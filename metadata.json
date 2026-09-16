@@ -1,0 +1,6 @@
+{
+  "name": "PECP — Performance Engineering Control Plane",
+  "description": "Customer-deployed Performance Engineering Control Plane for turning project intelligence into governed workload models, professional engineering artefacts, executable k6 tests, and traceable performance evidence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
