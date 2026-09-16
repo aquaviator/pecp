@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "scenarioId": "retailco-black-friday-2026",
   "name": "RetailCo Black Friday 2026 Readiness",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "milestone": "M1",
   "engineeringIntent": "FORECAST",
   "description": "Authoritative machine-readable M1 reference scenario evaluating peak transactional capacity, checkout latency limits, and architectural headroom for Black Friday 2026.",
@@ -13,30 +13,52 @@
         "value": 18000,
         "unit": "orders/hour",
         "source": "Performance Strategy 2024",
-        "status": "SUPERSEDED"
+        "sourceDocument": "Doc: RetailCo-Perf-Strat-2024.docx",
+        "status": "SUPERSEDED",
+        "notes": "Historical peak from previous retail season."
       },
       {
         "id": "cand-2",
         "value": 24000,
         "unit": "orders/hour",
         "source": "Retail Platform HLD v4",
-        "status": "IMPORTED"
+        "sourceDocument": "Doc: Architecture-HLD-v4.2.pdf",
+        "status": "IMPORTED",
+        "notes": "Engineering sizing assumption calculated prior to revised marketing forecasts."
       },
       {
         "id": "cand-3",
         "value": 31500,
         "unit": "orders/hour",
         "source": "Black Friday 2026 Business Forecast",
-        "status": "SELECTED_FORECAST_CANDIDATE"
+        "sourceDocument": "Doc: BF26-Commercial-Demand-Model.xlsx",
+        "status": "APPROVED",
+        "notes": "Commercial demand projection representing 31% year-over-year surge."
       }
     ],
-    "selectedPeakOrdersPerHour": 31500,
-    "averageSessionDuration": {
-      "value": 8,
-      "unit": "minutes",
-      "seconds": 480,
-      "source": "Doc: RetailCo-Perf-Strat-2024.docx §4.3",
-      "status": "APPROVED"
+    "formalResolutionEvent": {
+      "resolvedCandidateId": "cand-3",
+      "resolvedValue": 31500,
+      "resolvedUnit": "orders/hour",
+      "resolvedBy": "Lead Performance Architect",
+      "resolutionDate": "2026-08-19T10:00:00Z",
+      "resolutionRationale": "Formally approved commercial demand projection from Black Friday 2026 Business Forecast (BF26-Commercial-Demand-Model.xlsx) as authoritative baseline for peak capacity sizing."
+    },
+    "approvedWorkloadInputs": {
+      "peakOrdersPerHour": {
+        "value": 31500,
+        "unit": "orders/hour",
+        "status": "APPROVED",
+        "sourceCandidateId": "cand-3",
+        "sourceDocument": "Doc: BF26-Commercial-Demand-Model.xlsx"
+      },
+      "averageSessionDuration": {
+        "value": 8,
+        "unit": "minutes",
+        "seconds": 480,
+        "source": "Doc: RetailCo-Perf-Strat-2024.docx §4.3",
+        "status": "APPROVED"
+      }
     },
     "checkoutResponseTime": {
       "target": "< 2",
@@ -57,6 +79,9 @@
   },
   "expectedWorkloadDerivations": {
     "throughputConversions": {
+      "sourceValue": 31500,
+      "sourceUnit": "orders/hour",
+      "sourceStatus": "APPROVED",
       "hourlyOrders": 31500,
       "perMinuteOrders": 525,
       "perSecondOrders": 8.75,
@@ -79,13 +104,16 @@
       "forbiddenBehavior": "Engine must NOT multiply peak orders/second (8.75) by session duration (480s) to synthesize 4,200 concurrent sessions without proof that every session yields exactly one order."
     }
   },
-  "expectedUnresolvedItems": [
-    {
+  "historicalPreResolutionState": {
+    "description": "State of intelligence prior to formal resolution event where peak orders was conflicting across three sources.",
+    "conflictingItem": {
       "parameter": "peak_hourly_orders",
       "type": "CONFLICTING_SOURCE",
       "severity": "BLOCKING",
       "reason": "Three competing values (18,000, 24,000, 31,500) found across upstream project artefacts."
-    },
+    }
+  },
+  "remainingBlockers": [
     {
       "parameter": "checkout_response_time",
       "type": "AMBIGUOUS_SOURCE",
@@ -105,6 +133,10 @@
     "engineeringIntent": "FORECAST",
     "approvalReadiness": {
       "canApprove": false,
+      "blockingReasons": [
+        "Average session duration is known, but session arrival rate is missing. Little's Law (L = λ × W) requires the arrival rate of the same flow population.",
+        "Target specifies < 2.0s without an associated percentile (e.g. p95 or p99). Required for automated gate evaluation."
+      ],
       "minimumBlockingReasonsCount": 2
     },
     "isTruthfulDraft": true

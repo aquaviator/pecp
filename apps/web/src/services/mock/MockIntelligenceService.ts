@@ -2,7 +2,9 @@ import { IIntelligenceService } from '../interfaces/IIntelligenceService';
 import { IntelligenceItem, IntelligenceReviewSummary } from '../../types';
 import {
   RETAILCO_INTELLIGENCE_ITEMS_FIXTURE,
-  RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE
+  RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE,
+  RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+  RETAILCO_M1_INTELLIGENCE_SUMMARY_FIXTURE
 } from '../../fixtures/retailco/intelligenceFixture';
 
 export class MockIntelligenceService implements IIntelligenceService {
@@ -10,9 +12,13 @@ export class MockIntelligenceService implements IIntelligenceService {
   private summaries: Map<string, IntelligenceReviewSummary> = new Map();
 
   constructor() {
-    // Seed with RetailCo reference project data
+    // Seed with RetailCo baseline (3 conflicts, including unresolved peak orders)
     this.items.set('proj-retailco-bf2026', JSON.parse(JSON.stringify(RETAILCO_INTELLIGENCE_ITEMS_FIXTURE)));
     this.summaries.set('proj-retailco-bf2026', JSON.parse(JSON.stringify(RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE)));
+
+    // Also seed M1 post-resolution reference project for direct post-resolution testing
+    this.items.set('proj-retailco-bf2026-m1', JSON.parse(JSON.stringify(RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE)));
+    this.summaries.set('proj-retailco-bf2026-m1', JSON.parse(JSON.stringify(RETAILCO_M1_INTELLIGENCE_SUMMARY_FIXTURE)));
   }
 
   async getIntelligenceSummary(projectId: string): Promise<IntelligenceReviewSummary> {

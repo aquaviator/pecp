@@ -184,4 +184,146 @@ describe('Workload Engine: Pure Deterministic Mathematics (M1)', () => {
       expect(result.validationError).toContain('deviates from 100% by 15.00%');
     });
   });
+
+  describe('Workload Readiness Evaluation (M1.1 Gate Corrections)', () => {
+    it('recognises avg_session_duration key and creates MISSING_PREREQUISITE for session_arrival_rate', () => {
+      const items: any[] = [
+        {
+          id: 'intel-session-duration',
+          key: 'avg_session_duration',
+          title: 'Average User Session Duration',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'FOUND',
+          value: 8,
+          unit: 'minutes',
+          history: []
+        }
+      ];
+
+      const readiness = evaluateWorkloadReadiness(items);
+      expect(readiness.status).toBe('BLOCKED');
+      expect(readiness.blockingIssuesCount).toBeGreaterThanOrEqual(1);
+
+      const missingIssue = readiness.issues.find(
+        (i) => i.parameter === 'session_arrival_rate' && i.type === 'MISSING_PREREQUISITE'
+      );
+      expect(missingIssue).toBeDefined();
+      expect(missingIssue?.severity).toBe('BLOCKING');
+      expect(missingIssue?.description).toContain("Little's Law (L = λ × W) requires the arrival rate");
+    });
+
+    it('surfaces UNAPPROVED_CRITICAL_VALUE for unapproved critical workload inputs', () => {
+      const items: any[] = [
+        {
+          id: 'intel-peak-orders',
+          key: 'peak_hourly_orders',
+          title: 'Peak Hourly Order Volume',
+          category: 'WORKLOAD',
+          canonicalState: 'IMPORTED',
+          reviewStatus: 'FOUND',
+          approvalState: 'UNREVIEWED',
+          value: 24000,
+          unit: 'orders/hour',
+          history: []
+        }
+      ];
+
+      const readiness = evaluateWorkloadReadiness(items);
+      const unapprovedIssue = readiness.issues.find(
+        (i) => i.type === 'UNAPPROVED_CRITICAL_VALUE' && i.parameter === 'peak_hourly_orders'
+      );
+      expect(unapprovedIssue).toBeDefined();
+      expect(unapprovedIssue?.severity).toBe('BLOCKING');
+      expect(unapprovedIssue?.description).toContain('has not been formally approved');
+    });
+
+    it('avoids duplicate issues when an item is already flagged as CONFLICTING_SOURCE', () => {
+      const items: any[] = [
+        {
+          id: 'intel-peak-orders',
+          key: 'peak_hourly_orders',
+          title: 'Peak Hourly Order Volume',
+          category: 'WORKLOAD',
+          canonicalState: 'CONFLICTING',
+          reviewStatus: 'CONFLICTING',
+          approvalState: 'UNREVIEWED',
+          value: '31,500 (Candidate)',
+          candidates: [{ id: 'c1', value: 18000 }, { id: 'c2', value: 31500 }],
+          history: []
+        }
+      ];
+
+      const readiness = evaluateWorkloadReadiness(items);
+      const issuesForPeakOrders = readiness.issues.filter(
+        (i) => i.sourceIntelligenceId === 'intel-peak-orders'
+      );
+
+      // Must have exactly 1 issue (CONFLICTING_SOURCE), not duplicated with UNAPPROVED_CRITICAL_VALUE
+      expect(issuesForPeakOrders).toHaveLength(1);
+      expect(issuesForPeakOrders[0].type).toBe('CONFLICTING_SOURCE');
+    });
+
+    it('produces deterministic READY status when all required parameters are approved and valid', () => {
+      const readyItems: any[] = [
+        {
+          id: 'intel-peak-orders',
+          key: 'peak_hourly_orders',
+          title: 'Peak Hourly Order Volume',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'APPROVED',
+          approvalState: 'APPROVED',
+          value: 31500,
+          unit: 'orders/hour',
+          history: []
+        },
+        {
+          id: 'intel-session-duration',
+          key: 'avg_session_duration',
+          title: 'Average User Session Duration',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'APPROVED',
+          approvalState: 'APPROVED',
+          value: 8,
+          unit: 'minutes',
+          history: []
+        },
+        {
+          id: 'intel-session-arrival',
+          key: 'session_arrival_rate',
+          title: 'Session Arrival Rate',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'APPROVED',
+          approvalState: 'APPROVED',
+          value: 50,
+          unit: 'per_second',
+          history: []
+        },
+        {
+          id: 'intel-checkout-latency',
+          key: 'checkout_response_time',
+          title: 'Checkout Response Time (p95)',
+          category: 'ACCEPTANCE_CRITERIA',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'APPROVED',
+          approvalState: 'APPROVED',
+          value: '<= 2.0',
+          unit: 'seconds',
+          history: []
+        }
+      ];
+
+      const readiness = evaluateWorkloadReadiness(readyItems, {
+        hasJourneyDistribution: true,
+        journeyDistributionValid: true
+      });
+
+      expect(readiness.status).toBe('READY');
+      expect(readiness.isReady).toBe(true);
+      expect(readiness.blockingIssuesCount).toBe(0);
+    });
+  });
 });

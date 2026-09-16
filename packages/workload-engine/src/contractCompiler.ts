@@ -4,46 +4,126 @@ import {
   PerformanceContract,
   ContractStatus,
   AcceptanceCriterion,
-  WorkloadInput,
   CalculationLineage,
   BlockedCalculation,
-  WorkloadModel
+  WorkloadInput
 } from '@pecp/pe-domain';
 import { convertThroughput } from './throughput';
 import { evaluateSessionConcurrency } from './littlesLaw';
 import { evaluateWorkloadReadiness } from './readiness';
 
 export interface CompileContractOptions {
-  version?: string;
   projectSummary: ProjectSummary;
   intelligenceItems: IntelligenceItem[];
-  precomputedWorkload?: WorkloadModel;
+  version?: string;
+  allowCandidatePreview?: boolean;
+}
+
+interface ParsedCriterion {
+  operator?: string;
+  thresholdValue?: number;
+  unit?: string;
+  percentile?: number;
+  scope?: string;
+  target?: string;
 }
 
 /**
- * Deterministically compiles a Draft Performance Contract from canonical intelligence and workload calculations.
+ * Parses criterion properties strictly from source intelligence without inventing magic numbers.
+ */
+function parseCriterionFromItem(item: IntelligenceItem): ParsedCriterion {
+  let operator: string | undefined;
+  let thresholdValue: number | undefined;
+  let unit: string | undefined = item.unit || undefined;
+  let percentile: number | undefined;
+  let scope: string | undefined;
+
+  // Extract operator and threshold
+  if (typeof item.value === 'number') {
+    thresholdValue = item.value;
+  } else if (typeof item.value === 'string') {
+    const trimmed = item.value.trim();
+    const opMatch = trimmed.match(/^(<=|>=|<|>|==|=)\s*([\d,.]+)\s*(.*)$/);
+    if (opMatch) {
+      operator = opMatch[1];
+      const parsed = parseFloat(opMatch[2].replace(/,/g, ''));
+      if (!isNaN(parsed)) {
+        thresholdValue = parsed;
+      }
+      if (opMatch[3] && !unit) {
+        unit = opMatch[3].trim();
+      }
+    } else {
+      const numMatch = trimmed.match(/[\d,.]+/);
+      if (numMatch) {
+        const parsed = parseFloat(numMatch[0].replace(/,/g, ''));
+        if (!isNaN(parsed)) {
+          thresholdValue = parsed;
+        }
+      }
+    }
+  }
+
+  // Extract percentile if explicitly declared in title, value, or source location
+  // Do not extract from notes (which often discuss why a percentile is missing or ambiguous)
+  if (item.ambiguityReason && /percentile.*not defined/i.test(item.ambiguityReason)) {
+    percentile = undefined;
+  } else {
+    const titleAndValue = `${item.title} ${item.value ?? ''} ${item.sourceLocation ?? ''}`;
+    const pMatch = titleAndValue.match(/\bp(\d{2,3})\b/i) || titleAndValue.match(/(\d{2,3})(?:th|st|nd|rd)\s*percentile/i);
+    if (pMatch) {
+      const p = parseInt(pMatch[1], 10);
+      if (!isNaN(p) && p > 0 && p <= 100) {
+        percentile = p;
+      }
+    }
+  }
+
+  // Derive scope from source location or title if known
+  if (item.sourceLocation && item.sourceLocation.toLowerCase().includes('checkout')) {
+    scope = 'Checkout API Flow';
+  } else if (item.title.toLowerCase().includes('search')) {
+    scope = 'Search & Catalog API';
+  } else if (item.sourceDocument) {
+    scope = item.sourceDocument;
+  }
+
+  // Construct target string if threshold is known
+  let target: string | undefined;
+  if (thresholdValue !== undefined) {
+    const op = operator || '';
+    const u = unit ? ` ${unit}` : '';
+    target = `${op} ${thresholdValue}${u}`.trim();
+  }
+
+  return { operator, thresholdValue, unit, percentile, scope, target };
+}
+
+/**
+ * Pure deterministic compiler that produces a Draft Performance Contract
+ * from project summary and upstream intelligence items.
  *
- * Adheres strictly to Constitution §5, §6, §7 and M1 Work Package §5:
- * - Truthfully exposes unresolved blocking issues rather than inventing missing information.
- * - Refuses approval readiness when blocking issues or ambiguous NFR percentiles remain.
- * - Preserves engineering intent (e.g. FORECAST).
- * - Retains full calculation lineage.
+ * Adheres strictly to Constitution §3, §5, §7, §8:
+ * - Never silently selects candidates or invents throughput calculations from conflicting items.
+ * - Retains full calculation lineage for all derivations.
+ * - Never invents default percentiles or magic numbers.
+ * - Accurately reports readiness blockers preventing formal approval.
  */
 export function compileDraftPerformanceContract(
   options: CompileContractOptions
 ): PerformanceContract {
   const { projectSummary, intelligenceItems, version = 'v0.1-draft' } = options;
 
-  // 1. Extract workload inputs
+  // 1. Map Workload Inputs faithfully without silently choosing candidates
   const workloadItems = intelligenceItems.filter(
-    (item) => item.category === 'WORKLOAD' || item.category === 'BUSINESS_CONTEXT'
+    (item) => item.category === 'WORKLOAD'
   );
 
   const workloadInputs: WorkloadInput[] = workloadItems.map((item) => ({
     id: item.id,
     key: item.key,
     title: item.title,
-    value: item.value ?? (item.candidates?.[0]?.value || 'UNSPECIFIED'),
+    value: item.value ?? (item.candidates && item.candidates.length > 0 ? 'UNRESOLVED_CANDIDATES' : 'UNSPECIFIED'),
     unit: item.unit || '',
     canonicalState: item.canonicalState,
     reviewStatus: item.reviewStatus,
@@ -53,35 +133,72 @@ export function compileDraftPerformanceContract(
     notes: item.notes
   }));
 
-  // 2. Perform deterministic throughput calculations if peak orders exist
+  // 2. Perform deterministic throughput calculations if peak orders exist and is approved
   const peakOrdersItem = intelligenceItems.find(
     (item) => item.key === 'peak_hourly_orders' || item.key === 'peak_orders'
   );
 
+  const calculations: CalculationLineage[] = [];
+  const blockedCalculations: BlockedCalculation[] = [];
+
+  const isPeakOrdersConflicting = Boolean(
+    peakOrdersItem &&
+      (peakOrdersItem.canonicalState === 'CONFLICTING' ||
+        peakOrdersItem.reviewStatus === 'CONFLICTING' ||
+        (peakOrdersItem.candidates &&
+          peakOrdersItem.candidates.length > 1 &&
+          peakOrdersItem.canonicalState !== 'APPROVED' &&
+          peakOrdersItem.approvalState !== 'APPROVED'))
+  );
+
+  const isPeakOrdersApproved = Boolean(
+    peakOrdersItem &&
+      !isPeakOrdersConflicting &&
+      (peakOrdersItem.canonicalState === 'APPROVED' ||
+        peakOrdersItem.approvalState === 'APPROVED')
+  );
+
   let numericPeakOrders: number | undefined;
+
   if (peakOrdersItem) {
-    if (typeof peakOrdersItem.value === 'number') {
-      numericPeakOrders = peakOrdersItem.value;
-    } else if (typeof peakOrdersItem.value === 'string') {
-      const match = peakOrdersItem.value.match(/[\d,.]+/);
-      if (match) {
-        const parsed = parseFloat(match[0].replace(/,/g, ''));
+    if (isPeakOrdersConflicting || !isPeakOrdersApproved) {
+      // Constitution §3 & M1.1 §2: Unresolved conflicting items must NOT become authoritative calculations.
+      blockedCalculations.push({
+        calculationId: `calc-blocked-throughput-${peakOrdersItem.id}`,
+        outputParameter: 'order_throughput_per_second',
+        status: 'BLOCKED',
+        calculated: false,
+        formulaIdentifier: 'throughput_time_unit_conversion',
+        reason: isPeakOrdersConflicting
+          ? 'Peak hourly order volume is in a CONFLICTING state across multiple competing candidates. An authoritative candidate must be formally selected and approved before compilation.'
+          : 'Peak hourly order volume has not been formally approved as an authoritative workload input.',
+        requiredIntelligence: [
+          'Formal approval and resolution of peak_hourly_orders candidate to an authoritative value'
+        ],
+        missingPrerequisites: ['approved_peak_hourly_orders'],
+        availableInputs: [
+          {
+            parameter: 'peak_hourly_orders',
+            value: peakOrdersItem.value ?? 'UNSPECIFIED',
+            unit: peakOrdersItem.unit || 'orders/hour',
+            sourceId: peakOrdersItem.id,
+            sourceTitle: peakOrdersItem.title
+          }
+        ]
+      });
+    } else {
+      // Governed current value that is explicitly resolved/approved
+      if (typeof peakOrdersItem.value === 'number') {
+        numericPeakOrders = peakOrdersItem.value;
+      } else if (typeof peakOrdersItem.value === 'string') {
+        const clean = peakOrdersItem.value.replace(/,/g, '').trim();
+        const parsed = parseFloat(clean);
         if (!isNaN(parsed) && parsed > 0) {
           numericPeakOrders = parsed;
         }
       }
     }
-    if (!numericPeakOrders && peakOrdersItem.candidates && peakOrdersItem.candidates.length > 0) {
-      const cand = peakOrdersItem.candidates.find((c) => c.id === 'cand-3') || peakOrdersItem.candidates[0];
-      const parsedCand = typeof cand.value === 'number' ? cand.value : parseFloat(String(cand.value).replace(/,/g, ''));
-      if (!isNaN(parsedCand) && parsedCand > 0) {
-        numericPeakOrders = parsedCand;
-      }
-    }
   }
-
-  const calculations: CalculationLineage[] = [];
-  const blockedCalculations: BlockedCalculation[] = [];
 
   if (numericPeakOrders !== undefined && numericPeakOrders > 0) {
     const throughputConversion = convertThroughput(
@@ -94,9 +211,18 @@ export function compileDraftPerformanceContract(
   }
 
   // 3. Evaluate session concurrency (Little's Law)
-  const sessionDurationItem = intelligenceItems.find((i) => i.key === 'avg_session_duration' || i.key === 'session_duration');
+  const sessionDurationItem = intelligenceItems.find(
+    (i) =>
+      i.key === 'avg_session_duration' ||
+      i.key === 'session_duration' ||
+      i.key === 'average_session_duration'
+  );
   const sessionArrivalItem = intelligenceItems.find(
-    (i) => i.key === 'session_arrival_rate' || i.key === 'user_arrival_rate'
+    (i) =>
+      i.key === 'session_arrival_rate' ||
+      i.key === 'user_arrival_rate' ||
+      i.key === 'session_starts_per_hour' ||
+      i.key === 'session_arrivals'
   );
 
   const sessionConcurrencyEval = evaluateSessionConcurrency({
@@ -129,88 +255,86 @@ export function compileDraftPerformanceContract(
   // 4. Evaluate workload readiness
   const readiness = evaluateWorkloadReadiness(intelligenceItems);
 
-  // 5. Extract Acceptance Criteria and classify ambiguity
+  // 5. Extract Acceptance Criteria without magic numbers or manufactured defaults
   const criteriaItems = intelligenceItems.filter(
     (item) =>
       item.category === 'REQUIREMENTS' ||
-      item.category === 'ACCEPTANCE_CRITERIA' ||
-      item.key.includes('latency') ||
-      item.key.includes('throughput') ||
-      item.key.includes('availability')
+      item.category === 'ACCEPTANCE_CRITERIA'
   );
 
   const acceptanceCriteria: AcceptanceCriterion[] = [];
 
   for (const item of criteriaItems) {
-    if (item.key.includes('checkout') || item.title.toLowerCase().includes('checkout')) {
-      const isAmbiguous =
-        item.reviewStatus === 'AMBIGUOUS' ||
-        Boolean(item.ambiguityReason && item.ambiguityReason.length > 0);
+    const parsed = parseCriterionFromItem(item);
+    const isCheckout = item.key.includes('checkout') || item.title.toLowerCase().includes('checkout');
+    const isLatency = item.key.includes('latency') || item.key.includes('response_time');
 
-      acceptanceCriteria.push({
-        id: `crit-${item.id}`,
-        key: item.key,
-        metric: 'Transaction Response Time',
-        scope: 'Checkout API Flow',
-        target: '< 2.0s',
-        operator: '<',
-        thresholdValue: 2.0,
-        unit: 'seconds',
-        percentile: isAmbiguous ? undefined : 95,
-        status: isAmbiguous ? 'AMBIGUOUS' : 'DEFINED',
-        ambiguityNotice: isAmbiguous
-          ? 'Target specifies < 2.0s without an associated percentile (e.g. p95 or p99). Required for automated gate evaluation.'
-          : undefined,
-        sourceIntelligenceId: item.id,
-        isBlockingForApproval: isAmbiguous
-      });
-    } else if (item.key === 'search_latency' || item.title.toLowerCase().includes('search')) {
-      acceptanceCriteria.push({
-        id: `crit-${item.id}`,
-        key: item.key,
-        metric: 'Search Response Time (p95)',
-        scope: 'Search & Catalog API',
-        target: '<= 0.8s',
-        operator: '<=',
-        thresholdValue: 0.8,
-        unit: 'seconds',
-        percentile: 95,
-        status: 'DEFINED',
-        sourceIntelligenceId: item.id,
-        isBlockingForApproval: false
-      });
-    } else if (item.key.includes('order') || item.key.includes('throughput')) {
-      acceptanceCriteria.push({
-        id: `crit-${item.id}`,
-        key: item.key,
-        metric: 'Peak Order Throughput',
-        scope: 'End-to-End Order Processing Pipeline',
-        target: '>= 8.75 orders/sec',
-        operator: '>=',
-        thresholdValue: calculations[0]?.outputValue || 8.75,
-        unit: 'orders/second',
-        status: 'DEFINED',
-        sourceIntelligenceId: item.id,
-        isBlockingForApproval: false
-      });
+    // Ambiguity detection: missing percentile for response time requirements
+    const isAmbiguousPercentile = isLatency && parsed.percentile === undefined;
+    const isAmbiguous =
+      item.reviewStatus === 'AMBIGUOUS' ||
+      Boolean(item.ambiguityReason && item.ambiguityReason.length > 0) ||
+      isAmbiguousPercentile ||
+      parsed.thresholdValue === undefined;
+
+    let ambiguityNotice: string | undefined;
+    if (isAmbiguousPercentile) {
+      ambiguityNotice = item.ambiguityReason || `Target specifies ${parsed.target || 'latency'} without an associated percentile (e.g. p95 or p99). Required for automated gate evaluation.`;
+    } else if (isAmbiguous) {
+      ambiguityNotice = item.ambiguityReason || `Criterion "${item.title}" lacks a complete numeric threshold or operational scope.`;
     }
+
+    acceptanceCriteria.push({
+      id: `crit-${item.id}`,
+      key: item.key,
+      metric: item.title,
+      scope: parsed.scope || 'System Under Test',
+      target: parsed.target || (typeof item.value === 'string' ? item.value : 'UNSPECIFIED'),
+      operator: parsed.operator as AcceptanceCriterion['operator'],
+      thresholdValue: parsed.thresholdValue,
+      unit: parsed.unit || item.unit || '',
+      percentile: parsed.percentile,
+      status: isAmbiguous ? 'AMBIGUOUS' : 'DEFINED',
+      ambiguityNotice,
+      sourceIntelligenceId: item.id,
+      isBlockingForApproval: isAmbiguous
+    });
+  }
+
+  // If order throughput calculation is authoritatively compiled, add derived throughput criterion
+  const throughputCalc = calculations.find(
+    (c) => c.outputParameter === 'order_throughput_per_second'
+  );
+  if (throughputCalc && throughputCalc.outputValue !== undefined) {
+    acceptanceCriteria.push({
+      id: `crit-derived-peak-throughput`,
+      key: 'peak_order_throughput_criterion',
+      metric: 'Peak Order Throughput',
+      scope: 'End-to-End Order Processing Pipeline',
+      target: `>= ${throughputCalc.outputValue} ${throughputCalc.unit}`,
+      operator: '>=',
+      thresholdValue: throughputCalc.outputValue,
+      unit: throughputCalc.unit,
+      status: 'DEFINED',
+      sourceIntelligenceId: peakOrdersItem?.id,
+      isBlockingForApproval: false
+    });
   }
 
   // 6. Formulate approval readiness
   const blockingReasons: string[] = [];
 
   for (const issue of readiness.issues) {
-    if (issue.severity === 'BLOCKING') {
+    if (issue.severity === 'BLOCKING' && !blockingReasons.includes(issue.description)) {
       blockingReasons.push(issue.description);
     }
   }
 
   for (const crit of acceptanceCriteria) {
     if (crit.isBlockingForApproval && crit.ambiguityNotice) {
-      if (!blockingReasons.includes(crit.ambiguityNotice)) {
-        blockingReasons.push(
-          `Acceptance Criterion "${crit.metric}" is AMBIGUOUS: ${crit.ambiguityNotice}`
-        );
+      const msg = `Acceptance Criterion "${crit.metric}" is AMBIGUOUS: ${crit.ambiguityNotice}`;
+      if (!blockingReasons.includes(msg)) {
+        blockingReasons.push(msg);
       }
     }
   }

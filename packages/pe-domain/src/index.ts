@@ -307,14 +307,14 @@ export interface AcceptanceCriterion {
   key: string;
   metric: string;
   target: string;
-  operator: '<' | '<=' | '>' | '>=' | '==' | 'BETWEEN';
-  thresholdValue: number;
+  operator?: '<' | '<=' | '>' | '>=' | '==' | 'BETWEEN';
+  thresholdValue?: number;
   unit: string;
   percentile?: number; // e.g. 95, 99
   scope: string; // e.g. 'Checkout API', 'Global', 'Search'
   status: AcceptanceCriterionStatus;
   ambiguityNotice?: string;
-  sourceIntelligenceId: string;
+  sourceIntelligenceId?: string;
   isBlockingForApproval: boolean;
 }
 

@@ -184,6 +184,86 @@ export const RETAILCO_INTELLIGENCE_ITEMS_FIXTURE: IntelligenceItem[] = [
   }
 ];
 
+/**
+ * Post-resolution M1 Reference Scenario Fixture.
+ *
+ * Demonstrates the system state AFTER the peak orders conflict has been
+ * formally resolved to 31,500 orders/hour (cand-3) by the Lead Architect.
+ *
+ * Preserves the original 3 candidates in history, provides an approved
+ * current value for throughput conversion, and retains remaining blockers
+ * (session arrival rate missing, checkout latency percentile ambiguous).
+ */
+export const RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE: IntelligenceItem[] = [
+  {
+    id: 'intel-peak-orders',
+    key: 'peak_hourly_orders',
+    title: 'Peak Hourly Order Volume',
+    category: 'WORKLOAD',
+    canonicalState: 'APPROVED',
+    reviewStatus: 'FOUND',
+    unit: 'orders/hour',
+    value: 31500,
+    source: 'Black Friday 2026 Business Forecast',
+    sourceDocument: 'Doc: BF26-Commercial-Demand-Model.xlsx',
+    sourceLocation: 'Sheet "Forecast Summary", Cell F18',
+    capturedDate: '2026-08-01T09:15:00Z',
+    approvalState: 'APPROVED',
+    approvedBy: 'Lead Performance Architect',
+    approvalDate: '2026-08-19T10:00:00Z',
+    notes: 'Authoritative candidate formally approved from Black Friday 2026 Business Forecast (cand-3: 31,500 orders/hour) resolving upstream strategy variance.',
+    candidates: [
+      {
+        id: 'cand-1',
+        value: '18,000',
+        unit: 'orders/hour',
+        source: 'Performance Strategy 2024',
+        sourceDocument: 'Doc: RetailCo-Perf-Strat-2024.docx',
+        sourceLocation: 'Page 14, Section 4.1 "Historical Peak Volumes"',
+        canonicalState: 'SUPERSEDED',
+        reviewStatus: 'STALE',
+        capturedDate: '2024-11-05T10:00:00Z',
+        notes: 'Superseded historical baseline from previous retail season.'
+      },
+      {
+        id: 'cand-2',
+        value: '24,000',
+        unit: 'orders/hour',
+        source: 'Retail Platform HLD v4',
+        sourceDocument: 'Doc: Architecture-HLD-v4.2.pdf',
+        sourceLocation: 'Page 38, Section 8.2 "Capacity Envelope"',
+        canonicalState: 'IMPORTED',
+        reviewStatus: 'FOUND',
+        capturedDate: '2026-04-12T14:30:00Z',
+        notes: 'Engineering sizing assumption calculated prior to revised marketing forecasts.'
+      },
+      {
+        id: 'cand-3',
+        value: '31,500',
+        unit: 'orders/hour',
+        source: 'Black Friday 2026 Business Forecast',
+        sourceDocument: 'Doc: BF26-Commercial-Demand-Model.xlsx',
+        sourceLocation: 'Sheet "Forecast Summary", Cell F18',
+        canonicalState: 'APPROVED',
+        reviewStatus: 'FOUND',
+        capturedDate: '2026-08-01T09:15:00Z',
+        notes: 'Approved authoritative candidate representing 31% commercial year-over-year surge.'
+      }
+    ],
+    history: [
+      { date: '2026-08-15T11:20:00Z', action: 'Ingested candidates from 3 documents', actor: 'Intelligence Ingestion Pipeline' },
+      { date: '2026-08-15T11:21:00Z', action: 'Classified reviewStatus as CONFLICTING', actor: 'Deterministic Model Validator' },
+      {
+        date: '2026-08-19T10:00:00Z',
+        action: 'Formally resolved conflict selecting candidate cand-3 (31,500 orders/hour)',
+        actor: 'Lead Performance Architect',
+        note: 'Approved commercial demand projection for Black Friday 2026'
+      }
+    ]
+  },
+  ...RETAILCO_INTELLIGENCE_ITEMS_FIXTURE.slice(1)
+];
+
 export const RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE: IntelligenceReviewSummary = {
   documentsAnalysed: 5,
   requirementsFound: 28,
@@ -255,4 +335,20 @@ export const RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE: IntelligenceReviewSummary = 
       notes: 'Distributed tracing enabled with high-fidelity sampling during test windows.'
     }
   ]
+};
+
+export const RETAILCO_M1_INTELLIGENCE_SUMMARY_FIXTURE: IntelligenceReviewSummary = {
+  ...RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE,
+  conflicts: 2,
+  readinessSections: RETAILCO_INTELLIGENCE_SUMMARY_FIXTURE.readinessSections.map((sec) =>
+    sec.id === 'workload'
+      ? {
+          ...sec,
+          status: 'VERIFIED',
+          summary: 'Peak hourly order candidate resolved and approved (31,500 orders/hour). Journey mix captured.',
+          verifiedCount: 5,
+          notes: 'Authoritative peak order baseline approved for deterministic throughput conversion.'
+        }
+      : sec
+  )
 };

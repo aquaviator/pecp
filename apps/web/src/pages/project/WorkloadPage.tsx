@@ -45,17 +45,56 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
     }
   }, [project.id, initialItems, intelligenceService]);
 
-  // Extract peak orders item or default to candidate value 31,500
-  const peakOrdersItem = items.find((i) => i.key === 'peak_hourly_orders');
-  const basePeakOrders = 31500; // Selected business forecast candidate
+  // Extract peak orders item
+  const peakOrdersItem = items.find((i) => i.key === 'peak_hourly_orders' || i.key === 'peak_orders');
+  const isPeakOrdersConflicting = Boolean(
+    peakOrdersItem &&
+      (peakOrdersItem.canonicalState === 'CONFLICTING' ||
+        peakOrdersItem.reviewStatus === 'CONFLICTING' ||
+        (peakOrdersItem.candidates &&
+          peakOrdersItem.candidates.length > 1 &&
+          peakOrdersItem.canonicalState !== 'APPROVED' &&
+          peakOrdersItem.approvalState !== 'APPROVED'))
+  );
+
+  let basePeakOrders: number | undefined;
+  if (peakOrdersItem && !isPeakOrdersConflicting) {
+    if (typeof peakOrdersItem.value === 'number') {
+      basePeakOrders = peakOrdersItem.value;
+    } else if (typeof peakOrdersItem.value === 'string') {
+      const parsed = parseFloat(peakOrdersItem.value.replace(/,/g, ''));
+      if (!isNaN(parsed) && parsed > 0) {
+        basePeakOrders = parsed;
+      }
+    }
+  }
+
+  const effectivePeakOrders = basePeakOrders ?? 31500;
+
+  const handleResolveConflict = async () => {
+    if (!peakOrdersItem) return;
+    try {
+      const resolved = await intelligenceService.resolveIntelligenceConflict(
+        project.id,
+        peakOrdersItem.id,
+        'cand-3',
+        'Formally approved commercial demand projection from BF26 Commercial Demand Model'
+      );
+      setItems((prev) => prev.map((item) => (item.id === resolved.id ? resolved : item)));
+    } catch (err) {
+      console.error('Failed to resolve conflict:', err);
+    }
+  };
 
   // 1. Throughput conversion (Deterministic, Constitution §3)
-  const throughputConversion = convertThroughput(
-    basePeakOrders,
-    'per_hour',
-    peakOrdersItem?.id || 'intel-peak-orders',
-    'Black Friday 2026 Business Forecast'
-  );
+  const throughputConversion = basePeakOrders
+    ? convertThroughput(
+        basePeakOrders,
+        'per_hour',
+        peakOrdersItem?.id || 'intel-peak-orders',
+        peakOrdersItem?.source || 'Black Friday 2026 Business Forecast'
+      )
+    : null;
 
   // 2. Session Concurrency (Little's Law check)
   const sessionConcurrency = evaluateSessionConcurrency({
@@ -65,7 +104,7 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
     sessionDuration: 8,
     sessionDurationUnit: 'minutes',
     sourceSessionDurationId: 'intel-session-duration',
-    hasOrderThroughput: true,
+    hasOrderThroughput: Boolean(basePeakOrders !== undefined),
     orderThroughput: basePeakOrders,
     orderThroughputUnit: 'per_hour',
     sourceOrderThroughputId: 'intel-peak-orders'
@@ -86,7 +125,7 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
 
   // 4. Growth & Headroom scaling
   const scaledWorkload = applyGrowthAndHeadroom({
-    baseValue: basePeakOrders,
+    baseValue: effectivePeakOrders,
     baseUnit: 'orders/hour',
     growthPercentage: selectedGrowth,
     headroomPercentage: selectedHeadroom,
@@ -154,30 +193,55 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
               <TrendingUp className="w-3.5 h-3.5 text-sky-400" />
               <span>1. Business Demand Throughput</span>
             </h3>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
-              Calculated
+            <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+              throughputConversion
+                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                : 'bg-rose-950 text-rose-300 border-rose-800'
+            }`}>
+              {throughputConversion ? 'Calculated' : 'Blocked / Unresolved'}
             </span>
           </div>
-          <p className="text-xs text-slate-400">
-            Unit conversions from Black Friday 2026 forecast candidate ({basePeakOrders.toLocaleString()} orders/hr):
-          </p>
-          <div className="space-y-2 bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-xs">
-            <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-500">Hourly Rate:</span>
-              <span className="text-white font-bold">{throughputConversion.hourlyRate.toLocaleString()} /hr</span>
+          {throughputConversion ? (
+            <>
+              <p className="text-xs text-slate-400">
+                Unit conversions from approved Black Friday 2026 forecast baseline ({basePeakOrders?.toLocaleString()} orders/hr):
+              </p>
+              <div className="space-y-2 bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-xs">
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-500">Hourly Rate:</span>
+                  <span className="text-white font-bold">{throughputConversion.hourlyRate.toLocaleString()} /hr</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-500">Per-Minute Rate (÷ 60):</span>
+                  <span className="text-sky-300 font-bold">{throughputConversion.perMinuteRate} /min</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-500">Per-Second Rate (÷ 60):</span>
+                  <span className="text-emerald-300 font-bold">{throughputConversion.perSecondRate} orders/sec</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-amber-400/90 leading-tight bg-amber-950/30 p-2 rounded border border-amber-900/50">
+                {throughputConversion.semanticNotice}
+              </p>
+            </>
+          ) : (
+            <div className="space-y-2.5 bg-rose-950/40 p-3 rounded-lg border border-rose-800 font-mono text-xs">
+              <div className="text-rose-300 font-bold flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span>Unresolved Competing Candidates</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Peak hourly orders is in a CONFLICTING state across 3 candidates (18,000 / 24,000 / 31,500). Constitution §3 forbids calculating contract throughput from unapproved candidates.
+              </p>
+              <button
+                onClick={handleResolveConflict}
+                className="mt-1 px-3 py-1.5 bg-rose-900 hover:bg-rose-800 text-rose-200 text-xs font-sans font-semibold rounded border border-rose-700 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-rose-300" />
+                <span>Resolve to Approved Candidate (31,500 /hr)</span>
+              </button>
             </div>
-            <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-500">Per-Minute Rate (÷ 60):</span>
-              <span className="text-sky-300 font-bold">{throughputConversion.perMinuteRate} /min</span>
-            </div>
-            <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-500">Per-Second Rate (÷ 60):</span>
-              <span className="text-emerald-300 font-bold">{throughputConversion.perSecondRate} orders/sec</span>
-            </div>
-          </div>
-          <p className="text-[11px] text-amber-400/90 leading-tight bg-amber-950/30 p-2 rounded border border-amber-900/50">
-            {throughputConversion.semanticNotice}
-          </p>
+          )}
         </div>
 
         {/* 2. Concurrency / Little's Law */}
@@ -318,7 +382,10 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
           <div className="space-y-2 text-xs">
             <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
               <span className="text-sky-300 font-semibold block">Open Workload (Ingress):</span>
-              <span className="text-[11px] text-slate-400">Maps to k6 constant-arrival-rate executor based on {throughputConversion.perSecondRate} req/sec.</span>
+              <span className="text-[11px] text-slate-400">
+                Maps to k6 constant-arrival-rate executor based on{' '}
+                {throughputConversion ? `${throughputConversion.perSecondRate} req/sec` : 'approved ingress throughput (pending resolution)'}.
+              </span>
             </div>
             <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
               <span className="text-emerald-300 font-semibold block">Closed Workload (Browsing):</span>

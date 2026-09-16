@@ -176,19 +176,36 @@ export const ContractPage: React.FC<ContractPageProps> = ({ project, initialItem
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex justify-between items-center text-xs">
                   <span className="font-semibold text-slate-300">Peak Transaction Throughput</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
-                    Compiled Lineage
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                    contract.workloadCalculations[0]
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                      : 'bg-rose-950 text-rose-300 border-rose-800'
+                  }`}>
+                    {contract.workloadCalculations[0] ? 'Compiled Lineage' : 'BLOCKED'}
                   </span>
                 </div>
-                <div className="text-xl font-bold font-mono text-white">
-                  {contract.workloadCalculations[0]?.outputValue || 8.75} <span className="text-xs text-slate-400 font-normal">orders/sec (525/min, 31.5k/hr)</span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  {contract.workloadCalculations[0]?.humanReadableExplanation}
-                </p>
-                <div className="text-[10px] font-mono text-slate-500 pt-2 border-t border-slate-900">
-                  Lineage ID: {contract.workloadCalculations[0]?.calculationId}
-                </div>
+                {contract.workloadCalculations[0] ? (
+                  <>
+                    <div className="text-xl font-bold font-mono text-white">
+                      {contract.workloadCalculations[0].outputValue} <span className="text-xs text-slate-400 font-normal">orders/sec (525/min, 31.5k/hr)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {contract.workloadCalculations[0].humanReadableExplanation}
+                    </p>
+                    <div className="text-[10px] font-mono text-slate-500 pt-2 border-t border-slate-900">
+                      Lineage ID: {contract.workloadCalculations[0].calculationId}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-lg font-bold font-mono text-rose-400">
+                      UNRESOLVED (Not Calculated)
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {contract.blockedWorkloadCalculations.find((b) => b.outputParameter === 'order_throughput_per_second')?.reason || 'Throughput calculation blocked pending candidate approval.'}
+                    </p>
+                  </>
+                )}
               </div>
 
               {/* Session Concurrency */}

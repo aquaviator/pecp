@@ -75,31 +75,94 @@ export function evaluateWorkloadReadiness(
   }
 
   // 3. Check for Little's Law prerequisites: Session Arrival Rate vs Session Duration
-  const sessionDurationItem = items.find((i) => i.key === 'session_duration');
+  const sessionDurationItem = items.find(
+    (i) =>
+      i.key === 'session_duration' ||
+      i.key === 'avg_session_duration' ||
+      i.key === 'average_session_duration' ||
+      i.key === 'user_session_duration' ||
+      i.key.toLowerCase().includes('session_duration')
+  );
   const sessionArrivalItem = items.find(
-    (i) => i.key === 'session_arrival_rate' || i.key === 'user_arrival_rate'
+    (i) =>
+      i.key === 'session_arrival_rate' ||
+      i.key === 'user_arrival_rate' ||
+      i.key === 'session_starts_per_hour' ||
+      i.key === 'session_arrivals' ||
+      i.key === 'session_arrival'
   );
   const peakOrdersItem = items.find(
     (i) => i.key === 'peak_hourly_orders' || i.key === 'peak_orders'
   );
 
   if (sessionDurationItem && !sessionArrivalItem) {
-    issues.push({
-      id: 'issue-missing-session-arrival-rate',
-      type: 'MISSING_PREREQUISITE',
-      parameter: 'session_arrival_rate',
-      severity: 'BLOCKING',
-      sourceIntelligenceId: sessionDurationItem.id,
-      description:
-        'Average session duration is known, but session arrival rate is missing. Little\'s Law (L = λ × W) requires the arrival rate of the same flow population.',
-      remediationGuidance:
-        peakOrdersItem
-          ? 'Provide peak session starts/hour OR an approved conversion ratio from business orders to session arrivals. Do NOT infer session concurrency directly from order throughput.'
-          : 'Provide peak session starts/hour from user telemetry or marketing analytics.'
-    });
+    // Avoid duplicate issue if already reported
+    const alreadyReported = issues.some(
+      (iss) => iss.parameter === 'session_arrival_rate' && iss.type === 'MISSING_PREREQUISITE'
+    );
+    if (!alreadyReported) {
+      issues.push({
+        id: 'issue-missing-session-arrival-rate',
+        type: 'MISSING_PREREQUISITE',
+        parameter: 'session_arrival_rate',
+        severity: 'BLOCKING',
+        sourceIntelligenceId: sessionDurationItem.id,
+        description:
+          'Average session duration is known, but session arrival rate is missing. Little\'s Law (L = λ × W) requires the arrival rate of the same flow population.',
+        remediationGuidance:
+          peakOrdersItem
+            ? 'Provide peak session starts/hour OR an approved conversion ratio from business orders to session arrivals. Do NOT infer session concurrency directly from order throughput.'
+            : 'Provide peak session starts/hour from user telemetry or marketing analytics.'
+      });
+    }
   }
 
-  // 4. Journey distribution validation check if provided
+  // 4. Check for UNAPPROVED_CRITICAL_VALUE on critical workload/acceptance inputs
+  // Critical inputs that must be approved before authoritative contract calculation
+  const criticalKeys = new Set([
+    'peak_hourly_orders',
+    'peak_orders',
+    'order_throughput',
+    'journey_distribution',
+    'checkout_response_time',
+    'checkout_latency',
+    'max_error_rate'
+  ]);
+
+  for (const item of items) {
+    const isCritical =
+      criticalKeys.has(item.key) ||
+      item.category === 'WORKLOAD' ||
+      item.category === 'ACCEPTANCE_CRITERIA';
+
+    if (!isCritical) continue;
+
+    // Check if already covered by CONFLICTING_SOURCE, AMBIGUOUS_SOURCE, or MISSING_PREREQUISITE
+    const alreadyHasSemanticIssue = issues.some(
+      (iss) => iss.sourceIntelligenceId === item.id
+    );
+    if (alreadyHasSemanticIssue) continue;
+
+    // Check if formally approved
+    const isApproved =
+      item.canonicalState === 'APPROVED' ||
+      item.approvalState === 'APPROVED';
+
+    if (!isApproved) {
+      issues.push({
+        id: `issue-unapproved-${item.id}`,
+        type: 'UNAPPROVED_CRITICAL_VALUE',
+        parameter: item.key,
+        severity: 'BLOCKING',
+        sourceIntelligenceId: item.id,
+        description: `Critical parameter "${item.title}" (${item.key}) has not been formally approved.`,
+        remediationGuidance:
+          'Review and formally approve the authoritative value before using it in contractual baseline models.'
+      });
+    }
+  }
+
+  // 5. Journey distribution validation check if provided
   if (options?.hasJourneyDistribution && options.journeyDistributionValid === false) {
     issues.push({
       id: 'issue-invalid-journey-distribution',
