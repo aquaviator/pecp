@@ -1,0 +1,15 @@
+{
+  "name": "@pecp/pe-domain",
+  "version": "1.0.0",
+  "description": "Authoritative shared TypeScript contracts for the Performance Engineering Control Plane (PECP)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}

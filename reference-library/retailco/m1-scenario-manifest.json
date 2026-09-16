@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "scenarioId": "retailco-black-friday-2026",
+  "name": "RetailCo Black Friday 2026 Readiness",
+  "version": "1.0.0",
+  "milestone": "M1",
+  "engineeringIntent": "FORECAST",
+  "description": "Authoritative machine-readable M1 reference scenario evaluating peak transactional capacity, checkout latency limits, and architectural headroom for Black Friday 2026.",
+  "inputs": {
+    "peakOrderThroughputCandidates": [
+      {
+        "id": "cand-1",
+        "value": 18000,
+        "unit": "orders/hour",
+        "source": "Performance Strategy 2024",
+        "status": "SUPERSEDED"
+      },
+      {
+        "id": "cand-2",
+        "value": 24000,
+        "unit": "orders/hour",
+        "source": "Retail Platform HLD v4",
+        "status": "IMPORTED"
+      },
+      {
+        "id": "cand-3",
+        "value": 31500,
+        "unit": "orders/hour",
+        "source": "Black Friday 2026 Business Forecast",
+        "status": "SELECTED_FORECAST_CANDIDATE"
+      }
+    ],
+    "selectedPeakOrdersPerHour": 31500,
+    "averageSessionDuration": {
+      "value": 8,
+      "unit": "minutes",
+      "seconds": 480,
+      "source": "Doc: RetailCo-Perf-Strat-2024.docx §4.3",
+      "status": "APPROVED"
+    },
+    "checkoutResponseTime": {
+      "target": "< 2",
+      "thresholdValue": 2.0,
+      "unit": "seconds",
+      "percentile": null,
+      "source": "Azure DevOps Work Item #49201",
+      "status": "AMBIGUOUS",
+      "ambiguityReason": "Response-time percentile is not defined (e.g. median, p90, p95, p99, or maximum)."
+    },
+    "journeyDistribution": [
+      { "name": "Browse", "percentage": 55 },
+      { "name": "Search", "percentage": 20 },
+      { "name": "Basket", "percentage": 15 },
+      { "name": "Checkout", "percentage": 8 },
+      { "name": "Account", "percentage": 2 }
+    ]
+  },
+  "expectedWorkloadDerivations": {
+    "throughputConversions": {
+      "hourlyOrders": 31500,
+      "perMinuteOrders": 525,
+      "perSecondOrders": 8.75,
+      "lineageFormula": "throughput_time_unit_conversion",
+      "isUnitConversionOnly": true,
+      "semanticConstraint": "Unit conversion of transaction/order volume only. This value must NOT be described as user/session arrival rate unless source intelligence explicitly defines that relationship."
+    },
+    "journeyDistributionValidation": {
+      "totalPercentage": 100,
+      "isValid": true,
+      "tolerance": 0.01
+    },
+    "concurrencyCalculation": {
+      "status": "BLOCKED",
+      "calculated": false,
+      "reason": "Average session duration is known, but session arrival rate is not. Peak order throughput cannot be assumed to equal session arrival rate.",
+      "requiredIntelligence": [
+        "Peak session starts/hour OR an approved relationship that converts business orders into session arrivals."
+      ],
+      "forbiddenBehavior": "Engine must NOT multiply peak orders/second (8.75) by session duration (480s) to synthesize 4,200 concurrent sessions without proof that every session yields exactly one order."
+    }
+  },
+  "expectedUnresolvedItems": [
+    {
+      "parameter": "peak_hourly_orders",
+      "type": "CONFLICTING_SOURCE",
+      "severity": "BLOCKING",
+      "reason": "Three competing values (18,000, 24,000, 31,500) found across upstream project artefacts."
+    },
+    {
+      "parameter": "checkout_response_time",
+      "type": "AMBIGUOUS_SOURCE",
+      "severity": "BLOCKING",
+      "reason": "Target specifies < 2.0s without an associated percentile (e.g. p95 or p99). Required for automated gate evaluation."
+    },
+    {
+      "parameter": "session_arrival_rate",
+      "type": "MISSING_PREREQUISITE",
+      "severity": "BLOCKING",
+      "reason": "Average session duration is known, but session arrival rate is missing. Little's Law requires arrival rate of the same flow population."
+    }
+  ],
+  "expectedPerformanceContract": {
+    "status": "BLOCKED",
+    "canApprove": false,
+    "engineeringIntent": "FORECAST",
+    "approvalReadiness": {
+      "canApprove": false,
+      "minimumBlockingReasonsCount": 2
+    },
+    "isTruthfulDraft": true
+  }
+}

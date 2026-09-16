@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -14,6 +15,12 @@ export default defineConfig({
     port: 3000,
     fs: {
       allow: ['..']
+    }
+  },
+  resolve: {
+    alias: {
+      '@pecp/pe-domain': path.resolve(__dirname, 'packages/pe-domain/src/index.ts'),
+      '@pecp/workload-engine': path.resolve(__dirname, 'packages/workload-engine/src/index.ts')
     }
   },
   build: {
