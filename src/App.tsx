@@ -1,308 +1,206 @@
-import React, { useState } from 'react';
-import {
-  EngineeringIntent,
-  IntelligenceItem,
-  IntelligenceConflict,
-  UserJourney,
-  WorkloadParameters,
-  PerformanceContract,
-  EngineeringArtefact,
-  K6TestDefinition,
-  ExecutionRun,
-  PerformanceFinding,
-  ProviderConnector
-} from './types';
-import {
-  INITIAL_CONNECTORS,
-  INITIAL_INTELLIGENCE_ITEMS,
-  INITIAL_CONFLICTS,
-  INITIAL_JOURNEYS,
-  INITIAL_WORKLOAD,
-  INITIAL_CONTRACT,
-  INITIAL_ARTEFACTS,
-  INITIAL_K6_SCRIPT,
-  INITIAL_EXECUTION_RUNS,
-  INITIAL_FINDINGS
-} from './data/retailCoReference';
-import { Header } from './components/Header';
-import { Navigation, LifecycleStage } from './components/Navigation';
-import { IntelligenceView } from './components/IntelligenceView';
-import { ConflictReviewView } from './components/ConflictReviewView';
-import { WorkloadModelerView } from './components/WorkloadModelerView';
-import { ContractView } from './components/ContractView';
-import { ArtefactsView } from './components/ArtefactsView';
-import { K6RunnerView } from './components/K6RunnerView';
-import { EvidenceView } from './components/EvidenceView';
+import React, { useState, useEffect } from 'react';
+import { ProjectSummary } from './types';
+import { ServiceProvider, useServices } from './services/ServiceContext';
+import { AppHeader, MainNavSection } from './components/layout/AppHeader';
+import { ProjectHeader } from './components/layout/ProjectHeader';
+import { ProjectSubnav, ProjectTab } from './components/layout/ProjectSubnav';
+import { DashboardPage } from './pages/DashboardPage';
+import { ProjectsPage } from './pages/ProjectsPage';
+import { AdministrationPage } from './pages/AdministrationPage';
+import { ProjectOverviewPage } from './pages/project/ProjectOverviewPage';
+import { IntelligencePage } from './pages/project/IntelligencePage';
+import { ArchitecturePage } from './pages/project/ArchitecturePage';
+import { RequirementsPage } from './pages/project/RequirementsPage';
+import { WorkloadPage } from './pages/project/WorkloadPage';
+import { ContractPage } from './pages/project/ContractPage';
+import { StrategyPage } from './pages/project/StrategyPage';
+import { TestPlanPage } from './pages/project/TestPlanPage';
+import { TestsPage } from './pages/project/TestsPage';
+import { ExecutionsPage } from './pages/project/ExecutionsPage';
+import { ResultsPage } from './pages/project/ResultsPage';
+import { FindingsPage } from './pages/project/FindingsPage';
+import { EvidencePage } from './pages/project/EvidencePage';
+import { IntegrationsPage } from './pages/project/IntegrationsPage';
+import { NewProjectModal } from './pages/project/NewProjectModal';
 import { ConstitutionModal } from './components/ConstitutionModal';
 
-export const App: React.FC = () => {
-  const [activeIntent, setActiveIntent] = useState<EngineeringIntent>('CERTIFICATION');
-  const [currentStage, setCurrentStage] = useState<LifecycleStage>('INTELLIGENCE');
+const AppContent: React.FC = () => {
+  const { projectService, intelligenceService } = useServices();
+
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [activeProject, setActiveProject] = useState<ProjectSummary | null>(null);
+  const [mainNav, setMainNav] = useState<MainNavSection>('PROJECTS');
+  const [projectTab, setProjectTab] = useState<ProjectTab>('INTELLIGENCE');
+  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isConstitutionOpen, setIsConstitutionOpen] = useState(false);
+  const [conflictsCount, setConflictsCount] = useState(3);
 
-  // Core canonical model state
-  const [connectors, setConnectors] = useState<ProviderConnector[]>(INITIAL_CONNECTORS);
-  const [intelligenceItems, setIntelligenceItems] = useState<IntelligenceItem[]>(INITIAL_INTELLIGENCE_ITEMS);
-  const [conflicts, setConflicts] = useState<IntelligenceConflict[]>(INITIAL_CONFLICTS);
-  const [journeys, setJourneys] = useState<UserJourney[]>(INITIAL_JOURNEYS);
-  const [workload, setWorkload] = useState<WorkloadParameters>(INITIAL_WORKLOAD);
-  const [contract, setContract] = useState<PerformanceContract>(INITIAL_CONTRACT);
-  const [artefacts, setArtefacts] = useState<EngineeringArtefact[]>(INITIAL_ARTEFACTS);
-  const [executionRun, setExecutionRun] = useState<ExecutionRun>(INITIAL_EXECUTION_RUNS[0]);
-  const [findings, setFindings] = useState<PerformanceFinding[]>(INITIAL_FINDINGS);
+  // Load projects from service on startup
+  useEffect(() => {
+    loadProjects();
+  }, []);
 
-  const [testDefinition, setTestDefinition] = useState<K6TestDefinition>({
-    id: 'k6-retailco-bf26',
-    name: 'RetailCo Black Friday 2026 Peak Certification',
-    version: '1.0',
-    targetUrl: 'https://lab.retailco.internal',
-    thresholds: {
-      http_req_failed: ['rate<0.01'],
-      'http_req_duration{journey:browse}': ['p(95)<250'],
-      'http_req_duration{journey:search}': ['p(95)<200'],
-      'http_req_duration{journey:cart}': ['p(95)<300'],
-      'http_req_duration{journey:checkout}': ['p(95)<350']
-    },
-    scenarios: [
-      {
-        name: 'retailco_peak_certification',
-        executor: 'ramping-vus',
-        stages: [
-          { duration: '2m', target: 800 },
-          { duration: '3m', target: 3450 },
-          { duration: '10m', target: 3450 },
-          { duration: '2m', target: 0 }
-        ],
-        gracefulStop: '30s'
+  const loadProjects = async () => {
+    try {
+      const list = await projectService.getProjects();
+      setProjects(list);
+      if (list.length > 0 && !activeProject) {
+        setActiveProject(list[0]);
       }
-    ],
-    scriptCode: INITIAL_K6_SCRIPT,
-    generatedAt: '2026-08-28T10:00:00Z'
-  });
-
-  // Conflict resolution handler
-  const handleResolveConflict = (
-    conflictId: string,
-    choice: 'sourceA' | 'sourceB' | 'CUSTOM',
-    customVal?: number | string,
-    rationale?: string
-  ) => {
-    setConflicts((prev) =>
-      prev.map((c) => {
-        if (c.id === conflictId) {
-          return {
-            ...c,
-            status: 'RESOLVED',
-            selectedSource: choice,
-            resolutionNote: rationale
-          };
-        }
-        return c;
-      })
-    );
-
-    const conflict = conflicts.find((c) => c.id === conflictId);
-    if (conflict) {
-      const resolvedValue =
-        choice === 'sourceA'
-          ? conflict.sourceA.value
-          : choice === 'sourceB'
-          ? conflict.sourceB.value
-          : customVal || conflict.sourceA.value;
-
-      // Update matching canonical item to APPROVED
-      setIntelligenceItems((prev) =>
-        prev.map((item) => {
-          if (item.id === conflict.itemId) {
-            return {
-              ...item,
-              value: resolvedValue,
-              canonicalState: 'APPROVED',
-              notes: `Resolved via Conflict Review (${choice}): ${rationale || ''}`,
-              provenance: {
-                ...item.provenance,
-                approvedBy: 'Performance Governance Lead',
-                approvalTimestamp: new Date().toISOString(),
-                rationale: `Conflict resolved: ${rationale || 'Selected authoritative source'}`
-              }
-            };
-          }
-          return item;
-        })
-      );
+    } catch (err) {
+      console.error('Failed to load projects:', err);
     }
   };
 
-  const handleUpdateIntelligenceItem = (updated: IntelligenceItem) => {
-    setIntelligenceItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  // Sync conflict count from intelligence summary
+  useEffect(() => {
+    if (activeProject) {
+      intelligenceService.getIntelligenceSummary(activeProject.id).then((sum) => {
+        setConflictsCount(sum.conflicts);
+      }).catch(console.error);
+    }
+  }, [activeProject, intelligenceService]);
+
+  const handleSelectProject = (projectId: string) => {
+    const found = projects.find((p) => p.id === projectId);
+    if (found) {
+      setActiveProject(found);
+      setMainNav('PROJECTS');
+    }
   };
 
-  const handleAddIntelligenceItem = (newItem: IntelligenceItem) => {
-    setIntelligenceItems((prev) => [newItem, ...prev]);
+  const handleProjectCreated = (newProject: ProjectSummary) => {
+    setProjects((prev) => [newProject, ...prev]);
+    setActiveProject(newProject);
+    setMainNav('PROJECTS');
+    setProjectTab('INTELLIGENCE');
   };
-
-  const handleApproveContract = (approverName: string) => {
-    setContract((prev) => ({
-      ...prev,
-      status: 'APPROVED',
-      approvedAt: new Date().toISOString(),
-      approvedBy: approverName
-    }));
-  };
-
-  const handleExportEvidencePackage = () => {
-    const bundle = {
-      product: 'PECP — Performance Engineering Control Plane v1.0',
-      organisation: 'RetailCo Digital (Reference Organisation)',
-      intent: activeIntent,
-      exportedAt: new Date().toISOString(),
-      contract: {
-        id: contract.id,
-        version: contract.version,
-        approvedBy: contract.approvedBy,
-        gates: contract.slaGates
-      },
-      workload: {
-        targetTps: workload.targetTps,
-        calculatedVus: workload.calculatedVirtualUsers,
-        equation: workload.littlesLawEquation,
-        journeys: journeys
-      },
-      executionResult: {
-        runNumber: executionRun.runNumber,
-        verdict: executionRun.verdict,
-        peakVus: executionRun.peakVus,
-        averageTps: executionRun.averageTps,
-        p95LatencyMs: executionRun.p95LatencyMs,
-        errorRatePct: executionRun.errorRatePct
-      },
-      findings: findings,
-      canonicalModelSnapshot: intelligenceItems
-    };
-
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pecp_evidence_package_retailco_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportFindingToALM = (findingId: string) => {
-    setFindings((prev) =>
-      prev.map((f) => {
-        if (f.id === findingId) {
-          return {
-            ...f,
-            exportedToALM: true,
-            ticketRef: `ADO-BUG-${Math.floor(10000 + Math.random() * 90000)}`
-          };
-        }
-        return f;
-      })
-    );
-  };
-
-  const pendingConflictsCount = conflicts.filter((c) => c.status === 'PENDING').length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500/30 selection:text-sky-200">
-      {/* Top Header */}
-      <Header
-        activeIntent={activeIntent}
-        onIntentChange={setActiveIntent}
-        connectors={connectors}
+      {/* Top Application Header */}
+      <AppHeader
+        activeNav={mainNav}
+        onSelectNav={setMainNav}
+        activeProject={activeProject}
+        projects={projects}
+        onSelectProject={handleSelectProject}
+        onOpenNewProjectModal={() => setIsNewProjectModalOpen(true)}
         onOpenConstitution={() => setIsConstitutionOpen(true)}
-        onExportPackage={handleExportEvidencePackage}
       />
 
-      {/* Lifecycle Navigation Bar */}
-      <Navigation
-        currentStage={currentStage}
-        onSelectStage={setCurrentStage}
-        pendingConflictsCount={pendingConflictsCount}
+      {/* Main Content Area */}
+      {mainNav === 'DASHBOARD' && (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <DashboardPage
+            projects={projects}
+            onSelectProject={handleSelectProject}
+            onOpenNewProject={() => setIsNewProjectModalOpen(true)}
+            onOpenConstitution={() => setIsConstitutionOpen(true)}
+          />
+        </main>
+      )}
+
+      {mainNav === 'ADMINISTRATION' && (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <AdministrationPage />
+        </main>
+      )}
+
+      {mainNav === 'PROJECTS' && (
+        <div className="flex-1 flex flex-col">
+          {activeProject ? (
+            <>
+              {/* Active Project Header & Subnav */}
+              <ProjectHeader project={activeProject} />
+              <ProjectSubnav
+                activeTab={projectTab}
+                onSelectTab={setProjectTab}
+                conflictsCount={conflictsCount}
+              />
+
+              {/* Project Subtab Content */}
+              <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                {projectTab === 'OVERVIEW' && (
+                  <ProjectOverviewPage
+                    project={activeProject}
+                    onNavigateTab={setProjectTab}
+                  />
+                )}
+                {projectTab === 'INTELLIGENCE' && (
+                  <IntelligencePage project={activeProject} />
+                )}
+                {projectTab === 'ARCHITECTURE' && (
+                  <ArchitecturePage project={activeProject} />
+                )}
+                {projectTab === 'REQUIREMENTS' && (
+                  <RequirementsPage project={activeProject} />
+                )}
+                {projectTab === 'WORKLOAD' && (
+                  <WorkloadPage project={activeProject} />
+                )}
+                {projectTab === 'PERFORMANCE_CONTRACT' && (
+                  <ContractPage project={activeProject} />
+                )}
+                {projectTab === 'STRATEGY' && (
+                  <StrategyPage project={activeProject} />
+                )}
+                {projectTab === 'TEST_PLAN' && (
+                  <TestPlanPage project={activeProject} />
+                )}
+                {projectTab === 'TESTS' && (
+                  <TestsPage project={activeProject} />
+                )}
+                {projectTab === 'EXECUTIONS' && (
+                  <ExecutionsPage project={activeProject} />
+                )}
+                {projectTab === 'RESULTS' && (
+                  <ResultsPage project={activeProject} />
+                )}
+                {projectTab === 'FINDINGS' && (
+                  <FindingsPage project={activeProject} />
+                )}
+                {projectTab === 'EVIDENCE' && (
+                  <EvidencePage project={activeProject} />
+                )}
+                {projectTab === 'INTEGRATIONS' && (
+                  <IntegrationsPage project={activeProject} />
+                )}
+              </main>
+            </>
+          ) : (
+            <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <ProjectsPage
+                projects={projects}
+                onSelectProject={handleSelectProject}
+                onOpenNewProject={() => setIsNewProjectModalOpen(true)}
+              />
+            </main>
+          )}
+        </div>
+      )}
+
+      {/* New Project Creation Flow Modal */}
+      <NewProjectModal
+        isOpen={isNewProjectModalOpen}
+        onClose={() => setIsNewProjectModalOpen(false)}
+        onProjectCreated={handleProjectCreated}
       />
 
-      {/* Main Lifecycle Content Body */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {currentStage === 'INTELLIGENCE' && (
-          <IntelligenceView
-            items={intelligenceItems}
-            onUpdateItem={handleUpdateIntelligenceItem}
-            onAddItem={handleAddIntelligenceItem}
-            onNavigateToConflicts={() => setCurrentStage('CONFLICTS')}
-          />
-        )}
-
-        {currentStage === 'CONFLICTS' && (
-          <ConflictReviewView
-            conflicts={conflicts}
-            items={intelligenceItems}
-            onResolveConflict={handleResolveConflict}
-            onNavigateToWorkload={() => setCurrentStage('WORKLOAD')}
-          />
-        )}
-
-        {currentStage === 'WORKLOAD' && (
-          <WorkloadModelerView
-            workload={workload}
-            journeys={journeys}
-            activeIntent={activeIntent}
-            onUpdateWorkload={setWorkload}
-            onUpdateJourneys={setJourneys}
-            onNavigateToContract={() => setCurrentStage('CONTRACT')}
-          />
-        )}
-
-        {currentStage === 'CONTRACT' && (
-          <ContractView
-            contract={contract}
-            onApproveContract={handleApproveContract}
-            onNavigateToArtefacts={() => setCurrentStage('ARTEFACTS')}
-          />
-        )}
-
-        {currentStage === 'ARTEFACTS' && (
-          <ArtefactsView
-            artefacts={artefacts}
-            onNavigateToK6={() => setCurrentStage('K6_RUNNER')}
-          />
-        )}
-
-        {currentStage === 'K6_RUNNER' && (
-          <K6RunnerView
-            testDefinition={testDefinition}
-            activeRun={executionRun}
-            onStartExecution={() => {
-              // Ensure completed run is recorded
-              setExecutionRun((prev) => ({
-                ...prev,
-                status: 'COMPLETED',
-                verdict: 'PASS_WITH_OBSERVATION'
-              }));
-            }}
-            onNavigateToEvidence={() => setCurrentStage('EVIDENCE')}
-          />
-        )}
-
-        {currentStage === 'EVIDENCE' && (
-          <EvidenceView
-            run={executionRun}
-            contract={contract}
-            findings={findings}
-            onExportEvidence={handleExportEvidencePackage}
-            onExportFindingToALM={handleExportFindingToALM}
-          />
-        )}
-      </main>
-
-      {/* Product Constitution Modal */}
+      {/* Authoritative Product Constitution Modal */}
       <ConstitutionModal
         isOpen={isConstitutionOpen}
         onClose={() => setIsConstitutionOpen(false)}
       />
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <ServiceProvider>
+      <AppContent />
+    </ServiceProvider>
   );
 };
 
