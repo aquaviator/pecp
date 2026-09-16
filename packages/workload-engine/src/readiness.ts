@@ -27,13 +27,28 @@ export function evaluateWorkloadReadiness(
 ): WorkloadReadiness {
   const issues: WorkloadIssue[] = [];
 
-  // 1. Check for CONFLICTING items
-  const conflictingItems = items.filter(
-    (item) =>
-      item.canonicalState === 'CONFLICTING' ||
-      item.reviewStatus === 'CONFLICTING' ||
-      (item.candidates && item.candidates.length > 1)
-  );
+  // 1. Check for CONFLICTING items based on governed state / explicit unresolved status
+  const conflictingItems = items.filter((item) => {
+    // If an item has been formally resolved/approved, historical candidates kept for provenance do not create an active conflict
+    if (item.canonicalState === 'APPROVED' || item.approvalState === 'APPROVED') {
+      return false;
+    }
+    if (item.canonicalState === 'CONFLICTING' || item.reviewStatus === 'CONFLICTING') {
+      return true;
+    }
+    if (item.candidates && item.candidates.length > 1) {
+      const activeCandidates = item.candidates.filter(
+        (c) =>
+          c.canonicalState !== 'SUPERSEDED' &&
+          c.canonicalState !== 'STALE' &&
+          c.reviewStatus !== 'STALE'
+      );
+      if (activeCandidates.length > 1) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   for (const item of conflictingItems) {
     issues.push({

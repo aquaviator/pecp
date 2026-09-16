@@ -68,14 +68,11 @@ describe('Draft Performance Contract Compiler (M1 & M1.1)', () => {
       expect(throughputCalc?.formulaIdentifier).toBe('throughput_time_unit_conversion');
       expect(contract.calculationLineageReferences).toContain(throughputCalc?.calculationId);
 
-      // Derived acceptance criterion is added based on the calculation
+      // Throughput calculation is recorded in workloadCalculations, but NOT manufactured as acceptance criterion
       const derivedCrit = contract.acceptanceCriteria.find(
         (c) => c.key === 'peak_order_throughput_criterion'
       );
-      expect(derivedCrit).toBeDefined();
-      expect(derivedCrit?.thresholdValue).toBe(8.75);
-      expect(derivedCrit?.unit).toBe('orders/second');
-      expect(derivedCrit?.operator).toBe('>=');
+      expect(derivedCrit).toBeUndefined();
     });
   });
 
@@ -209,6 +206,183 @@ describe('Draft Performance Contract Compiler (M1 & M1.1)', () => {
       const allReasons = contract.approvalReadiness.blockingReasons.join(' ');
       expect(allReasons).toMatch(/session[_\s]arrival[_\s]rate/i);
       expect(allReasons).toMatch(/percentile/i);
+    });
+  });
+
+  describe('M1.2 Final Semantic Gate Hardening', () => {
+    it('produces a blocked / refused readiness state when intelligence is conflicting', () => {
+      const conflictingItems: IntelligenceItem[] = [
+        {
+          id: 'item-peak',
+          key: 'peak_hourly_orders',
+          title: 'Peak Hourly Orders',
+          category: 'WORKLOAD',
+          canonicalState: 'CONFLICTING',
+          reviewStatus: 'CONFLICTING',
+          approvalState: 'UNREVIEWED',
+          value: '31,500 (Candidate)',
+          candidates: [
+            {
+              id: 'c1',
+              value: 18000,
+              unit: 'orders/hour',
+              source: 'Source A',
+              sourceDocument: 'Doc A',
+              sourceLocation: 'p1',
+              capturedDate: '2026-08-01',
+              canonicalState: 'IMPORTED',
+              reviewStatus: 'FOUND'
+            },
+            {
+              id: 'c2',
+              value: 31500,
+              unit: 'orders/hour',
+              source: 'Source B',
+              sourceDocument: 'Doc B',
+              sourceLocation: 'p2',
+              capturedDate: '2026-08-01',
+              canonicalState: 'IMPORTED',
+              reviewStatus: 'FOUND'
+            }
+          ],
+          history: []
+        }
+      ];
+
+      const contract = compileDraftPerformanceContract({
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        intelligenceItems: conflictingItems
+      });
+
+      expect(contract.status).toBe('BLOCKED');
+      expect(contract.approvalReadiness.canApprove).toBe(false);
+      expect(contract.workloadCalculations.find((c) => c.outputParameter === 'order_throughput_per_second')).toBeUndefined();
+      expect(contract.blockedWorkloadCalculations.find((b) => b.outputParameter === 'order_throughput_per_second')).toBeDefined();
+    });
+
+    it('compiles without warning when all semantic prerequisites are fully approved and satisfied', () => {
+      const fullySatisfiedItems: IntelligenceItem[] = [
+        {
+          id: 'item-peak',
+          key: 'peak_hourly_orders',
+          title: 'Peak Hourly Orders',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'FOUND',
+          approvalState: 'APPROVED',
+          value: 36000,
+          unit: 'orders/hour',
+          history: []
+        },
+        {
+          id: 'item-session-arr',
+          key: 'session_arrival_rate',
+          title: 'Session Arrival Rate',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'FOUND',
+          approvalState: 'APPROVED',
+          value: 50,
+          unit: 'per_second',
+          history: []
+        },
+        {
+          id: 'item-session-dur',
+          key: 'avg_session_duration',
+          title: 'Average Session Duration',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'FOUND',
+          approvalState: 'APPROVED',
+          value: 8,
+          unit: 'minutes',
+          history: []
+        },
+        {
+          id: 'item-lat',
+          key: 'checkout_response_time',
+          title: 'Checkout Response Time (p95)',
+          category: 'ACCEPTANCE_CRITERIA',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'FOUND',
+          approvalState: 'APPROVED',
+          value: '<= 1.5',
+          unit: 'seconds',
+          history: []
+        }
+      ];
+
+      const contract = compileDraftPerformanceContract({
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        intelligenceItems: fullySatisfiedItems,
+        compilationTimestamp: '2026-09-16T12:00:00.000Z'
+      });
+
+      expect(contract.status).toBe('READY_FOR_APPROVAL');
+      expect(contract.approvalReadiness.canApprove).toBe(true);
+      expect(contract.approvalReadiness.blockingReasons).toHaveLength(0);
+      expect(contract.approvalReadiness.unresolvedIssuesCount).toBe(0);
+
+      // Concurrency calculated via Little's Law: 50 * 480 = 24,000
+      const concurrencyCalc = contract.workloadCalculations.find((c) => c.outputParameter === 'concurrent_sessions');
+      expect(concurrencyCalc).toBeDefined();
+      expect(concurrencyCalc?.outputValue).toBe(24000);
+
+      // Latency criterion properly defined with percentile 95
+      const crit = contract.acceptanceCriteria.find((c) => c.key === 'checkout_response_time');
+      expect(crit?.status).toBe('DEFINED');
+      expect(crit?.percentile).toBe(95);
+      expect(crit?.operator).toBe('<=');
+      expect(crit?.thresholdValue).toBe(1.5);
+    });
+
+    it('proves compiler output does not invent acceptance criteria for derived throughput', () => {
+      const itemsWithThroughputOnly: IntelligenceItem[] = [
+        {
+          id: 'item-peak',
+          key: 'peak_hourly_orders',
+          title: 'Peak Hourly Orders',
+          category: 'WORKLOAD',
+          canonicalState: 'APPROVED',
+          reviewStatus: 'FOUND',
+          approvalState: 'APPROVED',
+          value: 36000,
+          unit: 'orders/hour',
+          history: []
+        }
+      ];
+
+      const contract = compileDraftPerformanceContract({
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        intelligenceItems: itemsWithThroughputOnly
+      });
+
+      // Workload calculation exists
+      const throughputCalc = contract.workloadCalculations.find((c) => c.outputParameter === 'order_throughput_per_second');
+      expect(throughputCalc?.outputValue).toBe(10);
+
+      // But NO acceptance criteria was invented
+      expect(contract.acceptanceCriteria).toHaveLength(0);
+      expect(contract.acceptanceCriteria.find((c) => c.key === 'peak_order_throughput_criterion')).toBeUndefined();
+    });
+
+    it('verifies determinism across repeated compilation runs with explicit timestamp', () => {
+      const fixedTime = '2026-09-16T00:00:00.000Z';
+      const contract1 = compileDraftPerformanceContract({
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        compilationTimestamp: fixedTime
+      });
+
+      const contract2 = compileDraftPerformanceContract({
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        compilationTimestamp: fixedTime
+      });
+
+      expect(contract1.createdAt).toBe(fixedTime);
+      expect(contract2.createdAt).toBe(fixedTime);
+      expect(contract1).toEqual(contract2);
     });
   });
 });

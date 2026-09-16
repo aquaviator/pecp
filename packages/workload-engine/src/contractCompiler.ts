@@ -17,6 +17,7 @@ export interface CompileContractOptions {
   intelligenceItems: IntelligenceItem[];
   version?: string;
   allowCandidatePreview?: boolean;
+  compilationTimestamp?: string | Date;
 }
 
 interface ParsedCriterion {
@@ -114,6 +115,12 @@ export function compileDraftPerformanceContract(
 ): PerformanceContract {
   const { projectSummary, intelligenceItems, version = 'v0.1-draft' } = options;
 
+  const timestampStr = options.compilationTimestamp
+    ? (typeof options.compilationTimestamp === 'string'
+        ? options.compilationTimestamp
+        : options.compilationTimestamp.toISOString())
+    : (projectSummary.createdDate || '2026-08-19T10:00:00.000Z');
+
   // 1. Map Workload Inputs faithfully without silently choosing candidates
   const workloadItems = intelligenceItems.filter(
     (item) => item.category === 'WORKLOAD'
@@ -205,7 +212,11 @@ export function compileDraftPerformanceContract(
       numericPeakOrders,
       'per_hour',
       peakOrdersItem?.id || 'intel-peak-orders',
-      peakOrdersItem?.title || 'Peak Hourly Order Volume'
+      peakOrdersItem?.title || 'Peak Hourly Order Volume',
+      {
+        calculationId: `calc-throughput-${peakOrdersItem?.id || 'peak'}-${numericPeakOrders}`,
+        timestamp: timestampStr
+      }
     );
     calculations.push(throughputConversion.lineage);
   }
@@ -231,19 +242,21 @@ export function compileDraftPerformanceContract(
       sessionArrivalItem && typeof sessionArrivalItem.value === 'number'
         ? sessionArrivalItem.value
         : undefined,
-    sessionArrivalRateUnit: 'per_hour',
+    sessionArrivalRateUnit: (sessionArrivalItem?.unit as any) || 'per_hour',
     sourceSessionArrivalId: sessionArrivalItem?.id,
     hasSessionDuration: Boolean(sessionDurationItem && sessionDurationItem.value !== undefined),
     sessionDuration:
       sessionDurationItem && typeof sessionDurationItem.value === 'number'
         ? sessionDurationItem.value
         : undefined,
-    sessionDurationUnit: 'minutes',
+    sessionDurationUnit: (sessionDurationItem?.unit as any) || 'minutes',
     sourceSessionDurationId: sessionDurationItem?.id,
     hasOrderThroughput: Boolean(numericPeakOrders !== undefined),
     orderThroughput: numericPeakOrders,
     orderThroughputUnit: 'per_hour',
-    sourceOrderThroughputId: peakOrdersItem?.id
+    sourceOrderThroughputId: peakOrdersItem?.id,
+    calculationId: 'calc-littles-law-sessions',
+    timestamp: timestampStr
   });
 
   if (sessionConcurrencyEval.canCalculate && sessionConcurrencyEval.calculation) {
@@ -269,19 +282,31 @@ export function compileDraftPerformanceContract(
     const isCheckout = item.key.includes('checkout') || item.title.toLowerCase().includes('checkout');
     const isLatency = item.key.includes('latency') || item.key.includes('response_time');
 
-    // Ambiguity detection: missing percentile for response time requirements
+    // Executable semantics check according to M1.2 Requirement 3:
+    // An acceptance criterion may be DEFINED only when required executable semantics are present:
+    // metric/scope, thresholdValue, unit, and operator. Latency criteria additionally require percentile.
+    const isMissingOperator = !parsed.operator;
+    const isMissingThreshold = parsed.thresholdValue === undefined;
+    const isMissingUnit = !parsed.unit || parsed.unit.trim().length === 0;
     const isAmbiguousPercentile = isLatency && parsed.percentile === undefined;
+
     const isAmbiguous =
       item.reviewStatus === 'AMBIGUOUS' ||
       Boolean(item.ambiguityReason && item.ambiguityReason.length > 0) ||
-      isAmbiguousPercentile ||
-      parsed.thresholdValue === undefined;
+      isMissingOperator ||
+      isMissingThreshold ||
+      isMissingUnit ||
+      isAmbiguousPercentile;
 
     let ambiguityNotice: string | undefined;
     if (isAmbiguousPercentile) {
       ambiguityNotice = item.ambiguityReason || `Target specifies ${parsed.target || 'latency'} without an associated percentile (e.g. p95 or p99). Required for automated gate evaluation.`;
+    } else if (isMissingOperator) {
+      ambiguityNotice = item.ambiguityReason || `Criterion "${item.title}" (${item.key}) lacks an explicit comparison operator (<, <=, >, >=, ==) in canonical intelligence.`;
+    } else if (isMissingThreshold || isMissingUnit) {
+      ambiguityNotice = item.ambiguityReason || `Criterion "${item.title}" lacks a complete numeric threshold or unit in canonical intelligence.`;
     } else if (isAmbiguous) {
-      ambiguityNotice = item.ambiguityReason || `Criterion "${item.title}" lacks a complete numeric threshold or operational scope.`;
+      ambiguityNotice = item.ambiguityReason || `Criterion "${item.title}" is ambiguous or lacks executable operational semantics.`;
     }
 
     acceptanceCriteria.push({
@@ -301,25 +326,9 @@ export function compileDraftPerformanceContract(
     });
   }
 
-  // If order throughput calculation is authoritatively compiled, add derived throughput criterion
-  const throughputCalc = calculations.find(
-    (c) => c.outputParameter === 'order_throughput_per_second'
-  );
-  if (throughputCalc && throughputCalc.outputValue !== undefined) {
-    acceptanceCriteria.push({
-      id: `crit-derived-peak-throughput`,
-      key: 'peak_order_throughput_criterion',
-      metric: 'Peak Order Throughput',
-      scope: 'End-to-End Order Processing Pipeline',
-      target: `>= ${throughputCalc.outputValue} ${throughputCalc.unit}`,
-      operator: '>=',
-      thresholdValue: throughputCalc.outputValue,
-      unit: throughputCalc.unit,
-      status: 'DEFINED',
-      sourceIntelligenceId: peakOrdersItem?.id,
-      isBlockingForApproval: false
-    });
-  }
+  // Note: According to M1.2 Requirement 4, approved workload demand (e.g. 31,500/hr = 8.75/sec)
+  // remains in workloadCalculations as an engineering workload demand target and is NOT silently
+  // injected into NFR performance acceptance criteria.
 
   // 6. Formulate approval readiness
   const blockingReasons: string[] = [];
@@ -363,8 +372,8 @@ export function compileDraftPerformanceContract(
     version,
     engineeringIntent: projectSummary.intent,
     status,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: timestampStr,
+    updatedAt: timestampStr,
     sourceIntelligenceReferences: intelligenceItems.map((item) => ({
       id: item.id,
       key: item.key,

@@ -77,7 +77,7 @@ describe('Web Integration: Workload & Governed Contract UI Pages (M1 & M1.1)', (
   });
 
   describe('M0 Pre-Resolution State (Conflicting Peak Orders)', () => {
-    it('shows unresolved candidate warning in WorkloadPage when peak orders is conflicting', () => {
+    it('shows unresolved candidate warning in WorkloadPage when peak orders is conflicting without one-click resolution button', () => {
       const rawHtml = renderToString(
         <ServiceProvider>
           <WorkloadPage project={RETAILCO_PROJECT_FIXTURE} initialItems={RETAILCO_INTELLIGENCE_ITEMS_FIXTURE} />
@@ -87,7 +87,8 @@ describe('Web Integration: Workload & Governed Contract UI Pages (M1 & M1.1)', (
 
       expect(html).toContain('Blocked / Unresolved');
       expect(html).toContain('Unresolved Competing Candidates');
-      expect(html).toContain('Resolve to Approved Candidate (31,500 /hr)');
+      expect(html).toContain('Inspect &amp; Resolve in Intelligence Review');
+      expect(html).not.toContain('Resolve to Approved Candidate (31,500 /hr)');
     });
 
     it('blocks authoritative throughput calculation in ContractPage when peak orders is conflicting', () => {
@@ -101,6 +102,87 @@ describe('Web Integration: Workload & Governed Contract UI Pages (M1 & M1.1)', (
       expect(html).toContain('Peak Transaction Throughput');
       expect(html).toContain('UNRESOLVED (Not Calculated)');
       expect(html).toContain('Peak hourly order volume is in a CONFLICTING state');
+    });
+  });
+
+  describe('M1.2 WorkloadPage Semantic Decoupling', () => {
+    it('does NOT render or compute 31,500, 20%, 30%, 8 minutes, or 55/20/15/8/2 when given an empty or unrelated payload', () => {
+      const emptyPayload: any[] = [];
+      const rawHtml = renderToString(
+        <ServiceProvider>
+          <WorkloadPage project={RETAILCO_PROJECT_FIXTURE} initialItems={emptyPayload} />
+        </ServiceProvider>
+      );
+      const html = rawHtml.replace(/<!-- -->/g, '');
+
+      // Proves no fallback peak orders 31,500
+      expect(html).not.toContain('31,500');
+      expect(html).not.toContain('31500');
+      expect(html).not.toContain('8.75 orders/sec');
+
+      // Proves no default growth 20%
+      expect(html).not.toContain('+20%');
+
+      // Proves no default headroom 30%
+      expect(html).not.toContain('+30%');
+
+      // Proves no default session duration 8 minutes
+      expect(html).not.toContain('8.0 minutes');
+      expect(html).not.toContain('480 sec');
+
+      // Proves no hard-coded journey distribution 55/20/15/8/2
+      expect(html).not.toContain('Browse:');
+      expect(html).not.toContain('55%');
+      expect(html).not.toContain('Search:');
+      expect(html).not.toContain('20%');
+      expect(html).not.toContain('Basket:');
+      expect(html).not.toContain('15%');
+      expect(html).not.toContain('Checkout:');
+      expect(html).not.toContain('8%');
+      expect(html).not.toContain('Account:');
+      expect(html).not.toContain('2%');
+
+      // Shows unsupplied states
+      expect(html).toContain('Not supplied in intelligence');
+      expect(html).toContain('Not Supplied in Intelligence');
+      expect(html).toContain('No transformation applied');
+    });
+
+    it('displays unresolved / blocked indicator rather than a default calculated throughput in conflict state', () => {
+      const rawHtml = renderToString(
+        <ServiceProvider>
+          <WorkloadPage project={RETAILCO_PROJECT_FIXTURE} initialItems={RETAILCO_INTELLIGENCE_ITEMS_FIXTURE} />
+        </ServiceProvider>
+      );
+      const html = rawHtml.replace(/<!-- -->/g, '');
+
+      expect(html).toContain('Blocked / Unresolved');
+      expect(html).toContain('Unresolved Competing Candidates');
+      expect(html).not.toContain('8.75 orders/sec');
+      expect(html).not.toContain('525 /min');
+    });
+
+    it('verifies the conflict resolution button is gone from WorkloadPage and navigating to intelligence review is the available action', () => {
+      let navigated = false;
+      const rawHtml = renderToString(
+        <ServiceProvider>
+          <WorkloadPage
+            project={RETAILCO_PROJECT_FIXTURE}
+            initialItems={RETAILCO_INTELLIGENCE_ITEMS_FIXTURE}
+            onNavigateToIntelligence={() => {
+              navigated = true;
+            }}
+          />
+        </ServiceProvider>
+      );
+      const html = rawHtml.replace(/<!-- -->/g, '');
+
+      // The old resolution button must be completely gone
+      expect(html).not.toContain('Resolve to Approved Candidate');
+      expect(html).not.toContain('cand-3');
+
+      // Action to navigate to Intelligence Review is present
+      expect(html).toContain('Inspect &amp; Resolve in Intelligence Review');
     });
   });
 });

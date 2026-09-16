@@ -18,6 +18,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { ProjectSummary, IntelligenceItem } from '../../types';
+import { TimeUnit } from '@pecp/pe-domain';
 import { useServices } from '../../services/ServiceContext';
 import {
   convertThroughput,
@@ -30,13 +31,12 @@ import {
 interface WorkloadPageProps {
   project: ProjectSummary;
   initialItems?: IntelligenceItem[];
+  onNavigateToIntelligence?: () => void;
 }
 
-export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItems }) => {
+export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItems, onNavigateToIntelligence }) => {
   const { intelligenceService } = useServices();
   const [items, setItems] = useState<IntelligenceItem[]>(initialItems || []);
-  const [selectedGrowth, setSelectedGrowth] = useState<number>(20);
-  const [selectedHeadroom, setSelectedHeadroom] = useState<number>(30);
   const [activeLineageId, setActiveLineageId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,75 +69,158 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
     }
   }
 
-  const effectivePeakOrders = basePeakOrders ?? 31500;
-
-  const handleResolveConflict = async () => {
-    if (!peakOrdersItem) return;
-    try {
-      const resolved = await intelligenceService.resolveIntelligenceConflict(
-        project.id,
-        peakOrdersItem.id,
-        'cand-3',
-        'Formally approved commercial demand projection from BF26 Commercial Demand Model'
-      );
-      setItems((prev) => prev.map((item) => (item.id === resolved.id ? resolved : item)));
-    } catch (err) {
-      console.error('Failed to resolve conflict:', err);
-    }
-  };
-
-  // 1. Throughput conversion (Deterministic, Constitution §3)
+  // 1. Throughput conversion (Deterministic, Constitution §3) - derived strictly from canonical intelligence
   const throughputConversion = basePeakOrders
     ? convertThroughput(
         basePeakOrders,
         'per_hour',
         peakOrdersItem?.id || 'intel-peak-orders',
-        peakOrdersItem?.source || 'Black Friday 2026 Business Forecast'
+        peakOrdersItem?.source || 'Supplied Source'
       )
     : null;
 
-  // 2. Session Concurrency (Little's Law check)
+  // 2. Session Duration & Arrival inputs derived from canonical intelligence aliases
+  const sessionDurationItem = items.find(
+    (i) =>
+      i.key === 'session_duration' ||
+      i.key === 'avg_session_duration' ||
+      i.key === 'average_session_duration' ||
+      i.key === 'residence_time' ||
+      i.key.toLowerCase().includes('session_duration')
+  );
+  const sessionArrivalItem = items.find(
+    (i) =>
+      i.key === 'session_arrival_rate' ||
+      i.key === 'user_arrival_rate' ||
+      i.key === 'session_starts_per_hour' ||
+      i.key === 'session_arrivals' ||
+      i.key.toLowerCase().includes('session_arrival')
+  );
+
+  let parsedSessionDuration: number | undefined;
+  const sessionDurationUnit: TimeUnit =
+    sessionDurationItem?.unit === 'seconds' ||
+    sessionDurationItem?.unit === 'minutes' ||
+    sessionDurationItem?.unit === 'hours'
+      ? sessionDurationItem.unit
+      : 'minutes';
+  if (sessionDurationItem) {
+    if (typeof sessionDurationItem.value === 'number') {
+      parsedSessionDuration = sessionDurationItem.value;
+    } else if (typeof sessionDurationItem.value === 'string') {
+      const parsed = parseFloat(sessionDurationItem.value);
+      if (!isNaN(parsed)) parsedSessionDuration = parsed;
+    }
+  }
+
+  let parsedSessionArrivalRate: number | undefined;
+  if (sessionArrivalItem) {
+    if (typeof sessionArrivalItem.value === 'number') {
+      parsedSessionArrivalRate = sessionArrivalItem.value;
+    } else if (typeof sessionArrivalItem.value === 'string') {
+      const parsed = parseFloat(sessionArrivalItem.value);
+      if (!isNaN(parsed)) parsedSessionArrivalRate = parsed;
+    }
+  }
+
   const sessionConcurrency = evaluateSessionConcurrency({
-    hasSessionArrivalRate: false, // Intentionally missing in RetailCo upstream
-    sessionArrivalRate: undefined,
-    hasSessionDuration: true,
-    sessionDuration: 8,
-    sessionDurationUnit: 'minutes',
-    sourceSessionDurationId: 'intel-session-duration',
+    hasSessionArrivalRate: Boolean(parsedSessionArrivalRate !== undefined),
+    sessionArrivalRate: parsedSessionArrivalRate,
+    hasSessionDuration: Boolean(parsedSessionDuration !== undefined),
+    sessionDuration: parsedSessionDuration,
+    sessionDurationUnit: sessionDurationUnit,
+    sourceSessionDurationId: sessionDurationItem?.id,
     hasOrderThroughput: Boolean(basePeakOrders !== undefined),
     orderThroughput: basePeakOrders,
     orderThroughputUnit: 'per_hour',
-    sourceOrderThroughputId: 'intel-peak-orders'
+    sourceOrderThroughputId: peakOrdersItem?.id
   });
 
-  // 3. Journey distribution validation
-  const journeyDistribution = validateJourneyDistribution(
-    [
-      { id: 'j-browse', name: 'Browse', percentage: 55, weight: 0.55 },
-      { id: 'j-search', name: 'Search', percentage: 20, weight: 0.2 },
-      { id: 'j-basket', name: 'Basket', percentage: 15, weight: 0.15 },
-      { id: 'j-checkout', name: 'Checkout', percentage: 8, weight: 0.08 },
-      { id: 'j-account', name: 'Account', percentage: 2, weight: 0.02 }
-    ],
-    0.01,
-    ['intel-journey-distribution']
+  // 3. Journey distribution derived from structured canonical intelligence
+  const journeyItem = items.find(
+    (i) =>
+      i.key === 'journey_distribution' ||
+      i.key === 'traffic_distribution' ||
+      i.key === 'journey_mix' ||
+      i.key.toLowerCase().includes('journey')
   );
 
-  // 4. Growth & Headroom scaling
-  const scaledWorkload = applyGrowthAndHeadroom({
-    baseValue: effectivePeakOrders,
-    baseUnit: 'orders/hour',
-    growthPercentage: selectedGrowth,
-    headroomPercentage: selectedHeadroom,
-    sourceBaseId: peakOrdersItem?.id || 'intel-peak-orders',
-    parameterName: 'Peak Forecast Capacity Target'
-  });
+  const parsedSegments: { id: string; name: string; percentage: number; weight: number }[] = [];
+  if (journeyItem && typeof journeyItem.value === 'string') {
+    const parts = journeyItem.value.split(',').map((s) => s.trim());
+    for (const part of parts) {
+      const match = part.match(/^([A-Za-z\s]+?)(?::|\s+)?(\d+(?:\.\d+)?)\s*%/);
+      if (match) {
+        const name = match[1].trim();
+        const percentage = parseFloat(match[2]);
+        parsedSegments.push({
+          id: `j-${name.toLowerCase().replace(/\s+/g, '-')}`,
+          name,
+          percentage,
+          weight: percentage / 100
+        });
+      }
+    }
+  }
+
+  const journeyDistribution =
+    parsedSegments.length > 0 && journeyItem
+      ? validateJourneyDistribution(parsedSegments, 0.01, [journeyItem.id])
+      : null;
+
+  // 4. Growth & Headroom scaling - derived from intelligence, no defaults applied
+  const growthItem = items.find(
+    (i) =>
+      i.key === 'annual_growth' ||
+      i.key === 'projected_growth' ||
+      i.key === 'growth_percentage' ||
+      i.key.toLowerCase().includes('growth')
+  );
+  const headroomItem = items.find(
+    (i) =>
+      i.key === 'architectural_headroom' ||
+      i.key === 'engineering_headroom' ||
+      i.key === 'headroom' ||
+      i.key.toLowerCase().includes('headroom')
+  );
+
+  let parsedGrowth: number | undefined;
+  if (growthItem) {
+    if (typeof growthItem.value === 'number') parsedGrowth = growthItem.value;
+    else if (typeof growthItem.value === 'string') {
+      const p = parseFloat(growthItem.value.replace(/%/g, ''));
+      if (!isNaN(p)) parsedGrowth = p;
+    }
+  }
+
+  let parsedHeadroom: number | undefined;
+  if (headroomItem) {
+    if (typeof headroomItem.value === 'number') parsedHeadroom = headroomItem.value;
+    else if (typeof headroomItem.value === 'string') {
+      const p = parseFloat(headroomItem.value.replace(/%/g, ''));
+      if (!isNaN(p)) parsedHeadroom = p;
+    }
+  }
+
+  const hasScalingInputs =
+    basePeakOrders !== undefined && parsedGrowth !== undefined && parsedHeadroom !== undefined;
+
+  const scaledWorkload = hasScalingInputs
+    ? applyGrowthAndHeadroom({
+        baseValue: basePeakOrders!,
+        baseUnit: 'orders/hour',
+        growthPercentage: parsedGrowth!,
+        headroomPercentage: parsedHeadroom!,
+        sourceBaseId: peakOrdersItem?.id || 'intel-peak-orders',
+        parameterName: 'Peak Forecast Capacity Target'
+      })
+    : null;
 
   // 5. Workload Readiness
   const readiness = evaluateWorkloadReadiness(items, {
-    hasJourneyDistribution: true,
-    journeyDistributionValid: journeyDistribution.isValid,
-    journeyValidationError: journeyDistribution.validationError
+    hasJourneyDistribution: Boolean(journeyDistribution !== null),
+    journeyDistributionValid: journeyDistribution?.isValid,
+    journeyValidationError: journeyDistribution?.validationError
   });
 
   return (
@@ -204,7 +287,7 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
           {throughputConversion ? (
             <>
               <p className="text-xs text-slate-400">
-                Unit conversions from approved Black Friday 2026 forecast baseline ({basePeakOrders?.toLocaleString()} orders/hr):
+                Unit conversions from approved baseline ({basePeakOrders?.toLocaleString()} orders/hr):
               </p>
               <div className="space-y-2 bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-xs">
                 <div className="flex justify-between items-center text-slate-300">
@@ -228,18 +311,28 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
             <div className="space-y-2.5 bg-rose-950/40 p-3 rounded-lg border border-rose-800 font-mono text-xs">
               <div className="text-rose-300 font-bold flex items-center gap-1.5">
                 <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                <span>Unresolved Competing Candidates</span>
+                <span>{isPeakOrdersConflicting ? 'Unresolved Competing Candidates' : 'Missing Peak Orders Input'}</span>
               </div>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                Peak hourly orders is in a CONFLICTING state across 3 candidates (18,000 / 24,000 / 31,500). Constitution §3 forbids calculating contract throughput from unapproved candidates.
+                {isPeakOrdersConflicting
+                  ? 'Peak hourly orders has multiple competing candidates. Constitution §3 forbids calculating contract throughput from unapproved candidates. Conflict resolution belongs in Intelligence Review.'
+                  : 'Peak hourly orders has not been supplied or approved in canonical intelligence.'}
               </p>
-              <button
-                onClick={handleResolveConflict}
-                className="mt-1 px-3 py-1.5 bg-rose-900 hover:bg-rose-800 text-rose-200 text-xs font-sans font-semibold rounded border border-rose-700 transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-rose-300" />
-                <span>Resolve to Approved Candidate (31,500 /hr)</span>
-              </button>
+              {isPeakOrdersConflicting && (
+                <button
+                  onClick={() => {
+                    if (onNavigateToIntelligence) {
+                      onNavigateToIntelligence();
+                    } else {
+                      window.location.hash = `#/project/${project.id}/intelligence`;
+                    }
+                  }}
+                  className="mt-1 px-3 py-1.5 bg-rose-900 hover:bg-rose-800 text-rose-200 text-xs font-sans font-semibold rounded border border-rose-700 transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-rose-300" />
+                  <span>Inspect & Resolve in Intelligence Review</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -263,11 +356,13 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
               Concurrent Sessions: NOT CALCULATED
             </div>
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              {sessionConcurrency.blocked?.reason}
+              {sessionConcurrency.blocked?.reason || 'Session arrival rate and session duration must be known for the same flow population.'}
             </p>
-            <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
-              <strong className="text-rose-300">Required Intelligence:</strong> {sessionConcurrency.blocked?.requiredIntelligence[0]}
-            </div>
+            {sessionConcurrency.blocked?.requiredIntelligence && sessionConcurrency.blocked.requiredIntelligence.length > 0 && (
+              <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                <strong className="text-rose-300">Required Intelligence:</strong> {sessionConcurrency.blocked.requiredIntelligence[0]}
+              </div>
+            )}
           </div>
           <div className="text-[10px] text-slate-500 font-mono">
             Constitution §3: Anti-hallucination law strictly prevents multiplying order throughput by session duration.
@@ -281,8 +376,12 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
               <Clock className="w-3.5 h-3.5 text-emerald-400" />
               <span>3. Session Duration (W)</span>
             </h3>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-              Approved
+            <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+              parsedSessionDuration !== undefined
+                ? 'bg-slate-800 text-slate-300 border-slate-700'
+                : 'bg-rose-950 text-rose-300 border-rose-800'
+            }`}>
+              {parsedSessionDuration !== undefined ? 'Supplied' : 'Not Supplied'}
             </span>
           </div>
           <p className="text-xs text-slate-400">
@@ -291,16 +390,24 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
           <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs space-y-2 font-mono">
             <div className="flex justify-between items-center">
               <span className="text-slate-500">Duration Value:</span>
-              <span className="text-white font-bold">8.0 minutes (480 sec)</span>
+              <span className="text-white font-bold">
+                {parsedSessionDuration !== undefined
+                  ? `${parsedSessionDuration} ${sessionDurationUnit} (${sessionDurationUnit === 'minutes' ? parsedSessionDuration * 60 : parsedSessionDuration} sec)`
+                  : 'Not supplied in intelligence'}
+              </span>
             </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span className="text-slate-500">Source:</span>
-              <span className="text-slate-300">Strategy 2024 §4.3</span>
-            </div>
-            <div className="flex justify-between items-center text-slate-400">
-              <span className="text-slate-500">Approval:</span>
-              <span className="text-emerald-400">Lead Perf Architect</span>
-            </div>
+            {sessionDurationItem && (
+              <>
+                <div className="flex justify-between items-center text-slate-400">
+                  <span className="text-slate-500">Source:</span>
+                  <span className="text-slate-300">{sessionDurationItem.source || sessionDurationItem.sourceDocument || 'Canonical Item'}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400">
+                  <span className="text-slate-500">Approval:</span>
+                  <span className="text-emerald-400">{sessionDurationItem.approvalState || sessionDurationItem.canonicalState}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -311,25 +418,42 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
               <PieChart className="w-3.5 h-3.5 text-sky-400" />
               <span>4. Journey Distribution Matrix</span>
             </h3>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
-              Validated 100%
+            <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+              journeyDistribution && journeyDistribution.isValid
+                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                : 'bg-amber-950 text-amber-300 border-amber-800'
+            }`}>
+              {journeyDistribution ? (journeyDistribution.isValid ? 'Validated 100%' : 'Invalid Mix') : 'Unstructured / Absent'}
             </span>
           </div>
           <p className="text-xs text-slate-400">
             Validated traffic weighting across user transaction journeys:
           </p>
-          <div className="space-y-1.5 bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-mono">
-            {journeyDistribution.journeys.map((j) => (
-              <div key={j.id} className="flex justify-between items-center">
-                <span className="text-slate-400">{j.name}:</span>
-                <span className="text-sky-300 font-semibold">{j.percentage}% (weight {j.weight})</span>
+          {journeyDistribution ? (
+            <div className="space-y-1.5 bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-mono">
+              {journeyDistribution.journeys.map((j) => (
+                <div key={j.id} className="flex justify-between items-center">
+                  <span className="text-slate-400">{j.name}:</span>
+                  <span className="text-sky-300 font-semibold">{j.percentage}% (weight {j.weight})</span>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-slate-800 flex justify-between items-center font-bold">
+                <span className="text-slate-300">Total Mix:</span>
+                <span className="text-emerald-400">{journeyDistribution.totalPercentage}%</span>
               </div>
-            ))}
-            <div className="pt-2 border-t border-slate-800 flex justify-between items-center font-bold">
-              <span className="text-slate-300">Total Mix:</span>
-              <span className="text-emerald-400">{journeyDistribution.totalPercentage}%</span>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-2 bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs">
+              <div className="text-amber-300 font-semibold font-mono">
+                {journeyItem ? 'Unstructured Canonical Value' : 'Not Supplied in Intelligence'}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                {journeyItem
+                  ? `Source specifies: "${journeyItem.value}". Cannot be automatically decomposed into discrete journey percentages.`
+                  : 'Journey distribution ratios are not represented in supplied canonical intelligence.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 5. Growth & Engineering Headroom */}
@@ -339,8 +463,12 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
               <Shield className="w-3.5 h-3.5 text-purple-400" />
               <span>5. Growth & Engineering Headroom</span>
             </h3>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950 text-purple-300 border border-purple-800">
-              Explicit Formula
+            <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+              scaledWorkload
+                ? 'bg-purple-950 text-purple-300 border-purple-800'
+                : 'bg-slate-800 text-slate-400 border-slate-700'
+            }`}>
+              {scaledWorkload ? 'Explicit Formula' : 'Not Supplied'}
             </span>
           </div>
           <p className="text-xs text-slate-400">
@@ -349,19 +477,25 @@ export const WorkloadPage: React.FC<WorkloadPageProps> = ({ project, initialItem
           <div className="space-y-2 bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-slate-400">Projected Growth:</span>
-              <span className="text-sky-300 font-mono font-semibold">+{selectedGrowth}%</span>
+              <span className="text-sky-300 font-mono font-semibold">
+                {parsedGrowth !== undefined ? `+${parsedGrowth}%` : 'Not supplied'}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-400">Engineering Headroom:</span>
-              <span className="text-purple-300 font-mono font-semibold">+{selectedHeadroom}%</span>
+              <span className="text-purple-300 font-mono font-semibold">
+                {parsedHeadroom !== undefined ? `+${parsedHeadroom}%` : 'Not supplied'}
+              </span>
             </div>
             <div className="pt-2 border-t border-slate-800 flex justify-between items-center font-mono font-bold">
               <span className="text-slate-300">Scaled Target:</span>
-              <span className="text-emerald-300">{scaledWorkload.outputValue.toLocaleString()} orders/hr</span>
+              <span className="text-emerald-300">
+                {scaledWorkload ? `${scaledWorkload.outputValue.toLocaleString()} orders/hr` : 'No transformation applied'}
+              </span>
             </div>
           </div>
           <p className="text-[10px] text-slate-500 font-mono">
-            No default factors invented. All parameters must be explicitly declared.
+            No default factors invented. Parameters are applied only when explicitly supplied.
           </p>
         </div>
 

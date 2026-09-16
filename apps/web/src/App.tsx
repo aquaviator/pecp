@@ -137,7 +137,10 @@ const AppContent: React.FC = () => {
                   <RequirementsPage project={activeProject} />
                 )}
                 {projectTab === 'WORKLOAD' && (
-                  <WorkloadPage project={activeProject} />
+                  <WorkloadPage
+                    project={activeProject}
+                    onNavigateToIntelligence={() => setProjectTab('INTELLIGENCE')}
+                  />
                 )}
                 {projectTab === 'PERFORMANCE_CONTRACT' && (
                   <ContractPage project={activeProject} />

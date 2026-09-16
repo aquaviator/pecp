@@ -16,7 +16,8 @@ export function convertThroughput(
   baseRate: number,
   baseUnit: ThroughputUnit = 'per_hour',
   sourceId: string = 'intel-peak-orders',
-  sourceTitle: string = 'Peak Hourly Order Volume'
+  sourceTitle: string = 'Peak Hourly Order Volume',
+  options?: { calculationId?: string; timestamp?: string }
 ): ThroughputConversion {
   if (baseRate < 0 || isNaN(baseRate)) {
     throw new Error(`Invalid throughput base rate: ${baseRate}`);
@@ -51,7 +52,7 @@ export function convertThroughput(
   ];
 
   const lineage: CalculationLineage = {
-    calculationId: `calc-throughput-${Date.now()}`,
+    calculationId: options?.calculationId || `calc-throughput-${sourceId}-${baseRate}`,
     outputParameter: 'order_throughput_per_second',
     outputValue: perSecondRate,
     unit: 'orders/second',
@@ -84,7 +85,7 @@ export function convertThroughput(
       }
     ],
     sourceIntelligenceIds: [sourceId],
-    timestamp: new Date().toISOString(),
+    timestamp: options?.timestamp || '2026-09-16T00:00:00.000Z',
     assumptions: [
       'Throughput is assumed uniform across the peak hour duration unless burstiness curves are supplied.'
     ],

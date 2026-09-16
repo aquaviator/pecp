@@ -13,6 +13,8 @@ export interface LittlesLawParams {
   flowPopulation: string; // e.g. 'user_sessions' or 'checkout_transactions'
   sourceArrivalId?: string;
   sourceResidenceId?: string;
+  calculationId?: string;
+  timestamp?: string;
 }
 
 /**
@@ -29,7 +31,9 @@ export function calculateLittlesLaw(params: LittlesLawParams): CalculationLineag
     residenceTimeUnit,
     flowPopulation,
     sourceArrivalId = 'intel-arrival-rate',
-    sourceResidenceId = 'intel-residence-time'
+    sourceResidenceId = 'intel-residence-time',
+    calculationId,
+    timestamp
   } = params;
 
   if (arrivalRate <= 0 || isNaN(arrivalRate)) {
@@ -70,9 +74,14 @@ export function calculateLittlesLaw(params: LittlesLawParams): CalculationLineag
   // L = λ × W
   const concurrency = Number((lambdaPerSecond * residenceSeconds).toFixed(2));
 
+  const outputParam =
+    flowPopulation === 'sessions' || flowPopulation === 'user_sessions'
+      ? 'concurrent_sessions'
+      : `concurrency_${flowPopulation}`;
+
   return {
-    calculationId: `calc-littles-law-${Date.now()}`,
-    outputParameter: `concurrency_${flowPopulation}`,
+    calculationId: calculationId || `calc-littles-law-${flowPopulation}-${arrivalRate}-${residenceTime}`,
+    outputParameter: outputParam,
     outputValue: concurrency,
     unit: `concurrent_${flowPopulation}`,
     formulaIdentifier: 'littles_law_L_equals_lambda_times_W',
@@ -106,7 +115,7 @@ export function calculateLittlesLaw(params: LittlesLawParams): CalculationLineag
       }
     ],
     sourceIntelligenceIds: [sourceArrivalId, sourceResidenceId].filter(Boolean),
-    timestamp: new Date().toISOString(),
+    timestamp: timestamp || '2026-09-16T00:00:00.000Z',
     assumptions: [
       `System is assumed to be in steady-state equilibrium where arrival rate equals departure rate for ${flowPopulation}.`
     ]
@@ -134,6 +143,8 @@ export function evaluateSessionConcurrency(inputs: {
   orderThroughput?: number;
   orderThroughputUnit?: ThroughputUnit;
   sourceOrderThroughputId?: string;
+  calculationId?: string;
+  timestamp?: string;
 }): {
   canCalculate: boolean;
   calculation?: CalculationLineage;
@@ -153,7 +164,9 @@ export function evaluateSessionConcurrency(inputs: {
       residenceTimeUnit: inputs.sessionDurationUnit || 'minutes',
       flowPopulation: 'sessions',
       sourceArrivalId: inputs.sourceSessionArrivalId,
-      sourceResidenceId: inputs.sourceSessionDurationId
+      sourceResidenceId: inputs.sourceSessionDurationId,
+      calculationId: inputs.calculationId,
+      timestamp: inputs.timestamp
     });
     return { canCalculate: true, calculation: calc };
   }

@@ -232,10 +232,10 @@ export const RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE: IntelligenceItem[] = [
         source: 'Retail Platform HLD v4',
         sourceDocument: 'Doc: Architecture-HLD-v4.2.pdf',
         sourceLocation: 'Page 38, Section 8.2 "Capacity Envelope"',
-        canonicalState: 'IMPORTED',
-        reviewStatus: 'FOUND',
+        canonicalState: 'SUPERSEDED',
+        reviewStatus: 'STALE',
         capturedDate: '2026-04-12T14:30:00Z',
-        notes: 'Engineering sizing assumption calculated prior to revised marketing forecasts.'
+        notes: 'Superseded by formal resolution event selecting cand-3 (31,500 orders/hour).'
       },
       {
         id: 'cand-3',
