@@ -1,19 +1,28 @@
 import React from 'react';
 import { ListFilter, FileText, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
-import { ProjectSummary } from '../../types';
-import { StateBadge } from '../../components/common/StateBadge';
+import { ProjectSummary, ReviewStatus, CanonicalState } from '../../types';
+import { ReviewStatusBadge, CanonicalStateBadge } from '../../components/common/StateBadge';
 
 interface RequirementsPageProps {
   project: ProjectSummary;
 }
 
 export const RequirementsPage: React.FC<RequirementsPageProps> = ({ project }) => {
-  const nfrs = [
+  const nfrs: Array<{
+    id: string;
+    title: string;
+    statement: string;
+    reviewStatus: ReviewStatus;
+    canonicalState: CanonicalState;
+    reason: string;
+    source: string;
+  }> = [
     {
       id: 'NFR-021',
       title: 'Checkout Response Time Target',
       statement: 'Checkout should respond within 2 seconds.',
-      state: 'AMBIGUOUS' as const,
+      reviewStatus: 'AMBIGUOUS',
+      canonicalState: 'IMPORTED',
       reason: 'Response-time percentile is not defined.',
       source: 'Azure DevOps #49201'
     },
@@ -21,7 +30,8 @@ export const RequirementsPage: React.FC<RequirementsPageProps> = ({ project }) =
       id: 'NFR-022',
       title: 'Maximum Allowed HTTP Error Rate',
       statement: 'Error rate must remain below 0.5% under peak load.',
-      state: 'FOUND' as const,
+      reviewStatus: 'FOUND',
+      canonicalState: 'APPROVED',
       reason: 'Explicitly specifies 0.5% ceiling across 5xx responses.',
       source: 'Azure DevOps #49202'
     },
@@ -29,7 +39,8 @@ export const RequirementsPage: React.FC<RequirementsPageProps> = ({ project }) =
       id: 'NFR-023',
       title: 'Availability During Flash Sale Window',
       statement: 'Platform availability must sustain 99.95% over 4-hour peak window.',
-      state: 'APPROVED' as const,
+      reviewStatus: 'FOUND',
+      canonicalState: 'APPROVED',
       reason: 'Approved by Product Operations and Architecture.',
       source: 'Azure DevOps #49203'
     },
@@ -37,24 +48,30 @@ export const RequirementsPage: React.FC<RequirementsPageProps> = ({ project }) =
       id: 'NFR-024',
       title: 'Active Product SKU Test Pool Cardinality',
       statement: 'Realistic cache hit modeling requires minimum 250,000 active SKUs.',
-      state: 'MISSING' as const,
-      reason: 'Data Architecture team has not yet published SKU distribution matrix.',
-      source: 'Data Architecture Backlog'
+      reviewStatus: 'MISSING',
+      canonicalState: 'MISSING',
+      reason: 'Missing data pool volume definition.',
+      source: 'Data Strategy §4.2'
     }
   ];
 
   return (
     <div className="space-y-6">
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
-        <div className="flex items-center gap-2">
-          <ListFilter className="w-4 h-4 text-sky-400" />
-          <h2 className="text-base font-bold text-white tracking-tight">
-            Non-Functional Requirements (NFR) Register
-          </h2>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              <ListFilter className="w-4 h-4 text-sky-400" />
+              <span>Project Requirements & NFR Register</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Deterministic extraction of Non-Functional Requirements from upstream Azure DevOps and architecture documentation.
+            </p>
+          </div>
+          <span className="text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1 rounded-md border border-slate-800">
+            Source of Truth: Canonical PE Model
+          </span>
         </div>
-        <p className="text-xs text-slate-400 mt-1 max-w-3xl">
-          Captured performance requirements, SLA thresholds, and qualitative criteria linked to upstream ALM work items.
-        </p>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
@@ -62,11 +79,12 @@ export const RequirementsPage: React.FC<RequirementsPageProps> = ({ project }) =
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
               <tr>
-                <th className="p-3.5">Item Ref</th>
-                <th className="p-3.5">Requirement Title</th>
-                <th className="p-3.5">Specification Statement</th>
+                <th className="p-3.5">ID</th>
+                <th className="p-3.5">Title</th>
+                <th className="p-3.5">Requirement Statement</th>
+                <th className="p-3.5">Review Status</th>
                 <th className="p-3.5">Canonical State</th>
-                <th className="p-3.5">Analysis / Reason</th>
+                <th className="p-3.5">Review Notes / Gap</th>
                 <th className="p-3.5">ALM Source</th>
               </tr>
             </thead>
@@ -77,7 +95,10 @@ export const RequirementsPage: React.FC<RequirementsPageProps> = ({ project }) =
                   <td className="p-3.5 font-semibold text-white">{nfr.title}</td>
                   <td className="p-3.5 text-slate-300 italic font-serif">"{nfr.statement}"</td>
                   <td className="p-3.5">
-                    <StateBadge state={nfr.state} />
+                    <ReviewStatusBadge status={nfr.reviewStatus} />
+                  </td>
+                  <td className="p-3.5">
+                    <CanonicalStateBadge state={nfr.canonicalState} />
                   </td>
                   <td className="p-3.5 text-slate-400">{nfr.reason}</td>
                   <td className="p-3.5 font-mono text-slate-500 text-[11px]">{nfr.source}</td>

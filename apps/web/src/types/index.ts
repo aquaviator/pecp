@@ -1,16 +1,36 @@
-// PECP M0 Core Domain Types
+// PECP Core Domain Types
 // Authoritative definitions following docs/PRODUCT_CONSTITUTION.md
 
-export type IntelligenceState =
+/**
+ * Canonical intelligence/provenance state according to Constitution §7.
+ * Governs the authoritative engineering state and lineage of values.
+ */
+export type CanonicalState =
+  | 'MISSING'
+  | 'OBSERVED'
+  | 'MANUAL'
+  | 'IMPORTED'
+  | 'INFERRED'
+  | 'CALCULATED'
+  | 'CONFLICTING'
+  | 'STALE'
+  | 'APPROVED'
+  | 'SUPERSEDED';
+
+/**
+ * Review & readiness display status for triage, inspection, and gap analysis.
+ * Distinct from the underlying canonical lifecycle state.
+ */
+export type ReviewStatus =
   | 'FOUND'
   | 'MISSING'
   | 'AMBIGUOUS'
   | 'CONFLICTING'
-  | 'STALE'
-  | 'APPROVED'
-  | 'INFERRED'
-  | 'CALCULATED';
+  | 'STALE';
 
+/**
+ * Performance Engineering Intents (Constitution §6)
+ */
 export type EngineeringIntent =
   | 'DISCOVERY'
   | 'REPRESENTATIVE'
@@ -18,6 +38,9 @@ export type EngineeringIntent =
   | 'INVESTIGATIVE'
   | 'CERTIFICATION';
 
+/**
+ * Project initiation methods supported in PECP portal
+ */
 export type ProjectCreationMethod =
   | 'BRIEF'
   | 'UPLOAD_DOCUMENTS'
@@ -27,6 +50,16 @@ export type ProjectCreationMethod =
 export type IntegrationMode = 'MOCK' | 'SANDBOX' | 'LIVE';
 
 export type IntegrationStatus = 'NOT_CONFIGURED' | 'CONFIGURED' | 'DISABLED';
+
+export type IntelligenceCategory =
+  | 'BUSINESS_CONTEXT'
+  | 'WORKLOAD'
+  | 'REQUIREMENTS'
+  | 'ARCHITECTURE'
+  | 'ACCEPTANCE_CRITERIA'
+  | 'TEST_DATA'
+  | 'ENVIRONMENT'
+  | 'OBSERVABILITY';
 
 export interface ProjectSummary {
   id: string;
@@ -48,7 +81,8 @@ export interface IntelligenceCandidate {
   source: string;
   sourceDocument: string;
   sourceLocation: string;
-  state: IntelligenceState;
+  canonicalState: CanonicalState;
+  reviewStatus: ReviewStatus;
   capturedDate: string;
   notes?: string;
 }
@@ -64,8 +98,9 @@ export interface IntelligenceItem {
   id: string;
   key: string;
   title: string;
-  category: 'BUSINESS_CONTEXT' | 'WORKLOAD' | 'REQUIREMENTS' | 'ARCHITECTURE' | 'ACCEPTANCE_CRITERIA' | 'TEST_DATA' | 'ENVIRONMENT' | 'OBSERVABILITY';
-  state: IntelligenceState;
+  category: IntelligenceCategory;
+  canonicalState: CanonicalState;
+  reviewStatus: ReviewStatus;
   unit?: string;
   value?: string | number;
   source?: string;

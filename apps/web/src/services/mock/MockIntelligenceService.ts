@@ -69,7 +69,8 @@ export class MockIntelligenceService implements IIntelligenceService {
     // Apply resolution mutation on mock store
     item.value = chosen.value;
     if (chosen.unit) item.unit = chosen.unit;
-    item.state = 'APPROVED';
+    item.canonicalState = 'APPROVED';
+    item.reviewStatus = 'FOUND';
     item.approvalState = 'APPROVED';
     item.approvedBy = 'Performance Lead';
     item.approvalDate = new Date().toISOString();
@@ -111,7 +112,8 @@ export class MockIntelligenceService implements IIntelligenceService {
     const item = list.find((i) => i.id === itemId);
     if (!item) throw new Error(`Item ${itemId} not found`);
 
-    item.state = 'APPROVED';
+    item.canonicalState = 'APPROVED';
+    item.reviewStatus = 'FOUND';
     item.approvalState = 'APPROVED';
     item.approvedBy = approverName;
     item.approvalDate = new Date().toISOString();
