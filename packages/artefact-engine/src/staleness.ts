@@ -1,56 +1,11 @@
 import {
   PerformanceContract,
   EngineeringArtefact,
-  ArtefactStalenessResult
+  ArtefactStalenessResult,
+  computeContractFingerprint
 } from '@pecp/pe-domain';
 
-/**
- * Computes a deterministic, non-cryptographic drift checksum/fingerprint of a Performance Contract.
- * Detects structural or value drift in calculations, criteria, readiness, or issues.
- * Uses 32-bit FNV-1a for lightweight, environment-agnostic drift detection.
- * NOTE: This is a deterministic drift checksum, NOT a cryptographic hash or signature.
- */
-export function computeContractFingerprint(contract: PerformanceContract): string {
-  const digestPayload = {
-    id: contract.id,
-    version: contract.version,
-    status: contract.status,
-    intent: contract.engineeringIntent,
-    calculations: contract.workloadCalculations.map((c) => ({
-      id: c.calculationId,
-      param: c.outputParameter,
-      value: c.outputValue,
-      unit: c.unit
-    })),
-    blockedCalculations: contract.blockedWorkloadCalculations.map((bc) => ({
-      id: bc.calculationId,
-      param: bc.outputParameter,
-      reason: bc.reason
-    })),
-    criteria: contract.acceptanceCriteria.map((ac) => ({
-      id: ac.id,
-      metric: ac.metric,
-      target: ac.target,
-      status: ac.status,
-      percentile: ac.percentile
-    })),
-    issues: contract.unresolvedIssues.map((issue) => ({
-      id: issue.id,
-      type: issue.type,
-      severity: issue.severity
-    })),
-    canApprove: contract.approvalReadiness.canApprove
-  };
-
-  const str = JSON.stringify(digestPayload);
-  // FNV-1a 32-bit hash implementation
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return `fp-${(hash >>> 0).toString(16).padStart(8, '0')}`;
-}
+export { computeContractFingerprint };
 
 /**
  * Pure function evaluating whether an existing engineering artefact is stale

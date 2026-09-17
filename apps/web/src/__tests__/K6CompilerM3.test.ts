@@ -53,7 +53,7 @@ describe('PECP k6 Execution Bundle Compiler (M3.0)', () => {
   });
 
   describe('2. Executable k6 Bundle Generation', () => {
-    it('compiles an execution-ready bundle with config.json, journeys.js, and entrypoint.js', () => {
+    it('compiles an execution-ready bundle with config.json, journeys.js, entrypoint.js, and runtime.js', () => {
       const bundle = compileK6Bundle({
         testDefinition: approvedM3TestDef,
         generatedAt: '2026-08-25T14:30:00.000Z'
@@ -61,12 +61,38 @@ describe('PECP k6 Execution Bundle Compiler (M3.0)', () => {
 
       expect(bundle.isExecutable).toBe(true);
       expect(bundle.nonExecutableReasons).toEqual([]);
-      expect(bundle.files.length).toBe(3);
+      expect(bundle.files.length).toBe(4);
 
       const fileNames = bundle.files.map((f) => f.filename);
       expect(fileNames).toContain('config.json');
       expect(fileNames).toContain('journeys.js');
       expect(fileNames).toContain('entrypoint.js');
+      expect(fileNames).toContain('runtime.js');
+
+      // journeys.js and entrypoint.js consume runtime.js
+      const entrypointFile = bundle.files.find((f) => f.filename === 'entrypoint.js');
+      expect(entrypointFile?.content).toContain("import { executeIteration");
+      expect(entrypointFile?.content).toContain("from './runtime.js'");
+
+      const journeysFile = bundle.files.find((f) => f.filename === 'journeys.js');
+      expect(journeysFile?.content).toContain("import { executeStep } from './runtime.js'");
+    });
+
+    it('governs provider-derived capacity sizing and records provenance metadata', () => {
+      const bundle = compileK6Bundle({
+        testDefinition: approvedM3TestDef
+      });
+
+      const providerCap = bundle.options.ext?.pecp?.providerCapacity;
+      expect(providerCap).toBeDefined();
+      expect(providerCap?.isProviderDerived).toBe(true);
+      expect(providerCap?.policyId).toBe('k6-standard-arrival-rate-sizing');
+      expect(providerCap?.preAllocatedVUs).toBe(22); // max(10, ceil(8.75 * 2.5)) = 22
+      expect(providerCap?.maxVUs).toBe(88); // max(50, ceil(8.75 * 10)) = 88
+
+      const scenario = bundle.options.scenarios[Object.keys(bundle.options.scenarios)[0]];
+      expect(scenario.preAllocatedVUs).toBe(22);
+      expect(scenario.maxVUs).toBe(88);
     });
 
     it('derives scenario configuration directly from explicit canonical schedule stages', () => {
@@ -114,8 +140,8 @@ describe('PECP k6 Execution Bundle Compiler (M3.0)', () => {
       const pecpExt = bundle.options.ext?.pecp;
       expect(pecpExt).toBeDefined();
       expect(pecpExt?.testDefinitionId).toBe(approvedM3TestDef.id);
-      expect(pecpExt?.workloadAttainment.targetValue).toBe(8.75);
-      expect(pecpExt?.workloadAttainment.unit).toBe('orders/second');
+      expect(pecpExt?.workloadAttainment?.targetValue).toBe(8.75);
+      expect(pecpExt?.workloadAttainment?.unit).toBe('orders/second');
     });
 
     it('generates modular journey functions with correct weights and credentials references', () => {

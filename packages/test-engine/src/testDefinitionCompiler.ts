@@ -12,18 +12,13 @@ import {
   ExecutionParameter,
   TestDefinitionIssue,
   AcceptanceCriterion,
-  CredentialReference
+  CredentialReference,
+  ExecutionIntelligenceOverrides,
+  computeContractFingerprint
 } from '@pecp/pe-domain';
 import { computeTestDefinitionFingerprint } from './fingerprint.js';
 
-export interface ExecutionIntelligenceOverrides {
-  schedule?: WorkloadSchedule;
-  journeys?: JourneyDefinition[];
-  targetEnvironmentBaseUrlRef?: string;
-  testDataIdentifiers?: string[];
-  preconditions?: ExecutionPrecondition[];
-  credentialReferences?: CredentialReference[];
-}
+export type { ExecutionIntelligenceOverrides };
 
 export interface CompileTestDefinitionOptions {
   contract: PerformanceContract;
@@ -37,36 +32,19 @@ export interface CompileTestDefinitionOptions {
 }
 
 /**
- * Computes deterministic drift checksum of a contract if not already provided.
- */
-function getContractFingerprint(contract: PerformanceContract): string {
-  // Simple deterministic digest of contract essential state
-  const digest = JSON.stringify({
-    id: contract.id,
-    version: contract.version,
-    status: contract.status,
-    throughput: contract.workloadCalculations.find((c) => c.outputParameter.includes('order'))?.outputValue,
-    criteria: contract.acceptanceCriteria.map((c) => ({ id: c.id, status: c.status, target: c.target }))
-  });
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < digest.length; i++) {
-    hash ^= digest.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-  }
-  return `fp-${(hash >>> 0).toString(16).padStart(8, '0')}`;
-}
-
-/**
  * Pure compiler: transforms governed PerformanceContract + canonical intelligence into
  * an engine-neutral Canonical Test Definition according to Constitution §10 and M3.0 laws.
  *
  * Enforces:
- * 1. Upstream Contract Gate: BLOCKED contract produces BLOCKED, non-executable Test Definition.
- * 2. Authoritative Execution-Input Law: NEVER invents execution schedules, durations, or endpoints.
+ * 1. Upstream Contract Gate: Only APPROVED contracts may yield READY_FOR_EXECUTION.
+ *    BLOCKED contract produces BLOCKED. DRAFT or READY_FOR_APPROVAL produces NOT_EXECUTABLE.
+ * 2. Authoritative Execution-Input Law: NEVER invents execution schedules, durations, endpoints,
+ *    workload targets (e.g. 8.75/s), tolerances (e.g. 5%), or preconditions.
  * 3. Workload Demand Separation: Required throughput is tracked as a prerequisite WorkloadAttainmentRequirement,
  *    strictly separated from NFR response time criteria.
- * 4. Criteria Cleanliness: Ambiguous criteria (missing percentiles) are excluded from executable criteria.
- * 5. Secret Reference Boundary: Credential references only; never embeds raw tokens.
+ * 4. Journey Step Integrity: POST/PUT/PATCH steps require explicit requestPayload.
+ * 5. Criteria Cleanliness: Ambiguous criteria (missing percentiles) are excluded from executable criteria.
+ * 6. Secret Reference Boundary: Credential references only; never embeds raw tokens.
  */
 export function compileTestDefinition(options: CompileTestDefinitionOptions): TestDefinition {
   const { contract, intelligenceItems = [], projectSummary, executionIntelligence } = options;
@@ -80,8 +58,9 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
   const issues: TestDefinitionIssue[] = [];
   const blockingReasons: string[] = [];
 
-  // 1. Contract Gate Verification
-  const contractFingerprint = getContractFingerprint(contract);
+  // 1. Authoritative Contract Fingerprint & Governance Gate
+  const contractFingerprint = computeContractFingerprint(contract);
+
   if (contract.status === 'BLOCKED') {
     issues.push({
       id: 'issue-contract-blocked',
@@ -92,6 +71,16 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
       remediationGuidance: 'Resolve upstream contract blockers and attain approved status before execution.'
     });
     blockingReasons.push('Upstream Performance Contract is in BLOCKED status.');
+  } else if (contract.status !== 'APPROVED') {
+    issues.push({
+      id: 'issue-contract-not-approved',
+      type: 'UPSTREAM_CONTRACT_NOT_APPROVED',
+      severity: 'BLOCKING',
+      parameter: 'contract.status',
+      description: `Upstream Performance Contract is in ${contract.status} status and has not been approved. Only APPROVED contracts may yield executable test definitions.`,
+      remediationGuidance: 'The Performance Contract must be approved by the Lead Performance Architect before downstream execution readiness.'
+    });
+    blockingReasons.push(`Upstream Performance Contract must be in APPROVED status for execution readiness (current status: ${contract.status}).`);
   }
 
   // 2. Workload Demand Attainment Requirement (Strictly separate from NFRs)
@@ -101,18 +90,35 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
       (c) => c.outputParameter.toLowerCase().includes('second') || c.unit.toLowerCase().includes('second')
     ) ||
     contract.workloadCalculations.find((c) => c.formulaIdentifier.includes('throughput'));
-  const targetRate = throughputCalc ? throughputCalc.outputValue : 8.75;
-  const targetUnit = throughputCalc ? throughputCalc.unit : 'orders/second';
 
-  const workloadAttainment: WorkloadAttainmentRequirement = {
-    metric: 'Target Workload Arrival Demand',
-    targetValue: targetRate,
-    unit: targetUnit,
-    evaluationType: 'WORKLOAD_DEMAND',
-    description: `Target arrival demand of ${targetRate} ${targetUnit} must be sustained across steady-state windows. Workload attainment is an authoritative prerequisite for test validity, NOT an NFR response time criterion.`,
-    tolerancePercentage: 5,
-    isPrerequisiteForEvaluation: true
-  };
+  let workloadAttainment: WorkloadAttainmentRequirement | undefined;
+  let targetRate: number | undefined;
+  let targetUnit: string | undefined;
+
+  if (throughputCalc) {
+    targetRate = throughputCalc.outputValue;
+    targetUnit = throughputCalc.unit;
+    workloadAttainment = {
+      metric: 'Target Workload Arrival Demand',
+      targetValue: targetRate,
+      unit: targetUnit,
+      evaluationType: 'WORKLOAD_DEMAND',
+      description: `Target arrival demand of ${targetRate} ${targetUnit} must be sustained across steady-state windows. Workload attainment is an authoritative prerequisite for test validity, NOT an NFR response time criterion.`,
+      tolerancePercentage: executionIntelligence?.workloadTolerancePercentage, // Optional: never defaulted
+      isPrerequisiteForEvaluation: true
+    };
+  } else {
+    // DO NOT INVENT A FALLBACK TARGET RATE OR TOLERANCE
+    issues.push({
+      id: 'issue-workload-demand-not-supplied',
+      type: 'NOT_SUPPLIED',
+      severity: 'BLOCKING',
+      parameter: 'workload_demand',
+      description: 'Workload demand attainment target (e.g. required orders/second) is NOT_SUPPLIED in contract workload calculations.',
+      remediationGuidance: 'Ensure the Performance Contract includes an approved throughput calculation.'
+    });
+    blockingReasons.push('Workload demand attainment target is NOT_SUPPLIED in contract workload calculations.');
+  }
 
   // 3. Acceptance Criteria Partitioning (Defined vs Ambiguous)
   const executableCriteria: AcceptanceCriterion[] = [];
@@ -161,7 +167,7 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
       stages: [],
       totalDurationSeconds: 0,
       peakArrivalRate: 0,
-      rateUnit: targetUnit,
+      rateUnit: targetUnit || 'arrivals/second',
       timeUnit: 'seconds'
     };
     issues.push({
@@ -197,8 +203,27 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
   let journeys: JourneyDefinition[] = [];
   if (executionIntelligence?.journeys && executionIntelligence.journeys.length > 0) {
     journeys = executionIntelligence.journeys;
+
+    // Validate request payload requirement for mutating HTTP methods
+    for (const journey of journeys) {
+      for (const step of journey.steps) {
+        if (['POST', 'PUT', 'PATCH'].includes(step.method)) {
+          if (!step.requestPayload) {
+            issues.push({
+              id: `issue-step-payload-missing-${step.id}`,
+              type: 'NOT_SUPPLIED',
+              severity: 'BLOCKING',
+              parameter: `step.requestPayload.${step.id}`,
+              description: `Request payload is NOT_SUPPLIED for HTTP ${step.method} step "${step.name}" (${step.id}) in journey "${journey.name}".`,
+              remediationGuidance: 'Supply an explicit RequestPayloadDefinition for steps that require an HTTP body.'
+            });
+            blockingReasons.push(`HTTP ${step.method} step "${step.name}" (${step.id}) requires an explicit requestPayload.`);
+          }
+        }
+      }
+    }
   } else {
-    // Map distribution from contract if present, but mark steps as NOT_SUPPLIED if steps missing
+    // Journey steps NOT supplied
     issues.push({
       id: 'issue-journeys-not-supplied',
       type: 'NOT_SUPPLIED',
@@ -210,32 +235,11 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     blockingReasons.push('Journey step definitions (HTTP methods, endpoints, think times) are NOT_SUPPLIED.');
   }
 
-  // 7. Preconditions
-  const preconditions: ExecutionPrecondition[] = executionIntelligence?.preconditions || [
-    {
-      id: 'precond-env',
-      category: 'ENVIRONMENT',
-      statement: targetEnvironmentBaseUrlRef ? `Target environment reachable at ${targetEnvironmentBaseUrlRef}` : 'Target environment provisioned and reachable',
-      isSatisfied: Boolean(targetEnvironmentBaseUrlRef),
-      verificationMethod: 'HTTP GET /health probe'
-    },
-    {
-      id: 'precond-data',
-      category: 'TEST_DATA',
-      statement: executionIntelligence?.testDataIdentifiers && executionIntelligence.testDataIdentifiers.length > 0
-        ? `Test data loaded: ${executionIntelligence.testDataIdentifiers.join(', ')}`
-        : 'Synthetic test data pools loaded in cache and database',
-      isSatisfied: Boolean(executionIntelligence?.testDataIdentifiers && executionIntelligence.testDataIdentifiers.length > 0),
-      verificationMethod: 'Database query / SKU cardinality check'
-    },
-    {
-      id: 'precond-gov',
-      category: 'GOVERNANCE',
-      statement: 'Upstream Performance Contract approved and unblocked',
-      isSatisfied: contract.status === 'APPROVED' || contract.status === 'READY_FOR_APPROVAL',
-      verificationMethod: 'Contract governance audit'
-    }
-  ];
+  // 7. Preconditions: Strictly source-driven only.
+  // Never invent fake probes or assume URL presence means readiness.
+  const preconditions: ExecutionPrecondition[] = executionIntelligence?.preconditions
+    ? [...executionIntelligence.preconditions]
+    : [];
 
   for (const precond of preconditions) {
     if (!precond.isSatisfied) {
@@ -255,9 +259,9 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     {
       key: 'target_arrival_rate',
       label: 'Target Arrival Throughput',
-      value: targetRate,
+      value: targetRate !== undefined ? targetRate : 'NOT_SUPPLIED',
       unit: targetUnit,
-      isSupplied: true
+      isSupplied: targetRate !== undefined
     },
     {
       key: 'target_environment_base_url',
@@ -291,9 +295,9 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     targetEnvironmentBaseUrlRef
   };
 
-  // 10. Status & Executability
+  // 10. Status & Executability: Contract MUST be APPROVED and have zero blocking reasons
   const isExecutable =
-    contract.status !== 'BLOCKED' &&
+    contract.status === 'APPROVED' &&
     blockingReasons.length === 0 &&
     schedule.stages.length > 0 &&
     journeys.length > 0 &&

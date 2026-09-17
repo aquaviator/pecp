@@ -320,7 +320,9 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
               <p className="text-xs text-slate-400">Target Arrival Demand</p>
               <p className="text-base font-bold text-sky-400 mt-1">
-                {testDef.workloadAttainment.targetValue} {testDef.workloadAttainment.unit}
+                {testDef.workloadAttainment
+                  ? `${testDef.workloadAttainment.targetValue} ${testDef.workloadAttainment.unit}`
+                  : 'NOT_SUPPLIED'}
               </p>
               <p className="text-[11px] text-slate-500 mt-1">Prerequisite Attainment Metric</p>
             </div>

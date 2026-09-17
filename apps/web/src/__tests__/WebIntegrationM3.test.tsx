@@ -32,7 +32,7 @@ describe('Web Integration: TestsPage (M3.0)', () => {
     expect(html).toContain('Workload Schedule');
     expect(html).toContain('Journeys &amp; Steps (5)');
     expect(html).toContain('Criteria &amp; Thresholds');
-    expect(html).toContain('Generated k6 Bundle (3)');
+    expect(html).toContain('Generated k6 Bundle (4)');
     expect(html).toContain('Runtime Architecture');
 
     // Preconditions and Target Arrival Demand

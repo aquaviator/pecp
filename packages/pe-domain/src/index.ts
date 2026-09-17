@@ -501,6 +501,15 @@ export interface CredentialReference {
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
+export type RequestPayloadType = 'JSON_LITERAL' | 'DATA_REFERENCE' | 'TEMPLATE_REFERENCE';
+
+export interface RequestPayloadDefinition {
+  type: RequestPayloadType;
+  value: Record<string, unknown> | string;
+  contentType?: string; // default 'application/json'
+  description?: string;
+}
+
 export interface JourneyStep {
   id: string;
   name: string;
@@ -509,6 +518,7 @@ export interface JourneyStep {
   expectedStatusCode?: number;
   thinkTimeSeconds?: number;
   payloadDescription?: string;
+  requestPayload?: RequestPayloadDefinition;
   headers?: Record<string, string>;
   credentialReferences?: CredentialReference[];
 }
@@ -577,6 +587,7 @@ export type TestDefinitionIssueSeverity = 'BLOCKING' | 'WARNING';
 
 export type TestDefinitionIssueType =
   | 'UPSTREAM_CONTRACT_BLOCKED'
+  | 'UPSTREAM_CONTRACT_NOT_APPROVED'
   | 'NOT_SUPPLIED'
   | 'AMBIGUOUS_CRITERIA'
   | 'UNRESOLVED_SCHEDULE'
@@ -602,8 +613,26 @@ export interface TestScenario {
   engineeringIntent: EngineeringIntent;
   workloadSchedule: WorkloadSchedule;
   journeyDistribution: JourneyDefinition[];
-  attainmentRequirement: WorkloadAttainmentRequirement;
+  attainmentRequirement?: WorkloadAttainmentRequirement;
   targetEnvironmentBaseUrlRef: string;
+}
+
+export interface K6ProviderCapacityConfig {
+  preAllocatedVUs: number;
+  maxVUs: number;
+  rateTimeUnit?: string; // e.g. '1s'
+}
+
+export interface K6ProviderDerivedCapacity {
+  policyId: string;
+  policyVersion: string;
+  ruleIdentifier: string;
+  sourcePeakArrivalRate: number;
+  preAllocatedVUs: number;
+  maxVUs: number;
+  rateTimeUnit: string;
+  formulaDescription: string;
+  isProviderDerived: boolean;
 }
 
 export interface ExecutionIntelligenceOverrides {
@@ -613,6 +642,8 @@ export interface ExecutionIntelligenceOverrides {
   testDataIdentifiers?: string[];
   preconditions?: ExecutionPrecondition[];
   credentialReferences?: CredentialReference[];
+  workloadTolerancePercentage?: number;
+  k6ProviderCapacity?: K6ProviderCapacityConfig;
 }
 
 /**
@@ -637,7 +668,7 @@ export interface TestDefinition {
   parameters: ExecutionParameter[];
   executableCriteria: AcceptanceCriterion[]; // ONLY defined, non-ambiguous criteria!
   ambiguousCriteria: AcceptanceCriterion[]; // Excluded from k6 thresholds, surfaced as issues
-  workloadAttainment: WorkloadAttainmentRequirement;
+  workloadAttainment?: WorkloadAttainmentRequirement;
   issues: TestDefinitionIssue[];
   isExecutable: boolean;
   blockingReasons: string[];
@@ -678,11 +709,13 @@ export interface K6Options {
       sourceContractVersion: string;
       sourceContractFingerprint: string;
       generatedAt: string;
-      workloadAttainment: {
+      workloadAttainment?: {
         metric: string;
         targetValue: number;
         unit: string;
+        tolerancePercentage?: number;
       };
+      providerCapacity?: K6ProviderDerivedCapacity;
       targetEnvironmentBaseUrlRef: string;
       credentialReferences: CredentialReference[];
     };
@@ -715,5 +748,52 @@ export interface K6ExecutionBundle {
     ambiguousCriteriaExcludedCount: number;
     credentialReferencesCount: number;
   };
+}
+
+/**
+ * Computes a deterministic, non-cryptographic drift checksum/fingerprint of a Performance Contract.
+ * Detects structural or value drift in calculations, criteria, readiness, or issues.
+ * Uses 32-bit FNV-1a for lightweight, environment-agnostic drift detection.
+ * NOTE: This is a deterministic drift checksum, NOT a cryptographic hash or signature.
+ */
+export function computeContractFingerprint(contract: PerformanceContract): string {
+  const digestPayload = {
+    id: contract.id,
+    version: contract.version,
+    status: contract.status,
+    intent: contract.engineeringIntent,
+    calculations: contract.workloadCalculations.map((c) => ({
+      id: c.calculationId,
+      param: c.outputParameter,
+      value: c.outputValue,
+      unit: c.unit
+    })),
+    blockedCalculations: contract.blockedWorkloadCalculations.map((bc) => ({
+      id: bc.calculationId,
+      param: bc.outputParameter,
+      reason: bc.reason
+    })),
+    criteria: contract.acceptanceCriteria.map((ac) => ({
+      id: ac.id,
+      metric: ac.metric,
+      target: ac.target,
+      status: ac.status,
+      percentile: ac.percentile
+    })),
+    issues: contract.unresolvedIssues.map((issue) => ({
+      id: issue.id,
+      type: issue.type,
+      severity: issue.severity
+    })),
+    canApprove: contract.approvalReadiness.canApprove
+  };
+
+  const str = JSON.stringify(digestPayload);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return `fp-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 

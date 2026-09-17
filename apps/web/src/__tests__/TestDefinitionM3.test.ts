@@ -97,10 +97,10 @@ describe('PECP Canonical Test Definition Engine (M3.0)', () => {
       });
 
       expect(testDef.workloadAttainment).toBeDefined();
-      expect(testDef.workloadAttainment.evaluationType).toBe('WORKLOAD_DEMAND');
-      expect(testDef.workloadAttainment.targetValue).toBe(8.75);
-      expect(testDef.workloadAttainment.unit).toBe('orders/second');
-      expect(testDef.workloadAttainment.isPrerequisiteForEvaluation).toBe(true);
+      expect(testDef.workloadAttainment?.evaluationType).toBe('WORKLOAD_DEMAND');
+      expect(testDef.workloadAttainment?.targetValue).toBe(8.75);
+      expect(testDef.workloadAttainment?.unit).toBe('orders/second');
+      expect(testDef.workloadAttainment?.isPrerequisiteForEvaluation).toBe(true);
 
       // Workload demand must NOT appear in executable acceptance criteria
       const hasThroughputInCriteria = testDef.executableCriteria.some((c) =>

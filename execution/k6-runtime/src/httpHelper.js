@@ -4,16 +4,17 @@ import { check, sleep } from 'k6';
 
 /**
  * Executes a standardized HTTP step with timing, metric tagging, and checks.
+ * Does NOT invent defaults: expectedStatus and thinkTimeSeconds are explicit.
  */
 export function executeStep(stepConfig) {
   const {
-    method,
+    method = 'GET',
     url,
     body,
     headers = {},
     tags = {},
-    expectedStatus = 200,
-    thinkTime = 1
+    expectedStatus,
+    thinkTimeSeconds = 0
   } = stepConfig;
 
   const params = {
@@ -31,17 +32,24 @@ export function executeStep(stepConfig) {
     res = http.put(url, typeof body === 'string' ? body : JSON.stringify(body || {}), params);
   } else if (verb === 'DELETE') {
     res = http.del(url, params);
+  } else if (verb === 'PATCH') {
+    res = http.patch(url, typeof body === 'string' ? body : JSON.stringify(body || {}), params);
   } else {
     res = http.get(url, params);
   }
 
-  check(res, {
-    [`${tags.name || 'Step'} status is ${expectedStatus}`]: (r) => r.status === expectedStatus
-  });
+  // Check expected status ONLY if explicitly defined
+  if (expectedStatus !== undefined && expectedStatus !== null) {
+    check(res, {
+      [`${tags.name || 'Step'} status is ${expectedStatus}`]: (r) => r.status === expectedStatus
+    });
+  }
 
-  if (thinkTime > 0) {
-    sleep(thinkTime);
+  // Sleep ONLY if explicitly provided and greater than zero
+  if (typeof thinkTimeSeconds === 'number' && thinkTimeSeconds > 0) {
+    sleep(thinkTimeSeconds);
   }
 
   return res;
 }
+

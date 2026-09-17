@@ -91,7 +91,13 @@ export const RETAILCO_M3_JOURNEYS: JourneyDefinition[] = [
         method: 'POST',
         path: '/api/v1/basket/items',
         expectedStatusCode: 200,
-        thinkTimeSeconds: 2
+        thinkTimeSeconds: 2,
+        requestPayload: {
+          type: 'JSON_LITERAL',
+          contentType: 'application/json',
+          value: { sku: 'SKU-ELECTRONICS-9921', quantity: 1 },
+          description: 'Canonical basket add request payload'
+        }
       }
     ]
   },
@@ -109,6 +115,16 @@ export const RETAILCO_M3_JOURNEYS: JourneyDefinition[] = [
         path: '/api/v1/orders/checkout',
         expectedStatusCode: 201,
         thinkTimeSeconds: 4,
+        requestPayload: {
+          type: 'JSON_LITERAL',
+          contentType: 'application/json',
+          value: {
+            basketId: 'basket-active-ref',
+            paymentMethod: 'SYNTHETIC_CARD_TEST',
+            shippingAddressId: 'addr-ref-primary'
+          },
+          description: 'Canonical order checkout submission payload'
+        },
         credentialReferences: [
           {
             provider: 'ENV_VAR',
