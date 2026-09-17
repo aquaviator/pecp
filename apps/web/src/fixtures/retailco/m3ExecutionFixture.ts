@@ -3,39 +3,68 @@ import {
   IntelligenceItem,
   JourneyDefinition,
   WorkloadSchedule,
+  WorkloadPopulationRelationship,
   ExecutionIntelligenceOverrides
 } from '@pecp/pe-domain';
 import { RETAILCO_PROJECT_FIXTURE } from './projectFixture.js';
 import { RETAILCO_INTELLIGENCE_ITEMS_FIXTURE } from './intelligenceFixture.js';
 
 /**
+ * Governed Lineage: Workload Population Relationship for RetailCo Reference Lab (M3.0.3).
+ * Explicitly connects business attainment target (8.75 orders/s) to the k6 scheduler
+ * arrival rate (109.375 mixed journey iterations/s) via the checkout journey share (0.08).
+ */
+export const RETAILCO_M3_POPULATION_RELATIONSHIP: WorkloadPopulationRelationship = {
+  id: 'rel-retailco-bf26-orders-to-iterations',
+  formulaIdentifier: 'TARGET_DIVIDED_BY_JOURNEY_SHARE',
+  inputBusinessTarget: {
+    value: 8.75,
+    unit: 'orders/second',
+    sourceCalculationId: 'calc-throughput-second'
+  },
+  relevantJourneyKey: 'checkout',
+  journeyShare: 0.08,
+  contributionPerSuccessfulEvent: 1,
+  outputSchedulerRate: {
+    value: 109.375,
+    population: 'JOURNEY_ITERATION',
+    unit: 'journey_iterations/second'
+  },
+  description:
+    'Lineage derivation: 8.75 orders/second business workload demand / 0.08 checkout journey share = 109.375 mixed journey iterations/second (each successful checkout submission yields 1 order)',
+  sourceIntelligenceIds: ['intel-peak-orders']
+};
+
+/**
  * M3 Execution-Ready RetailCo Workload Schedule.
- * Explicitly provides canonical stage durations and target arrival rates (Constitution §10).
- * Open arrival model targeting 8.75 orders/second (31,500/hr).
+ * Explicitly provides canonical stage durations and target arrival rates (Constitution §10, M3.0.3).
+ * Open arrival model driving 109.375 journey iterations/second to attain 8.75 orders/second.
  */
 export const RETAILCO_M3_WORKLOAD_SCHEDULE: WorkloadSchedule = {
   id: 'sched-retailco-bf26-forecast-v1',
   executionModel: 'OPEN',
+  arrivalPopulation: 'JOURNEY_ITERATION',
+  populationRelationship: RETAILCO_M3_POPULATION_RELATIONSHIP,
   totalDurationSeconds: 1320, // 22 minutes total
-  peakArrivalRate: 8.75,
-  rateUnit: 'orders/second',
+  peakArrivalRate: 109.375,
+  rateUnit: 'journey_iterations/second',
   timeUnit: 'seconds',
   startRate: 0,
   stages: [
     {
       durationSeconds: 300,
-      targetArrivalRate: 8.75,
-      description: 'Ramp-up stage: 5 minutes linear ramp from 0 to peak commercial demand (8.75 req/s)'
+      targetArrivalRate: 109.375,
+      description: 'Ramp-up stage: 5 minutes linear ramp from 0 to peak scheduler arrival rate (109.375 journey_iterations/s)'
     },
     {
       durationSeconds: 900,
-      targetArrivalRate: 8.75,
-      description: 'Steady-state peak stage: 15 minutes at sustained peak demand (8.75 req/s)'
+      targetArrivalRate: 109.375,
+      description: 'Steady-state peak stage: 15 minutes at sustained peak scheduler arrival rate (109.375 journey_iterations/s)'
     },
     {
       durationSeconds: 120,
       targetArrivalRate: 0,
-      description: 'Ramp-down stage: 2 minutes cooldown to 0 req/s'
+      description: 'Ramp-down stage: 2 minutes cooldown to 0 journey_iterations/s'
     }
   ]
 };
@@ -132,7 +161,15 @@ export const RETAILCO_M3_JOURNEYS: JourneyDefinition[] = [
             referenceId: 'RETAILCO_CHECKOUT_AUTH_TOKEN',
             purpose: 'Checkout API Authorization'
           }
-        ]
+        ],
+        businessEventContribution: {
+          eventKey: 'order_created',
+          metric: 'orders',
+          unit: 'orders',
+          contribution: 1,
+          expectedStatus: 201,
+          description: '1 order attained per successful checkout submission'
+        }
       }
     ]
   },
@@ -161,6 +198,7 @@ export const RETAILCO_M3_JOURNEYS: JourneyDefinition[] = [
 export const RETAILCO_M3_EXECUTION_INTELLIGENCE: ExecutionIntelligenceOverrides = {
   schedule: RETAILCO_M3_WORKLOAD_SCHEDULE,
   journeys: RETAILCO_M3_JOURNEYS,
+  populationRelationship: RETAILCO_M3_POPULATION_RELATIONSHIP,
   targetEnvironmentBaseUrlRef: 'http://reference-lab.retailco.internal:8080',
   testDataIdentifiers: [
     'customer_account_pool_100k',

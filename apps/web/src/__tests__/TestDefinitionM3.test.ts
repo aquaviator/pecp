@@ -148,10 +148,14 @@ describe('PECP Canonical Test Definition Engine (M3.0)', () => {
       expect(testDef.isExecutable).toBe(true);
       expect(testDef.blockingReasons.length).toBe(0);
 
-      // Schedule verified
+      // Schedule verified: 109.375 journey_iterations/s scheduler peak attaining 8.75 orders/s
       expect(testDef.scenarios[0].workloadSchedule.stages.length).toBe(3);
       expect(testDef.scenarios[0].workloadSchedule.totalDurationSeconds).toBe(1320);
-      expect(testDef.scenarios[0].workloadSchedule.peakArrivalRate).toBe(8.75);
+      expect(testDef.scenarios[0].workloadSchedule.peakArrivalRate).toBe(109.375);
+      expect(testDef.scenarios[0].workloadSchedule.arrivalPopulation).toBe('JOURNEY_ITERATION');
+      expect(testDef.workloadAttainment?.targetValue).toBe(8.75);
+      expect(testDef.workloadAttainment?.unit).toBe('orders/second');
+      expect(testDef.populationRelationship?.outputSchedulerRate.value).toBe(109.375);
 
       // All 5 canonical journeys verified
       expect(testDef.journeys.length).toBe(5);

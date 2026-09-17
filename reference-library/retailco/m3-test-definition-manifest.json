@@ -42,15 +42,33 @@
       "evaluationType": "WORKLOAD_DEMAND",
       "isPrerequisiteForEvaluation": true
     },
+    "populationRelationship": {
+      "id": "rel-retailco-bf26-orders-to-iterations",
+      "formulaIdentifier": "TARGET_DIVIDED_BY_JOURNEY_SHARE",
+      "inputBusinessTarget": {
+        "value": 8.75,
+        "unit": "orders/second"
+      },
+      "relevantJourneyKey": "checkout",
+      "journeyShare": 0.08,
+      "contributionPerSuccessfulEvent": 1,
+      "outputSchedulerRate": {
+        "value": 109.375,
+        "population": "JOURNEY_ITERATION",
+        "unit": "journey_iterations/second"
+      },
+      "description": "Lineage derivation: 8.75 orders/second business workload demand / 0.08 checkout journey share = 109.375 mixed journey iterations/second"
+    },
     "schedule": {
       "executionModel": "OPEN",
+      "arrivalPopulation": "JOURNEY_ITERATION",
       "totalDurationSeconds": 1320,
-      "peakArrivalRate": 8.75,
-      "rateUnit": "orders/second",
+      "peakArrivalRate": 109.375,
+      "rateUnit": "journey_iterations/second",
       "stagesCount": 3,
       "stages": [
-        { "durationSeconds": 300, "targetArrivalRate": 8.75, "description": "Ramp-up (5m)" },
-        { "durationSeconds": 900, "targetArrivalRate": 8.75, "description": "Steady-state peak (15m)" },
+        { "durationSeconds": 300, "targetArrivalRate": 109.375, "description": "Ramp-up (5m)" },
+        { "durationSeconds": 900, "targetArrivalRate": 109.375, "description": "Steady-state peak (15m)" },
         { "durationSeconds": 120, "targetArrivalRate": 0, "description": "Ramp-down (2m)" }
       ]
     },

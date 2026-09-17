@@ -304,7 +304,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
       {/* Tab 1: Overview & Preconditions */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
               <p className="text-xs text-slate-400">Engineering Intent</p>
               <p className="text-base font-bold text-white mt-1">{testDef.engineeringIntent}</p>
@@ -318,13 +318,22 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
               <p className="text-[11px] text-slate-500 mt-1">Arrival-Rate Driven</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-              <p className="text-xs text-slate-400">Target Arrival Demand</p>
+              <p className="text-xs text-slate-400">Scheduled Arrival Rate</p>
               <p className="text-base font-bold text-sky-400 mt-1">
+                {testDef.scenarios[0]?.workloadSchedule.peakArrivalRate}
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {testDef.scenarios[0]?.workloadSchedule.rateUnit || 'journey_iterations/second'}
+              </p>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <p className="text-xs text-slate-400">Business Attainment Target</p>
+              <p className="text-base font-bold text-amber-400 mt-1">
                 {testDef.workloadAttainment
                   ? `${testDef.workloadAttainment.targetValue} ${testDef.workloadAttainment.unit}`
                   : 'NOT_SUPPLIED'}
               </p>
-              <p className="text-[11px] text-slate-500 mt-1">Prerequisite Attainment Metric</p>
+              <p className="text-[11px] text-slate-500 mt-1">Required Business Outcome</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
               <p className="text-xs text-slate-400">Total Duration</p>
@@ -336,6 +345,44 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
               <p className="text-[11px] text-slate-500 mt-1">Ramp + Steady + Cooldown</p>
             </div>
           </div>
+
+          {/* M3.0.3 Population Relationship Lineage Card */}
+          {testDef.populationRelationship && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  Governed Population Relationship & Attainment Lineage (M3.0.3)
+                </h3>
+                <span className="text-xs text-emerald-400 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60">
+                  {testDef.populationRelationship.formulaIdentifier}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs bg-slate-950 border border-slate-800 rounded-lg p-3.5">
+                <div>
+                  <span className="text-slate-400 block">Input Business Demand:</span>
+                  <span className="text-amber-400 font-mono font-bold text-sm">
+                    {testDef.populationRelationship.inputBusinessTarget.value} {testDef.populationRelationship.inputBusinessTarget.unit}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Governed Journey Contribution:</span>
+                  <span className="text-slate-200 font-mono">
+                    {testDef.populationRelationship.relevantJourneyKey} ({(testDef.populationRelationship.journeyShare * 100).toFixed(0)}% share, {testDef.populationRelationship.contributionPerSuccessfulEvent} order/completion)
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Output Scheduler Arrival Rate:</span>
+                  <span className="text-sky-400 font-mono font-bold text-sm">
+                    {testDef.populationRelationship.outputSchedulerRate.value} {testDef.populationRelationship.outputSchedulerRate.unit}
+                  </span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Lineage: {testDef.populationRelationship.description}. Business outcome attainment is observed via the distinct runtime counter signal <code className="text-emerald-400">businessAttainmentEvents</code> on successful checkout submit steps, strictly separated from k6 iteration schedule demand.
+              </p>
+            </div>
+          )}
 
           {/* Preconditions Card */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
@@ -429,9 +476,12 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                 </p>
               </div>
               <div className="text-right">
-                <span className="text-xs text-slate-400">Peak Demand:</span>
+                <span className="text-xs text-slate-400">Peak Scheduler Rate:</span>
                 <span className="text-sm font-bold text-sky-400 ml-2">
-                  {testDef.scenarios[0]?.workloadSchedule.peakArrivalRate} req/s
+                  {testDef.scenarios[0]?.workloadSchedule.peakArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit || 'journey_iterations/second'}
+                </span>
+                <span className="block text-[11px] text-slate-500">
+                  Population: {testDef.scenarios[0]?.workloadSchedule.arrivalPopulation || 'JOURNEY_ITERATION'}
                 </span>
               </div>
             </div>
@@ -443,7 +493,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                     <tr>
                       <th className="p-3">Stage #</th>
                       <th className="p-3">Duration</th>
-                      <th className="p-3">Target Arrival Rate</th>
+                      <th className="p-3">Target Scheduler Rate</th>
                       <th className="p-3">Description</th>
                     </tr>
                   </thead>
@@ -455,7 +505,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                           {Math.round(stage.durationSeconds / 60)} min ({stage.durationSeconds}s)
                         </td>
                         <td className="p-3 font-mono font-bold text-sky-400">
-                          {stage.targetArrivalRate} req/s
+                          {stage.targetArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit || 'journey_iterations/s'}
                         </td>
                         <td className="p-3 text-slate-400">{stage.description || 'Execution stage'}</td>
                       </tr>

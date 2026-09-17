@@ -224,17 +224,60 @@ export function compileK6Bundle(options: CompileK6BundleOptions): K6ExecutionBun
 
   // Provider Threshold Mapping Check (M3.0.2 Requirement 4)
   const thresholdMapping = buildK6Thresholds(testDefinition.executableCriteria);
-  const providerMappingFailed = thresholdMapping.unmappedReasons.length > 0;
+  
+  // Provider Population and Rate Unit Compatibility Check (M3.0.3 Requirement 7)
+  const providerIssues: TestDefinitionIssue[] = [];
+  const providerNonExecutableReasons: string[] = [];
+  const scheduleToCheck = testDefinition.scenarios[0]?.workloadSchedule;
+  const isMixedJourneys =
+    testDefinition.journeys.length > 1 ||
+    (testDefinition.journeys.length === 1 && testDefinition.journeys[0].weight < 0.999);
 
-  // If TestDefinition is non-executable OR provider threshold mapping fails, generate a safe blocked bundle
+  if (scheduleToCheck) {
+    const rateUnitLower = (scheduleToCheck.rateUnit || '').toLowerCase();
+    const attainmentUnit = (testDefinition.workloadAttainment?.unit || '').toLowerCase();
+
+    if (isMixedJourneys && (rateUnitLower.includes('order') || (attainmentUnit && rateUnitLower === attainmentUnit))) {
+      const reason = `k6 ramping-arrival-rate executor expects scheduler arrival rate (e.g. "journey_iterations/second"), but schedule specifies business outcome unit "${scheduleToCheck.rateUnit}".`;
+      providerIssues.push({
+        id: 'issue-provider-incompatible-rate-unit',
+        type: 'PROVIDER_INCOMPATIBLE_RATE_UNIT',
+        severity: 'BLOCKING',
+        parameter: 'schedule.rateUnit',
+        description: reason,
+        remediationGuidance: 'Configure schedule arrival population and scheduler rate unit instead of business outcome unit.'
+      });
+      providerNonExecutableReasons.push(reason);
+    }
+
+    const validPopulations = ['JOURNEY_ITERATION', 'SESSION', 'TRANSACTION', 'ITERATION'];
+    if (scheduleToCheck.arrivalPopulation && !validPopulations.includes(scheduleToCheck.arrivalPopulation)) {
+      const reason = `k6 provider does not support arrival population "${scheduleToCheck.arrivalPopulation}". Supported populations: ${validPopulations.join(', ')}.`;
+      providerIssues.push({
+        id: 'issue-provider-unsupported-population',
+        type: 'PROVIDER_INCOMPATIBLE_RATE_UNIT',
+        severity: 'BLOCKING',
+        parameter: 'schedule.arrivalPopulation',
+        description: reason,
+        remediationGuidance: `Set schedule arrivalPopulation to one of: ${validPopulations.join(', ')}.`
+      });
+      providerNonExecutableReasons.push(reason);
+    }
+  }
+
+  const providerMappingFailed = thresholdMapping.unmappedReasons.length > 0 || providerNonExecutableReasons.length > 0;
+
+  // If TestDefinition is non-executable OR provider mapping fails, generate a safe blocked bundle
   if (!testDefinition.isExecutable || providerMappingFailed) {
     const combinedBlockingReasons = [
       ...testDefinition.blockingReasons,
-      ...thresholdMapping.unmappedReasons
+      ...thresholdMapping.unmappedReasons,
+      ...providerNonExecutableReasons
     ];
     const combinedIssues = [
       ...testDefinition.issues,
-      ...thresholdMapping.issues
+      ...thresholdMapping.issues,
+      ...providerIssues
     ];
 
     const blockedOptions: K6Options = {
@@ -251,6 +294,14 @@ export function compileK6Bundle(options: CompileK6BundleOptions): K6ExecutionBun
           generatedAt,
           runtimeVersion: PECP_STABLE_K6_RUNTIME_VERSION,
           runtimeSourceId: PECP_STABLE_K6_RUNTIME_SOURCE_ID,
+          schedulerArrival: scheduleToCheck
+            ? {
+                population: scheduleToCheck.arrivalPopulation || 'JOURNEY_ITERATION',
+                peakRate: scheduleToCheck.peakArrivalRate,
+                unit: scheduleToCheck.rateUnit
+              }
+            : undefined,
+          populationRelationship: testDefinition.populationRelationship,
           workloadAttainment: testDefinition.workloadAttainment
             ? {
                 metric: testDefinition.workloadAttainment.metric,
@@ -376,7 +427,7 @@ ${combinedIssues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: ${iss.de
     preAllocatedVUs,
     maxVUs,
     stages: schedule.stages.map((st) => ({
-      target: Math.round(st.targetArrivalRate * 100) / 100,
+      target: Math.round(st.targetArrivalRate * 1000) / 1000,
       duration: `${st.durationSeconds}s`
     })),
     exec: 'default'
@@ -401,6 +452,12 @@ ${combinedIssues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: ${iss.de
         generatedAt,
         runtimeVersion: PECP_STABLE_K6_RUNTIME_VERSION,
         runtimeSourceId: PECP_STABLE_K6_RUNTIME_SOURCE_ID,
+        schedulerArrival: {
+          population: schedule.arrivalPopulation || 'JOURNEY_ITERATION',
+          peakRate: schedule.peakArrivalRate,
+          unit: schedule.rateUnit
+        },
+        populationRelationship: testDefinition.populationRelationship,
         workloadAttainment: testDefinition.workloadAttainment
           ? {
               metric: testDefinition.workloadAttainment.metric,
@@ -434,12 +491,15 @@ ${combinedIssues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: ${iss.de
           const bodyProp = step.requestPayload
             ? `    body: ${JSON.stringify(step.requestPayload.value)},\n`
             : '';
+          const businessEventProp = step.businessEventContribution
+            ? `    businessEvent: ${JSON.stringify(step.businessEventContribution)},\n`
+            : '';
 
           return `  // Step: ${step.name}
 ${authHeader}  executeStep({
     method: '${method}',
     url: \`\${baseUrl}${step.path}\`,
-${bodyProp}${expectedStatusProp}    thinkTimeSeconds: ${thinkTime},
+${bodyProp}${expectedStatusProp}${businessEventProp}    thinkTimeSeconds: ${thinkTime},
     headers,
     tags: { journey: '${journey.key}', step: '${step.id}', name: '${step.name}' }
   });`;
@@ -494,13 +554,14 @@ ${journeyRunnerMapEntries}
 // Architecture: Thin orchestration delegating to PECP Stable k6 Runtime
 // ============================================================================
 import { executeIteration, workloadArrivalDemand, workloadAttainmentRate } from './runtime.js';
+import { businessAttainmentEvents } from './runtime.js';
 import { JOURNEY_WEIGHTS, JOURNEY_RUNNER_MAP } from './journeys.js';
 
 // Load generated options and thresholds
 export const options = JSON.parse(open('./config.json'));
 
 // Re-export metrics for k6 engine discovery
-export { workloadArrivalDemand, workloadAttainmentRate };
+export { workloadArrivalDemand, workloadAttainmentRate, businessAttainmentEvents };
 
 const BASE_URL = __ENV['TARGET_BASE_URL'] || '${scenario.targetEnvironmentBaseUrlRef}';
 

@@ -378,6 +378,120 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     blockingReasons.push('Journey step definitions (HTTP methods, endpoints, think times) are NOT_SUPPLIED.');
   }
 
+  // 6b. Workload Population & Attainment Relationship Semantics (M3.0.3)
+  // PECP distinguishes the rate of iterations/sessions started by the executor
+  // from the rate of business outcomes that must be attained.
+  const populationRelationship =
+    executionIntelligence?.populationRelationship || schedule.populationRelationship;
+
+  if (populationRelationship) {
+    schedule.populationRelationship = populationRelationship;
+  }
+  if (!schedule.arrivalPopulation) {
+    schedule.arrivalPopulation = populationRelationship?.outputSchedulerRate?.population || 'JOURNEY_ITERATION';
+  }
+
+  const isMixedJourneys = journeys.length > 1 || (journeys.length === 1 && journeys[0].weight < 0.999);
+
+  if (isMixedJourneys && workloadAttainment) {
+    // 1. A mixed-journey schedule cannot use business outcome rate units (e.g. 'orders/second') directly
+    const unitLower = (schedule.rateUnit || '').toLowerCase();
+    const attainmentUnitLower = (workloadAttainment.unit || '').toLowerCase();
+    if (unitLower.includes('order') || (attainmentUnitLower && unitLower === attainmentUnitLower)) {
+      issues.push({
+        id: 'issue-invalid-population-rate-unit',
+        type: 'BUSINESS_WORKLOAD_UNIT_ON_MIXED_SCHEDULE',
+        severity: 'BLOCKING',
+        parameter: 'schedule.rateUnit',
+        description: `Mixed-journey workload schedule specifies business outcome rate unit "${schedule.rateUnit}". Scheduler arrival rate must express executor population (e.g. "journey_iterations/second") rather than business outcome units.`,
+        remediationGuidance: 'Specify a scheduler arrival population (e.g. JOURNEY_ITERATION) and arrival rate unit, and provide an explicit population relationship.'
+      });
+      blockingReasons.push(`Mixed-journey schedule cannot use business outcome unit "${schedule.rateUnit}" directly as executor arrival rate (BUSINESS_WORKLOAD_UNIT_ON_MIXED_SCHEDULE).`);
+    }
+
+    // 2. A mixed-journey Test Definition cannot use the business target rate directly as its scheduler arrival rate without an explicit relationship
+    if (!populationRelationship) {
+      issues.push({
+        id: 'issue-missing-population-relationship',
+        type: 'POPULATION_RELATIONSHIP_MISSING',
+        severity: 'BLOCKING',
+        parameter: 'populationRelationship',
+        description: `Mixed-journey Test Definition requires an explicit governed population relationship (POPULATION_RELATIONSHIP_MISSING) establishing the lineage between business attainment demand (${workloadAttainment.targetValue} ${workloadAttainment.unit}) and mixed-journey scheduler arrival rate (${schedule.peakArrivalRate} ${schedule.rateUnit || 'journey_iterations/second'}).`,
+        remediationGuidance: 'Define an explicit WorkloadPopulationRelationship establishing the lineage between business attainment demand and mixed-journey scheduler arrival rate.'
+      });
+      blockingReasons.push(`Mixed-journey Test Definition requires an explicit population relationship for business attainment target ${workloadAttainment.targetValue} ${workloadAttainment.unit} (POPULATION_RELATIONSHIP_MISSING).`);
+    }
+
+    // 3. If a population relationship is supplied, validate its consistency and lineage
+    if (populationRelationship) {
+      if (Math.abs(populationRelationship.inputBusinessTarget.value - workloadAttainment.targetValue) > 0.001) {
+        issues.push({
+          id: 'issue-population-rel-target-mismatch',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'inputBusinessTarget.value',
+          description: `Population relationship business target (${populationRelationship.inputBusinessTarget.value}) does not match upstream contract workload attainment target (${workloadAttainment.targetValue}).`,
+          remediationGuidance: 'Ensure inputBusinessTarget matches the approved workload attainment demand.'
+        });
+        blockingReasons.push(`Population relationship business target (${populationRelationship.inputBusinessTarget.value}) does not match contract target (${workloadAttainment.targetValue}).`);
+      }
+
+      const targetJourney = journeys.find((j) => j.key === populationRelationship.relevantJourneyKey);
+      if (!targetJourney) {
+        issues.push({
+          id: 'issue-population-rel-journey-not-found',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'relevantJourneyKey',
+          description: `Population relationship targets journey "${populationRelationship.relevantJourneyKey}" which is not defined in journey distribution.`,
+          remediationGuidance: 'Ensure relevantJourneyKey references a valid canonical journey key.'
+        });
+        blockingReasons.push(`Population relationship references missing journey "${populationRelationship.relevantJourneyKey}".`);
+      } else {
+        if (Math.abs(targetJourney.weight - populationRelationship.journeyShare) > 0.001) {
+          issues.push({
+            id: 'issue-population-rel-share-mismatch',
+            type: 'POPULATION_RELATIONSHIP_MISMATCH',
+            severity: 'BLOCKING',
+            parameter: 'journeyShare',
+            description: `Population relationship journeyShare (${populationRelationship.journeyShare}) does not match journey "${targetJourney.name}" weight (${targetJourney.weight}).`,
+            remediationGuidance: 'Ensure journeyShare matches the canonical journey weight.'
+          });
+          blockingReasons.push(`Population relationship journey share (${populationRelationship.journeyShare}) does not match journey weight (${targetJourney.weight}).`);
+        }
+
+        // Check math: targetValue / (journeyShare * contribution)
+        const contribution = populationRelationship.contributionPerSuccessfulEvent || 1;
+        const expectedSchedulerRate =
+          populationRelationship.inputBusinessTarget.value / (populationRelationship.journeyShare * contribution);
+        if (Math.abs(populationRelationship.outputSchedulerRate.value - expectedSchedulerRate) > 0.01) {
+          issues.push({
+            id: 'issue-population-rel-math-mismatch',
+            type: 'POPULATION_RELATIONSHIP_MISMATCH',
+            severity: 'BLOCKING',
+            parameter: 'outputSchedulerRate.value',
+            description: `Derived scheduler rate (${populationRelationship.outputSchedulerRate.value}) does not match formula target / (share * contribution) (expected ~${expectedSchedulerRate.toFixed(3)}).`,
+            remediationGuidance: 'Ensure outputSchedulerRate is accurately computed from inputBusinessTarget / (journeyShare * contribution).'
+          });
+          blockingReasons.push(`Derived scheduler rate (${populationRelationship.outputSchedulerRate.value}) does not match formula derivation (expected ~${expectedSchedulerRate.toFixed(3)}).`);
+        }
+
+        // Validate schedule.peakArrivalRate matches outputSchedulerRate
+        if (Math.abs(schedule.peakArrivalRate - populationRelationship.outputSchedulerRate.value) > 0.01) {
+          issues.push({
+            id: 'issue-schedule-rel-peak-rate-mismatch',
+            type: 'POPULATION_RELATIONSHIP_MISMATCH',
+            severity: 'BLOCKING',
+            parameter: 'schedule.peakArrivalRate',
+            description: `Schedule peakArrivalRate (${schedule.peakArrivalRate}) does not match derived population relationship scheduler rate (${populationRelationship.outputSchedulerRate.value}).`,
+            remediationGuidance: 'Align schedule peakArrivalRate and stage targets with the derived scheduler arrival rate.'
+          });
+          blockingReasons.push(`Schedule peakArrivalRate (${schedule.peakArrivalRate}) does not match population relationship rate (${populationRelationship.outputSchedulerRate.value}).`);
+        }
+      }
+    }
+  }
+
   // 7. Preconditions: Strictly source-driven only.
   // When an execution precondition is supplied and marked/treated as mandatory,
   // if isSatisfied is false, TestDefinition MUST be non-executable (Constitution §10, M3.0.2).
@@ -442,6 +556,7 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     workloadSchedule: schedule,
     journeyDistribution: journeys,
     attainmentRequirement: workloadAttainment,
+    populationRelationship,
     targetEnvironmentBaseUrlRef
   };
 
@@ -482,6 +597,7 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     executableCriteria,
     ambiguousCriteria,
     workloadAttainment,
+    populationRelationship,
     issues,
     isExecutable,
     blockingReasons,

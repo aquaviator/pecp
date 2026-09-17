@@ -189,13 +189,13 @@ describe('M3.0.1 Execution Governance Gate (10 Mandatory Corrections)', () => {
       expect(pecpExt?.providerCapacity?.policyId).toBe(K6_STANDARD_PROVIDER_POLICY.policyId);
       expect(pecpExt?.providerCapacity?.ruleIdentifier).toBe(K6_STANDARD_PROVIDER_POLICY.ruleIdentifier);
 
-      // peakArrivalRate is 8.75: preAllocatedVUs = max(10, ceil(8.75*2.5)) = 22, maxVUs = max(50, ceil(8.75*10)) = 88
-      expect(pecpExt?.providerCapacity?.preAllocatedVUs).toBe(22);
-      expect(pecpExt?.providerCapacity?.maxVUs).toBe(88);
+      // peakArrivalRate is 109.375 (M3.0.3): preAllocatedVUs = max(10, ceil(109.375*2.5)) = 274, maxVUs = max(50, ceil(109.375*10)) = 1094
+      expect(pecpExt?.providerCapacity?.preAllocatedVUs).toBe(274);
+      expect(pecpExt?.providerCapacity?.maxVUs).toBe(1094);
 
       const scenario = bundle.options.scenarios[Object.keys(bundle.options.scenarios)[0]];
-      expect(scenario.preAllocatedVUs).toBe(22);
-      expect(scenario.maxVUs).toBe(88);
+      expect(scenario.preAllocatedVUs).toBe(274);
+      expect(scenario.maxVUs).toBe(1094);
     });
 
     it('honors explicit provider capacity configuration when supplied', () => {

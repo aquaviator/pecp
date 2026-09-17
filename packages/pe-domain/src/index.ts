@@ -521,6 +521,42 @@ export interface JourneyStep {
   requestPayload?: RequestPayloadDefinition;
   headers?: Record<string, string>;
   credentialReferences?: CredentialReference[];
+  businessEventContribution?: BusinessEventContribution;
+}
+
+export interface BusinessEventContribution {
+  eventKey: string; // e.g. 'order_created'
+  metric: string; // e.g. 'orders'
+  unit: string; // e.g. 'orders'
+  contribution: number; // e.g. 1
+  expectedStatus: number; // e.g. 201
+  description?: string;
+}
+
+export type SchedulerArrivalPopulation =
+  | 'JOURNEY_ITERATION'
+  | 'SESSION'
+  | 'TRANSACTION'
+  | 'ITERATION';
+
+export interface WorkloadPopulationRelationship {
+  id: string;
+  formulaIdentifier: string; // e.g. 'TARGET_DIVIDED_BY_JOURNEY_SHARE'
+  inputBusinessTarget: {
+    value: number; // e.g. 8.75
+    unit: string; // e.g. 'orders/second'
+    sourceCalculationId?: string;
+  };
+  relevantJourneyKey: string; // e.g. 'checkout'
+  journeyShare: number; // e.g. 0.08 (8%)
+  contributionPerSuccessfulEvent: number; // e.g. 1
+  outputSchedulerRate: {
+    value: number; // e.g. 109.375
+    population: SchedulerArrivalPopulation; // 'JOURNEY_ITERATION'
+    unit: string; // 'journey_iterations/second'
+  };
+  description: string;
+  sourceIntelligenceIds?: string[];
 }
 
 export interface JourneyDefinition {
@@ -543,10 +579,12 @@ export interface ScheduleStage {
 export interface WorkloadSchedule {
   id: string;
   executionModel: ExecutionModel;
+  arrivalPopulation?: SchedulerArrivalPopulation;
+  populationRelationship?: WorkloadPopulationRelationship;
   stages: ScheduleStage[];
   totalDurationSeconds: number;
   peakArrivalRate: number;
-  rateUnit: string; // e.g. 'arrivals/second', 'orders/second'
+  rateUnit: string; // e.g. 'journey_iterations/second', 'orders/second'
   timeUnit: 'seconds' | 'minutes';
   startRate?: number; // Explicit initial arrival rate (e.g. 0 for ramp-up from zero)
   sourceIntelligenceIds?: string[];
@@ -599,7 +637,13 @@ export type TestDefinitionIssueType =
   | 'UNAPPROVED_VALUE'
   | 'UNSATISFIED_PRECONDITION'
   | 'INVALID_EXECUTION_STRUCTURE'
-  | 'PROVIDER_UNSUPPORTED_CRITERION';
+  | 'INVALID_POPULATION_SEMANTICS'
+  | 'MISSING_POPULATION_RELATIONSHIP'
+  | 'BUSINESS_WORKLOAD_UNIT_ON_MIXED_SCHEDULE'
+  | 'POPULATION_RELATIONSHIP_MISSING'
+  | 'POPULATION_RELATIONSHIP_MISMATCH'
+  | 'PROVIDER_UNSUPPORTED_CRITERION'
+  | 'PROVIDER_INCOMPATIBLE_RATE_UNIT';
 
 export interface TestDefinitionIssue {
   id: string;
@@ -618,6 +662,7 @@ export interface TestScenario {
   workloadSchedule: WorkloadSchedule;
   journeyDistribution: JourneyDefinition[];
   attainmentRequirement?: WorkloadAttainmentRequirement;
+  populationRelationship?: WorkloadPopulationRelationship;
   targetEnvironmentBaseUrlRef: string;
 }
 
@@ -642,6 +687,7 @@ export interface K6ProviderDerivedCapacity {
 export interface ExecutionIntelligenceOverrides {
   schedule?: WorkloadSchedule;
   journeys?: JourneyDefinition[];
+  populationRelationship?: WorkloadPopulationRelationship;
   targetEnvironmentBaseUrlRef?: string;
   testDataIdentifiers?: string[];
   preconditions?: ExecutionPrecondition[];
@@ -673,6 +719,7 @@ export interface TestDefinition {
   executableCriteria: AcceptanceCriterion[]; // ONLY defined, non-ambiguous criteria!
   ambiguousCriteria: AcceptanceCriterion[]; // Excluded from k6 thresholds, surfaced as issues
   workloadAttainment?: WorkloadAttainmentRequirement;
+  populationRelationship?: WorkloadPopulationRelationship;
   issues: TestDefinitionIssue[];
   isExecutable: boolean;
   blockingReasons: string[];
@@ -716,6 +763,12 @@ export interface K6Options {
       generatedAt: string;
       runtimeVersion?: string;
       runtimeSourceId?: string;
+      schedulerArrival?: {
+        population: SchedulerArrivalPopulation;
+        peakRate: number;
+        unit: string;
+      };
+      populationRelationship?: WorkloadPopulationRelationship;
       workloadAttainment?: {
         metric: string;
         targetValue: number;

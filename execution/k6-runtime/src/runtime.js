@@ -10,9 +10,10 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 export const PECP_RUNTIME_VERSION = '1.0.0';
 export const PECP_RUNTIME_SOURCE_ID = 'pecp-stable-k6-runtime-v1.0.0';
 
-// 1. Core Metrics (Prerequisite workload arrival demand & journey duration trends)
+// 1. Core Metrics (Prerequisite workload arrival demand, business attainment events, & journey duration trends)
 export const workloadArrivalDemand = new Counter('pecp_workload_arrival_demand');
 export const workloadAttainmentRate = new Rate('pecp_workload_attainment_rate');
+export const businessAttainmentEvents = new Counter('pecp_business_attainment_events');
 export const journeyDurationTrend = new Trend('pecp_journey_duration_ms', true);
 
 // 2. Governed Credential Resolution (Constitution §11, M3.0.2)
@@ -28,7 +29,7 @@ export function resolveCredential(referenceId, purpose) {
   return envVal;
 }
 
-// 3. HTTP Helper (No invented defaults: explicit expectedStatus and thinkTimeSeconds)
+// 3. HTTP Helper (No invented defaults: explicit expectedStatus, thinkTimeSeconds, and business events)
 export function executeStep(stepConfig) {
   const {
     method = 'GET',
@@ -37,7 +38,8 @@ export function executeStep(stepConfig) {
     headers = {},
     tags = {},
     expectedStatus,
-    thinkTimeSeconds = 0
+    thinkTimeSeconds = 0,
+    businessEvent
   } = stepConfig;
 
   const params = {
@@ -62,9 +64,19 @@ export function executeStep(stepConfig) {
   }
 
   // Check expected status ONLY if explicitly defined
+  let statusOk = true;
   if (expectedStatus !== undefined && expectedStatus !== null) {
-    check(res, {
+    statusOk = check(res, {
       [`${tags.name || 'Step'} status is ${expectedStatus}`]: (r) => r.status === expectedStatus
+    });
+  }
+
+  // Record business attainment event contribution if explicitly defined and step succeeded
+  if (businessEvent && statusOk) {
+    const contribution = typeof businessEvent.contribution === 'number' ? businessEvent.contribution : 1;
+    businessAttainmentEvents.add(contribution, {
+      event_key: businessEvent.eventKey,
+      metric: businessEvent.metric || 'orders'
     });
   }
 

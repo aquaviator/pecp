@@ -87,12 +87,12 @@ describe('PECP k6 Execution Bundle Compiler (M3.0)', () => {
       expect(providerCap).toBeDefined();
       expect(providerCap?.isProviderDerived).toBe(true);
       expect(providerCap?.policyId).toBe('k6-standard-arrival-rate-sizing');
-      expect(providerCap?.preAllocatedVUs).toBe(22); // max(10, ceil(8.75 * 2.5)) = 22
-      expect(providerCap?.maxVUs).toBe(88); // max(50, ceil(8.75 * 10)) = 88
+      expect(providerCap?.preAllocatedVUs).toBe(274); // max(10, ceil(109.375 * 2.5)) = 274
+      expect(providerCap?.maxVUs).toBe(1094); // max(50, ceil(109.375 * 10)) = 1094
 
       const scenario = bundle.options.scenarios[Object.keys(bundle.options.scenarios)[0]];
-      expect(scenario.preAllocatedVUs).toBe(22);
-      expect(scenario.maxVUs).toBe(88);
+      expect(scenario.preAllocatedVUs).toBe(274);
+      expect(scenario.maxVUs).toBe(1094);
     });
 
     it('derives scenario configuration directly from explicit canonical schedule stages', () => {
@@ -108,9 +108,9 @@ describe('PECP k6 Execution Bundle Compiler (M3.0)', () => {
       expect(scenario.stages).toBeDefined();
       expect(scenario.stages?.length).toBe(3);
 
-      // Matches schedule: 300s -> 8.75, 900s -> 8.75, 120s -> 0
-      expect(scenario.stages?.[0]).toEqual({ target: 8.75, duration: '300s' });
-      expect(scenario.stages?.[1]).toEqual({ target: 8.75, duration: '900s' });
+      // Matches schedule: 300s -> 109.375, 900s -> 109.375, 120s -> 0
+      expect(scenario.stages?.[0]).toEqual({ target: 109.375, duration: '300s' });
+      expect(scenario.stages?.[1]).toEqual({ target: 109.375, duration: '900s' });
       expect(scenario.stages?.[2]).toEqual({ target: 0, duration: '120s' });
     });
 
