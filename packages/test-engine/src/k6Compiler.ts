@@ -6,9 +6,21 @@ import {
   K6ExecutionBundleFile,
   AcceptanceCriterion,
   K6ProviderCapacityConfig,
-  K6ProviderDerivedCapacity
+  K6ProviderDerivedCapacity,
+  TestDefinitionIssue
 } from '@pecp/pe-domain';
 import { computeBundleFingerprint } from './fingerprint.js';
+import {
+  PECP_STABLE_K6_RUNTIME_VERSION,
+  PECP_STABLE_K6_RUNTIME_SOURCE_ID,
+  PECP_STABLE_K6_RUNTIME_SOURCE
+} from './authoritativeRuntime.js';
+
+export {
+  PECP_STABLE_K6_RUNTIME_VERSION,
+  PECP_STABLE_K6_RUNTIME_SOURCE_ID,
+  PECP_STABLE_K6_RUNTIME_SOURCE
+};
 
 export const K6_STANDARD_PROVIDER_POLICY = {
   policyId: 'k6-standard-arrival-rate-sizing',
@@ -30,15 +42,26 @@ function sanitizeMetricName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
 }
 
+export interface ThresholdCompilationResult {
+  thresholds: Record<string, string[]>;
+  issues: TestDefinitionIssue[];
+  unmappedReasons: string[];
+}
+
 /**
  * Maps defined canonical acceptance criteria to k6 threshold expressions.
- * Enforces Constitution §10: Only DEFINED criteria with explicit operator, thresholdValue,
- * and valid unit/percentile become thresholds.
- * Does NOT guess '<' operators or parse raw target strings.
- * Workload arrival demand is NEVER converted into an NFR threshold.
+ * Enforces Constitution §10 & Work Package M3.0.2:
+ * Provider threshold mapping failures must be explicit.
+ * For every criterion in testDefinition.executableCriteria:
+ * - either map it successfully into a k6 threshold; or
+ * - emit a provider compilation issue explaining why it cannot be mapped.
+ * If a required executable criterion cannot be represented by the provider,
+ * the resulting k6 bundle must be non-executable.
  */
-function buildK6Thresholds(criteria: AcceptanceCriterion[]): Record<string, string[]> {
+export function buildK6Thresholds(criteria: AcceptanceCriterion[]): ThresholdCompilationResult {
   const thresholds: Record<string, string[]> = {};
+  const issues: TestDefinitionIssue[] = [];
+  const unmappedReasons: string[] = [];
 
   for (const crit of criteria) {
     if (crit.status !== 'DEFINED') {
@@ -46,45 +69,113 @@ function buildK6Thresholds(criteria: AcceptanceCriterion[]): Record<string, stri
     }
 
     // Must have explicit operator and numeric thresholdValue
-    if (!crit.operator || crit.thresholdValue === undefined) {
+    const validOperators = ['<', '<=', '>', '>=', '=='];
+    if (!crit.operator || !validOperators.includes(crit.operator)) {
+      const reason = `Acceptance criterion "${crit.metric}" (${crit.id}) has unsupported or missing operator "${crit.operator}". Supported operators: ${validOperators.join(', ')}.`;
+      issues.push({
+        id: `issue-provider-threshold-op-${crit.id}`,
+        type: 'PROVIDER_UNSUPPORTED_CRITERION',
+        severity: 'BLOCKING',
+        parameter: `criteria.${crit.id}.operator`,
+        description: reason,
+        remediationGuidance: 'Specify a standard comparison operator (<, <=, >, >=, ==).'
+      });
+      unmappedReasons.push(reason);
+      continue;
+    }
+
+    if (crit.thresholdValue === undefined || isNaN(crit.thresholdValue)) {
+      const reason = `Acceptance criterion "${crit.metric}" (${crit.id}) has missing or non-numeric threshold value.`;
+      issues.push({
+        id: `issue-provider-threshold-val-${crit.id}`,
+        type: 'PROVIDER_UNSUPPORTED_CRITERION',
+        severity: 'BLOCKING',
+        parameter: `criteria.${crit.id}.thresholdValue`,
+        description: reason,
+        remediationGuidance: 'Provide a valid numeric threshold value.'
+      });
+      unmappedReasons.push(reason);
       continue;
     }
 
     const operator = crit.operator;
     const val = crit.thresholdValue;
-    if (isNaN(val)) continue;
 
     // Error rate thresholds
-    if (crit.metric.toLowerCase().includes('error') || crit.unit === 'rate' || crit.unit === '%') {
+    if (
+      crit.metric.toLowerCase().includes('error') ||
+      crit.metric.toLowerCase().includes('fail')
+    ) {
       let rateVal: number | undefined;
       if (crit.unit === '%') {
         rateVal = val / 100;
       } else if (crit.unit === 'rate' || crit.unit === 'fraction') {
         rateVal = val;
+      } else {
+        const reason = `Acceptance criterion "${crit.metric}" (${crit.id}) specifies unsupported unit "${crit.unit}" for error rate threshold. Supported error rate units: "%", "rate", "fraction".`;
+        issues.push({
+          id: `issue-provider-threshold-unit-${crit.id}`,
+          type: 'PROVIDER_UNSUPPORTED_CRITERION',
+          severity: 'BLOCKING',
+          parameter: `criteria.${crit.id}.unit`,
+          description: reason,
+          remediationGuidance: 'Use "%" or "rate" for error rate criteria in k6 provider.'
+        });
+        unmappedReasons.push(reason);
+        continue;
       }
+
       if (rateVal !== undefined && !isNaN(rateVal)) {
-        thresholds['http_req_failed'] = [`rate${operator}${rateVal}`];
+        const expr = `rate${operator}${rateVal}`;
+        thresholds['http_req_failed'] = thresholds['http_req_failed']
+          ? [...thresholds['http_req_failed'], expr]
+          : [expr];
       }
       continue;
     }
 
     // Response time / latency thresholds
     if (
-      crit.percentile &&
-      (crit.metric.toLowerCase().includes('latency') ||
-        crit.metric.toLowerCase().includes('response') ||
-        crit.metric.toLowerCase().includes('duration'))
+      crit.metric.toLowerCase().includes('latency') ||
+      crit.metric.toLowerCase().includes('response') ||
+      crit.metric.toLowerCase().includes('duration')
     ) {
+      if (!crit.percentile || isNaN(crit.percentile)) {
+        const reason = `Latency criterion "${crit.metric}" (${crit.id}) lacks a required percentile (e.g. 95, 99) for k6 threshold representation.`;
+        issues.push({
+          id: `issue-provider-threshold-pctl-${crit.id}`,
+          type: 'PROVIDER_UNSUPPORTED_CRITERION',
+          severity: 'BLOCKING',
+          parameter: `criteria.${crit.id}.percentile`,
+          description: reason,
+          remediationGuidance: 'Specify an explicit percentile (e.g. 95 or 99) for latency thresholds.'
+        });
+        unmappedReasons.push(reason);
+        continue;
+      }
+
       const pKey = `p(${crit.percentile})`;
       let msVal: number | undefined;
       if (crit.unit === 'seconds' || crit.unit === 's') {
         msVal = val * 1000;
       } else if (crit.unit === 'ms' || crit.unit === 'milliseconds') {
         msVal = val;
+      } else {
+        const reason = `Latency criterion "${crit.metric}" (${crit.id}) has unsupported unit "${crit.unit}". k6 provider supports "ms", "milliseconds", "s", "seconds".`;
+        issues.push({
+          id: `issue-provider-threshold-unit-${crit.id}`,
+          type: 'PROVIDER_UNSUPPORTED_CRITERION',
+          severity: 'BLOCKING',
+          parameter: `criteria.${crit.id}.unit`,
+          description: reason,
+          remediationGuidance: 'Change unit to "ms" or "seconds".'
+        });
+        unmappedReasons.push(reason);
+        continue;
       }
 
       if (msVal !== undefined && !isNaN(msVal)) {
-        const scope = crit.scope.toLowerCase();
+        const scope = (crit.scope || '').toLowerCase();
         let metricKey = 'http_req_duration';
         if (scope.includes('checkout')) {
           metricKey = 'http_req_duration{journey:checkout}';
@@ -92,106 +183,33 @@ function buildK6Thresholds(criteria: AcceptanceCriterion[]): Record<string, stri
           metricKey = 'http_req_duration{journey:search}';
         } else if (scope.includes('basket')) {
           metricKey = 'http_req_duration{journey:basket}';
+        } else if (scope.includes('browse')) {
+          metricKey = 'http_req_duration{journey:browse}';
         }
 
-        thresholds[metricKey] = [`${pKey}${operator}${msVal}`];
+        const expr = `${pKey}${operator}${msVal}`;
+        thresholds[metricKey] = thresholds[metricKey]
+          ? [...thresholds[metricKey], expr]
+          : [expr];
       }
+      continue;
     }
-  }
 
-  return thresholds;
-}
-
-/**
- * Deterministically packaged versioned PECP stable k6 runtime module.
- */
-export const PECP_STABLE_K6_RUNTIME_SOURCE = `// ============================================================================
-// PECP Stable k6 Runtime (Packaged Core Module v1.0)
-// Authoritative execution runtime for metrics, HTTP execution, and journey orchestration
-// ============================================================================
-import http from 'k6/http';
-import { check, sleep } from 'k6';
-import { Counter, Rate, Trend } from 'k6/metrics';
-
-// 1. Core Metrics (Prerequisite workload arrival demand & journey duration trends)
-export const workloadArrivalDemand = new Counter('pecp_workload_arrival_demand');
-export const workloadAttainmentRate = new Rate('pecp_workload_attainment_rate');
-export const journeyDurationTrend = new Trend('pecp_journey_duration_ms', true);
-
-// 2. HTTP Helper (No invented defaults: explicit expectedStatus and thinkTimeSeconds)
-export function executeStep(stepConfig) {
-  const {
-    method = 'GET',
-    url,
-    body,
-    headers = {},
-    tags = {},
-    expectedStatus,
-    thinkTimeSeconds = 0
-  } = stepConfig;
-
-  const params = {
-    headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
-    tags
-  };
-
-  let res;
-  const verb = method.toUpperCase();
-  if (verb === 'GET') {
-    res = http.get(url, params);
-  } else if (verb === 'POST') {
-    res = http.post(url, typeof body === 'string' ? body : JSON.stringify(body || {}), params);
-  } else if (verb === 'PUT') {
-    res = http.put(url, typeof body === 'string' ? body : JSON.stringify(body || {}), params);
-  } else if (verb === 'DELETE') {
-    res = http.del(url, params);
-  } else if (verb === 'PATCH') {
-    res = http.patch(url, typeof body === 'string' ? body : JSON.stringify(body || {}), params);
-  } else {
-    res = http.get(url, params);
-  }
-
-  // Check expected status ONLY if explicitly defined
-  if (expectedStatus !== undefined && expectedStatus !== null) {
-    check(res, {
-      [\`\${tags.name || 'Step'} status is \${expectedStatus}\`]: (r) => r.status === expectedStatus
+    // Unsupported metric type for k6 HTTP provider
+    const reason = `Acceptance criterion "${crit.metric}" (${crit.id}) cannot be mapped to k6 HTTP threshold (unsupported metric type).`;
+    issues.push({
+      id: `issue-provider-unsupported-metric-${crit.id}`,
+      type: 'PROVIDER_UNSUPPORTED_CRITERION',
+      severity: 'BLOCKING',
+      parameter: `criteria.${crit.id}.metric`,
+      description: reason,
+      remediationGuidance: 'k6 HTTP provider supports HTTP latency and error rate acceptance criteria.'
     });
+    unmappedReasons.push(reason);
   }
 
-  // Sleep ONLY if explicitly provided and greater than zero
-  if (typeof thinkTimeSeconds === 'number' && thinkTimeSeconds > 0) {
-    sleep(thinkTimeSeconds);
-  }
-
-  return res;
+  return { thresholds, issues, unmappedReasons };
 }
-
-// 3. Journey Selection & Orchestration
-export function selectJourneyByWeight(weights) {
-  const rand = Math.random();
-  let cumulative = 0;
-  for (const [journeyKey, weight] of Object.entries(weights)) {
-    cumulative += weight;
-    if (rand <= cumulative) {
-      return journeyKey;
-    }
-  }
-  return Object.keys(weights)[0];
-}
-
-export function executeIteration(journeyRunnerMap, weights, baseUrl, baseHeaders) {
-  workloadArrivalDemand.add(1);
-  const selectedKey = selectJourneyByWeight(weights);
-  const runner = journeyRunnerMap[selectedKey];
-
-  if (runner) {
-    const startTime = new Date().getTime();
-    runner(baseUrl, baseHeaders);
-    const duration = new Date().getTime() - startTime;
-    journeyDurationTrend.add(duration, { journey: selectedKey });
-  }
-}
-`;
 
 /**
  * Pure deterministic compiler: transforms an engine-neutral Canonical Test Definition
@@ -204,8 +222,21 @@ export function compileK6Bundle(options: CompileK6BundleOptions): K6ExecutionBun
     options.generatedAt ||
     (options.clock ? options.clock() : testDefinition.generationTimestamp || '2026-08-25T14:30:00.000Z');
 
-  // If TestDefinition is non-executable, generate a safe blocked bundle
-  if (!testDefinition.isExecutable) {
+  // Provider Threshold Mapping Check (M3.0.2 Requirement 4)
+  const thresholdMapping = buildK6Thresholds(testDefinition.executableCriteria);
+  const providerMappingFailed = thresholdMapping.unmappedReasons.length > 0;
+
+  // If TestDefinition is non-executable OR provider threshold mapping fails, generate a safe blocked bundle
+  if (!testDefinition.isExecutable || providerMappingFailed) {
+    const combinedBlockingReasons = [
+      ...testDefinition.blockingReasons,
+      ...thresholdMapping.unmappedReasons
+    ];
+    const combinedIssues = [
+      ...testDefinition.issues,
+      ...thresholdMapping.issues
+    ];
+
     const blockedOptions: K6Options = {
       scenarios: {},
       thresholds: {},
@@ -218,6 +249,8 @@ export function compileK6Bundle(options: CompileK6BundleOptions): K6ExecutionBun
           sourceContractVersion: testDefinition.sourceContractVersion,
           sourceContractFingerprint: testDefinition.sourceContractFingerprint,
           generatedAt,
+          runtimeVersion: PECP_STABLE_K6_RUNTIME_VERSION,
+          runtimeSourceId: PECP_STABLE_K6_RUNTIME_SOURCE_ID,
           workloadAttainment: testDefinition.workloadAttainment
             ? {
                 metric: testDefinition.workloadAttainment.metric,
@@ -236,15 +269,15 @@ export function compileK6Bundle(options: CompileK6BundleOptions): K6ExecutionBun
 // PECP GOVERNANCE NOTICE: EXECUTION BLOCKED
 // ============================================================================
 // This k6 bundle is currently NON-EXECUTABLE.
-// Upstream governance rules or missing execution parameters prevent execution.
+// Upstream governance rules, precondition failures, or provider threshold mapping issues prevent execution.
 //
 // BLOCKING REASONS:
-${testDefinition.blockingReasons.map((r, i) => `// ${i + 1}. ${r}`).join('\n')}
+${combinedBlockingReasons.map((r, i) => `// ${i + 1}. ${r}`).join('\n')}
 //
 // ISSUES:
-${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: ${iss.description}`).join('\n')}
+${combinedIssues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: ${iss.description}`).join('\n')}
 //
-// Remediation: Resolve blockers in canonical intelligence before re-compiling.
+// Remediation: Resolve blockers in canonical intelligence or threshold criteria before re-compiling.
 // ============================================================================
 `;
 
@@ -271,8 +304,10 @@ ${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: $
       testDefinitionVersion: testDefinition.version,
       testDefinitionFingerprint: testDefinition.fingerprint,
       generatedAt,
+      runtimeVersion: PECP_STABLE_K6_RUNTIME_VERSION,
+      runtimeSourceId: PECP_STABLE_K6_RUNTIME_SOURCE_ID,
       isExecutable: false,
-      nonExecutableReasons: testDefinition.blockingReasons,
+      nonExecutableReasons: combinedBlockingReasons,
       options: blockedOptions,
       files: blockedFiles,
       summary: {
@@ -331,9 +366,12 @@ ${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: $
     };
   }
 
+  // Correct k6 ramping-arrival-rate executor schema (M3.0.2 Requirement 1):
+  // Uses startRate (not rate) and explicit timeUnit: '1s'
+  const startRate = schedule.startRate !== undefined ? schedule.startRate : 0;
   const k6ScenarioConfig: K6ScenarioConfig = {
     executor: 'ramping-arrival-rate',
-    rate: 1, // 1 iteration per timeUnit (base multiplier for stage arrival rates)
+    startRate,
     timeUnit: '1s',
     preAllocatedVUs,
     maxVUs,
@@ -344,7 +382,7 @@ ${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: $
     exec: 'default'
   };
 
-  const thresholds = buildK6Thresholds(testDefinition.executableCriteria);
+  const thresholds = thresholdMapping.thresholds;
 
   const k6Options: K6Options = {
     scenarios: {
@@ -361,6 +399,8 @@ ${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: $
         sourceContractVersion: testDefinition.sourceContractVersion,
         sourceContractFingerprint: testDefinition.sourceContractFingerprint,
         generatedAt,
+        runtimeVersion: PECP_STABLE_K6_RUNTIME_VERSION,
+        runtimeSourceId: PECP_STABLE_K6_RUNTIME_SOURCE_ID,
         workloadAttainment: testDefinition.workloadAttainment
           ? {
               metric: testDefinition.workloadAttainment.metric,
@@ -376,7 +416,7 @@ ${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: $
     }
   };
 
-  // Generate journeys.js consuming the stable runtime helper
+  // Generate journeys.js consuming the stable runtime helper and safe credential resolution (M3.0.2 Requirement 5)
   const journeyFunctionsCode = testDefinition.journeys
     .map((journey) => {
       const funcName = `run${journey.key.charAt(0).toUpperCase() + journey.key.slice(1)}Journey`;
@@ -384,9 +424,10 @@ ${testDefinition.issues.map((iss) => `// - [${iss.severity}] ${iss.parameter}: $
         .map((step) => {
           const authHeader =
             step.credentialReferences && step.credentialReferences.length > 0
-              ? `  headers['Authorization'] = __ENV['${step.credentialReferences[0].referenceId}'] || 'Bearer NOT_CONFIGURED';\n`
+              ? `  // Credential Reference: __ENV['${step.credentialReferences[0].referenceId}']\n  const authToken = resolveCredential('${step.credentialReferences[0].referenceId}', '${step.credentialReferences[0].purpose || ''}');\n  headers['Authorization'] = \`Bearer \${authToken}\`;\n`
               : '';
           const thinkTime = typeof step.thinkTimeSeconds === 'number' ? step.thinkTimeSeconds : 0;
+
           const method = step.method.toUpperCase();
           const expectedStatusProp =
             step.expectedStatusCode !== undefined ? `    expectedStatus: ${step.expectedStatusCode},\n` : '';
@@ -429,9 +470,10 @@ ${stepsCode}
 // Source Test Definition: ${testDefinition.id} (${testDefinition.version})
 // Bound Contract: ${testDefinition.sourceContractId}
 // Generated At: ${generatedAt}
-// Consumes: PECP Stable k6 Runtime (executeStep)
+// Consumes: PECP Stable k6 Runtime (executeStep, resolveCredential)
 // ============================================================================
 import { executeStep } from './runtime.js';
+import { resolveCredential } from './runtime.js';
 
 export const JOURNEY_WEIGHTS = ${JSON.stringify(journeyWeightsMap, null, 2)};
 
@@ -515,6 +557,8 @@ function textSummary(data, options) {
     testDefinitionVersion: testDefinition.version,
     testDefinitionFingerprint: testDefinition.fingerprint,
     generatedAt,
+    runtimeVersion: PECP_STABLE_K6_RUNTIME_VERSION,
+    runtimeSourceId: PECP_STABLE_K6_RUNTIME_SOURCE_ID,
     isExecutable: true,
     nonExecutableReasons: [],
     options: k6Options,
@@ -535,4 +579,5 @@ function textSummary(data, options) {
     fingerprint
   };
 }
+
 

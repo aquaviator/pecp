@@ -548,6 +548,7 @@ export interface WorkloadSchedule {
   peakArrivalRate: number;
   rateUnit: string; // e.g. 'arrivals/second', 'orders/second'
   timeUnit: 'seconds' | 'minutes';
+  startRate?: number; // Explicit initial arrival rate (e.g. 0 for ramp-up from zero)
   sourceIntelligenceIds?: string[];
 }
 
@@ -570,6 +571,7 @@ export interface ExecutionPrecondition {
   category: 'ENVIRONMENT' | 'TEST_DATA' | 'OBSERVABILITY' | 'GOVERNANCE';
   statement: string;
   isSatisfied: boolean;
+  isMandatory?: boolean; // Defaults to true: mandatory unsatisfied preconditions gate execution
   sourceIntelligenceId?: string;
   verificationMethod?: string;
 }
@@ -595,7 +597,9 @@ export type TestDefinitionIssueType =
   | 'MISSING_TEST_DATA'
   | 'MISSING_OBSERVABILITY'
   | 'UNAPPROVED_VALUE'
-  | 'UNSATISFIED_PRECONDITION';
+  | 'UNSATISFIED_PRECONDITION'
+  | 'INVALID_EXECUTION_STRUCTURE'
+  | 'PROVIDER_UNSUPPORTED_CRITERION';
 
 export interface TestDefinitionIssue {
   id: string;
@@ -687,7 +691,8 @@ export interface K6Threshold {
 
 export interface K6ScenarioConfig {
   executor: 'ramping-arrival-rate' | 'constant-arrival-rate';
-  rate: number;
+  rate?: number; // for constant-arrival-rate
+  startRate?: number; // for ramping-arrival-rate
   timeUnit: string;
   preAllocatedVUs: number;
   maxVUs: number;
@@ -709,6 +714,8 @@ export interface K6Options {
       sourceContractVersion: string;
       sourceContractFingerprint: string;
       generatedAt: string;
+      runtimeVersion?: string;
+      runtimeSourceId?: string;
       workloadAttainment?: {
         metric: string;
         targetValue: number;
@@ -737,6 +744,8 @@ export interface K6ExecutionBundle {
   testDefinitionFingerprint: string;
   fingerprint: string; // Deterministic non-cryptographic drift checksum
   generatedAt: string;
+  runtimeVersion?: string;
+  runtimeSourceId?: string;
   isExecutable: boolean;
   nonExecutableReasons: string[];
   options: K6Options;

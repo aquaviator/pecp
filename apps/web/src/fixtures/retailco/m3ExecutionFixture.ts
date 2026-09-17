@@ -20,6 +20,7 @@ export const RETAILCO_M3_WORKLOAD_SCHEDULE: WorkloadSchedule = {
   peakArrivalRate: 8.75,
   rateUnit: 'orders/second',
   timeUnit: 'seconds',
+  startRate: 0,
   stages: [
     {
       durationSeconds: 300,
