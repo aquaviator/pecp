@@ -13,6 +13,7 @@
   "dependencies": {
     "@pecp/pe-domain": "*",
     "@pecp/workload-engine": "*",
+    "@pecp/artefact-engine": "*",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
     "motion": "^12.4.7",

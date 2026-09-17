@@ -351,3 +351,125 @@ export interface PerformanceContract {
   approvedBy?: string;
   approvedAt?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Engineering Artefacts Domain Models (M2)
+// ---------------------------------------------------------------------------
+
+export type ArtefactType = 'PERFORMANCE_STRATEGY' | 'PERFORMANCE_TEST_PLAN';
+
+export type ArtefactStatus =
+  | 'DRAFT'
+  | 'BLOCKED'
+  | 'READY_FOR_APPROVAL'
+  | 'APPROVED'
+  | 'STALE'
+  | 'SUPERSEDED';
+
+export type ArtefactVersion = string;
+
+export type ArtefactSectionStatus =
+  | 'COMPLETE'
+  | 'UNRESOLVED'
+  | 'NOT_SUPPLIED'
+  | 'BLOCKED';
+
+export type ArtefactCalloutType = 'INFO' | 'WARNING' | 'BLOCKER' | 'ASSUMPTION';
+
+export interface ArtefactCallout {
+  id?: string;
+  type: ArtefactCalloutType;
+  text: string;
+  sourceIntelligenceId?: string;
+}
+
+export interface ArtefactTable {
+  id: string;
+  caption?: string;
+  headers: string[];
+  rows: Array<Array<string | number | boolean>>;
+}
+
+export interface ArtefactSection {
+  id: string;
+  sectionNumber: string; // e.g. "1.0", "7.0", "7.1"
+  title: string;
+  status?: ArtefactSectionStatus;
+  summary?: string;
+  paragraphs?: string[];
+  subsections?: ArtefactSection[];
+  tables?: ArtefactTable[];
+  callouts?: ArtefactCallout[];
+  sourceIntelligenceIds?: string[];
+}
+
+export interface ArtefactSourceReference {
+  id: string;
+  key: string;
+  title: string;
+  canonicalState: CanonicalState;
+  reviewStatus: ReviewStatus;
+  sourceDocument?: string;
+  sourceLocation?: string;
+}
+
+export interface ArtefactIssue {
+  id: string;
+  title: string;
+  description: string;
+  severity: 'BLOCKING' | 'WARNING';
+  category:
+    | 'WORKLOAD'
+    | 'ACCEPTANCE_CRITERIA'
+    | 'ENVIRONMENT'
+    | 'TEST_DATA'
+    | 'OBSERVABILITY'
+    | 'GOVERNANCE';
+  sourceIntelligenceId?: string;
+  remediationGuidance?: string;
+}
+
+export interface ArtefactApprovalReadiness {
+  canApprove: boolean;
+  status: ArtefactStatus;
+  blockingReasons: string[];
+  unresolvedIssuesCount: number;
+}
+
+export interface ArtefactMetadata {
+  author?: string;
+  organisation?: string;
+  classification?: string;
+  targetAudience?: string;
+  governanceGate?: string;
+  [key: string]: unknown;
+}
+
+export interface EngineeringArtefact {
+  id: string;
+  projectId: string;
+  projectName: string;
+  type: ArtefactType;
+  title: string;
+  version: ArtefactVersion;
+  status: ArtefactStatus;
+  engineeringIntent: EngineeringIntent;
+  sourceContractId: string;
+  sourceContractVersion: string;
+  sourceContractFingerprint: string;
+  sourceIntelligenceReferences: ArtefactSourceReference[];
+  generationTimestamp: string;
+  sections: ArtefactSection[];
+  unresolvedIssues: ArtefactIssue[];
+  approvalReadiness: ArtefactApprovalReadiness;
+  metadata?: ArtefactMetadata;
+}
+
+export interface ArtefactStalenessResult {
+  isStale: boolean;
+  reasons: string[];
+  currentContractVersion: string;
+  artefactContractVersion: string;
+  currentContractFingerprint: string;
+  artefactContractFingerprint: string;
+}

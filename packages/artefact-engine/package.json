@@ -1,0 +1,18 @@
+{
+  "name": "@pecp/artefact-engine",
+  "version": "1.0.0",
+  "description": "Pure deterministic engineering artefact generator for PECP (Strategy and Test Plan)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@pecp/pe-domain": "*"
+  }
+}

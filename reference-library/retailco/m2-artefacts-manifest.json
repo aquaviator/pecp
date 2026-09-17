@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "scenarioId": "retailco-black-friday-2026-m2",
+  "name": "RetailCo Black Friday 2026 Engineering Artefacts (M2)",
+  "version": "1.0.0",
+  "milestone": "M2",
+  "engineeringIntent": "FORECAST",
+  "description": "Authoritative machine-readable M2 reference manifest defining expected engineering artefacts (Performance Strategy and Performance Test Plan) generated from the governed post-resolution M1 scenario.",
+  "upstreamSources": {
+    "m1ScenarioManifest": "reference-library/retailco/m1-scenario-manifest.json",
+    "sourceContractId": "contract-proj-retailco-bf26-v0.1-draft",
+    "sourceContractStatus": "BLOCKED"
+  },
+  "expectedStrategyArtefact": {
+    "type": "PERFORMANCE_STRATEGY",
+    "engineeringIntent": "FORECAST",
+    "status": "BLOCKED",
+    "canApprove": false,
+    "version": "v1.0-draft",
+    "documentControl": {
+      "boundContractId": "contract-proj-retailco-bf26-v0.1-draft",
+      "boundContractVersion": "v0.1-draft",
+      "hasContractFingerprint": true
+    },
+    "workloadStrategy": {
+      "approvedDemand": {
+        "hourlyOrders": 31500,
+        "perMinuteOrders": 525,
+        "perSecondOrders": 8.75,
+        "formula": "throughput_time_unit_conversion",
+        "semanticSeparation": "Workload demand is tracked as workload demand and is distinct from NFR latency/error acceptance criteria."
+      },
+      "concurrencyEvaluation": {
+        "status": "BLOCKED",
+        "calculated": false,
+        "reason": "Average session duration is known, but session arrival rate is missing. Little's Law (L = λ × W) requires arrival rate of the same flow population. Engine refuses to equate 8.75 orders/sec with session arrival rate."
+      }
+    },
+    "journeyDistribution": {
+      "source": "CANONICAL_INTELLIGENCE_ONLY",
+      "expectedJourneys": [
+        { "name": "Browse", "percentage": 55 },
+        { "name": "Search", "percentage": 20 },
+        { "name": "Basket", "percentage": 15 },
+        { "name": "Checkout", "percentage": 8 },
+        { "name": "Account", "percentage": 2 }
+      ],
+      "totalPercentage": 100
+    },
+    "acceptanceCriteria": {
+      "checkoutResponseTime": {
+        "target": "< 2",
+        "thresholdValue": 2.0,
+        "unit": "seconds",
+        "percentile": null,
+        "status": "AMBIGUOUS",
+        "isBlocking": true,
+        "reason": "Percentile is missing; cannot be evaluated by automated release gates."
+      }
+    },
+    "unresolvedBlockersCarried": [
+      {
+        "parameter": "session_arrival_rate",
+        "severity": "BLOCKING"
+      },
+      {
+        "parameter": "checkout_response_time",
+        "severity": "BLOCKING"
+      }
+    ],
+    "environmentalAndOperationalSections": {
+      "environment": {
+        "status": "NOT_SUPPLIED",
+        "inventedDetails": false
+      },
+      "testData": {
+        "status": "NOT_SUPPLIED",
+        "inventedDetails": false
+      },
+      "observability": {
+        "status": "NOT_SUPPLIED",
+        "inventedDetails": false
+      }
+    }
+  },
+  "expectedTestPlanArtefact": {
+    "type": "PERFORMANCE_TEST_PLAN",
+    "engineeringIntent": "FORECAST",
+    "status": "BLOCKED",
+    "canApprove": false,
+    "version": "v1.0-draft",
+    "workloadModel": {
+      "requiredDemandHourly": 31500,
+      "requiredDemandPerSecond": 8.75,
+      "concurrencyStatus": "BLOCKED"
+    },
+    "acceptanceCriteria": {
+      "ambiguousCount": 1,
+      "definedCount": 0
+    },
+    "passFailEvaluationRules": {
+      "passRequiresDemandAttainment": true,
+      "failCondition": "Breach of defined criteria under attained demand",
+      "inconclusiveCondition": "Failure to attain required workload demand or criteria non-evaluable"
+    },
+    "executableScriptsGenerated": false,
+    "unresolvedBlockersCarried": true
+  }
+}

@@ -20,7 +20,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@pecp/pe-domain': path.resolve(__dirname, '../../packages/pe-domain/src/index.ts'),
-      '@pecp/workload-engine': path.resolve(__dirname, '../../packages/workload-engine/src/index.ts')
+      '@pecp/workload-engine': path.resolve(__dirname, '../../packages/workload-engine/src/index.ts'),
+      '@pecp/artefact-engine': path.resolve(__dirname, '../../packages/artefact-engine/src/index.ts')
     }
   },
   build: {
