@@ -473,3 +473,247 @@ export interface ArtefactStalenessResult {
   currentContractFingerprint: string;
   artefactContractFingerprint: string;
 }
+
+// ---------------------------------------------------------------------------
+// Canonical Test Definition & Executable Test Models (M3)
+// Engine-neutral domain contracts according to Constitution §10 and M3.0
+// ---------------------------------------------------------------------------
+
+export type TestDefinitionStatus =
+  | 'DRAFT'
+  | 'BLOCKED'
+  | 'NOT_EXECUTABLE'
+  | 'READY_FOR_EXECUTION'
+  | 'APPROVED'
+  | 'SUPERSEDED';
+
+export type ExecutionModel = 'OPEN' | 'CLOSED';
+
+/**
+ * Governed secret/credential reference (Constitution §11).
+ * Never embeds raw tokens, keys, or passwords.
+ */
+export interface CredentialReference {
+  provider: string; // e.g. 'VAULT', 'AZURE_KEY_VAULT', 'ENV_VAR', 'CI_SECRET'
+  referenceId: string; // e.g. 'RETAILCO_CHECKOUT_AUTH_TOKEN'
+  purpose: string; // e.g. 'Checkout API Authorization'
+}
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+
+export interface JourneyStep {
+  id: string;
+  name: string;
+  method: HttpMethod;
+  path: string; // endpoint path or URI pattern, e.g. '/api/v1/orders'
+  expectedStatusCode?: number;
+  thinkTimeSeconds?: number;
+  payloadDescription?: string;
+  headers?: Record<string, string>;
+  credentialReferences?: CredentialReference[];
+}
+
+export interface JourneyDefinition {
+  id: string;
+  key: string; // e.g. 'browse', 'search', 'basket', 'checkout', 'account'
+  name: string;
+  weight: number; // 0.0 to 1.0 (e.g. 0.35)
+  percentage: number; // 0 to 100 (e.g. 35)
+  steps: JourneyStep[];
+  sourceIntelligenceIds?: string[];
+  description?: string;
+}
+
+export interface ScheduleStage {
+  durationSeconds: number;
+  targetArrivalRate: number; // arrivals per second
+  description?: string;
+}
+
+export interface WorkloadSchedule {
+  id: string;
+  executionModel: ExecutionModel;
+  stages: ScheduleStage[];
+  totalDurationSeconds: number;
+  peakArrivalRate: number;
+  rateUnit: string; // e.g. 'arrivals/second', 'orders/second'
+  timeUnit: 'seconds' | 'minutes';
+  sourceIntelligenceIds?: string[];
+}
+
+/**
+ * Strict separation: Workload attainment requirement is a prerequisite
+ * for test validity, NOT an NFR response-time criterion (Constitution §10, M2.1 Law 4).
+ */
+export interface WorkloadAttainmentRequirement {
+  metric: string; // e.g. 'Target Arrival Throughput'
+  targetValue: number; // e.g. 8.75
+  unit: string; // e.g. 'orders/second'
+  evaluationType: 'WORKLOAD_DEMAND';
+  description: string;
+  tolerancePercentage?: number; // e.g. 5%
+  isPrerequisiteForEvaluation: true;
+}
+
+export interface ExecutionPrecondition {
+  id: string;
+  category: 'ENVIRONMENT' | 'TEST_DATA' | 'OBSERVABILITY' | 'GOVERNANCE';
+  statement: string;
+  isSatisfied: boolean;
+  sourceIntelligenceId?: string;
+  verificationMethod?: string;
+}
+
+export interface ExecutionParameter {
+  key: string;
+  label: string;
+  value: string | number | boolean;
+  isSupplied: boolean;
+  unit?: string;
+  sourceIntelligenceId?: string;
+}
+
+export type TestDefinitionIssueSeverity = 'BLOCKING' | 'WARNING';
+
+export type TestDefinitionIssueType =
+  | 'UPSTREAM_CONTRACT_BLOCKED'
+  | 'NOT_SUPPLIED'
+  | 'AMBIGUOUS_CRITERIA'
+  | 'UNRESOLVED_SCHEDULE'
+  | 'MISSING_ENVIRONMENT'
+  | 'MISSING_TEST_DATA'
+  | 'MISSING_OBSERVABILITY'
+  | 'UNAPPROVED_VALUE'
+  | 'UNSATISFIED_PRECONDITION';
+
+export interface TestDefinitionIssue {
+  id: string;
+  type: TestDefinitionIssueType;
+  severity: TestDefinitionIssueSeverity;
+  parameter: string;
+  description: string;
+  remediationGuidance: string;
+  sourceIntelligenceId?: string;
+}
+
+export interface TestScenario {
+  id: string;
+  name: string;
+  engineeringIntent: EngineeringIntent;
+  workloadSchedule: WorkloadSchedule;
+  journeyDistribution: JourneyDefinition[];
+  attainmentRequirement: WorkloadAttainmentRequirement;
+  targetEnvironmentBaseUrlRef: string;
+}
+
+export interface ExecutionIntelligenceOverrides {
+  schedule?: WorkloadSchedule;
+  journeys?: JourneyDefinition[];
+  targetEnvironmentBaseUrlRef?: string;
+  testDataIdentifiers?: string[];
+  preconditions?: ExecutionPrecondition[];
+  credentialReferences?: CredentialReference[];
+}
+
+/**
+ * Engine-neutral Canonical Test Definition.
+ * Completely independent of k6 / JMeter syntax.
+ */
+export interface TestDefinition {
+  id: string;
+  projectId: string;
+  projectName: string;
+  version: string;
+  status: TestDefinitionStatus;
+  engineeringIntent: EngineeringIntent;
+  sourceContractId: string;
+  sourceContractVersion: string;
+  sourceContractFingerprint: string;
+  fingerprint: string; // Deterministic non-cryptographic drift checksum
+  generationTimestamp: string;
+  scenarios: TestScenario[];
+  journeys: JourneyDefinition[];
+  preconditions: ExecutionPrecondition[];
+  parameters: ExecutionParameter[];
+  executableCriteria: AcceptanceCriterion[]; // ONLY defined, non-ambiguous criteria!
+  ambiguousCriteria: AcceptanceCriterion[]; // Excluded from k6 thresholds, surfaced as issues
+  workloadAttainment: WorkloadAttainmentRequirement;
+  issues: TestDefinitionIssue[];
+  isExecutable: boolean;
+  blockingReasons: string[];
+  credentialReferences: CredentialReference[];
+}
+
+// ---------------------------------------------------------------------------
+// k6 Execution Provider / Bundle Domain Models (M3.0)
+// ---------------------------------------------------------------------------
+
+export interface K6Threshold {
+  metric: string; // e.g. 'http_req_duration{journey:checkout}', 'http_req_failed'
+  thresholdExpressions: string[]; // e.g. ['p(95)<2000']
+  sourceCriterionId?: string;
+}
+
+export interface K6ScenarioConfig {
+  executor: 'ramping-arrival-rate' | 'constant-arrival-rate';
+  rate: number;
+  timeUnit: string;
+  preAllocatedVUs: number;
+  maxVUs: number;
+  stages?: Array<{ target: number; duration: string }>;
+  duration?: string;
+  exec?: string;
+}
+
+export interface K6Options {
+  scenarios: Record<string, K6ScenarioConfig>;
+  thresholds: Record<string, string[]>;
+  summaryTrendStats?: string[];
+  ext?: {
+    pecp?: {
+      testDefinitionId: string;
+      testDefinitionVersion: string;
+      testDefinitionFingerprint: string;
+      sourceContractId: string;
+      sourceContractVersion: string;
+      sourceContractFingerprint: string;
+      generatedAt: string;
+      workloadAttainment: {
+        metric: string;
+        targetValue: number;
+        unit: string;
+      };
+      targetEnvironmentBaseUrlRef: string;
+      credentialReferences: CredentialReference[];
+    };
+  };
+}
+
+export interface K6ExecutionBundleFile {
+  filename: string;
+  path: string;
+  content: string;
+  language: 'json' | 'javascript';
+  description: string;
+}
+
+export interface K6ExecutionBundle {
+  id: string;
+  testDefinitionId: string;
+  testDefinitionVersion: string;
+  testDefinitionFingerprint: string;
+  fingerprint: string; // Deterministic non-cryptographic drift checksum
+  generatedAt: string;
+  isExecutable: boolean;
+  nonExecutableReasons: string[];
+  options: K6Options;
+  files: K6ExecutionBundleFile[];
+  summary: {
+    scenariosCount: number;
+    journeysCount: number;
+    thresholdsCount: number;
+    ambiguousCriteriaExcludedCount: number;
+    credentialReferencesCount: number;
+  };
+}
+

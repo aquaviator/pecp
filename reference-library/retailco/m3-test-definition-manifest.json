@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "scenarioId": "retailco-black-friday-2026-m3-execution-ready",
+  "name": "RetailCo Black Friday 2026 Canonical Test Definition & k6 Bundle (M3.0)",
+  "version": "1.0.0",
+  "milestone": "M3.0",
+  "engineeringIntent": "FORECAST",
+  "description": "Authoritative machine-readable M3.0 reference manifest defining the governed Canonical Test Definition and compiled deterministic k6 execution bundle for the execution-ready RetailCo reference state.",
+  "upstreamSources": {
+    "historicalBlockedScenario": "reference-library/retailco/m1-scenario-manifest.json",
+    "m2ArtefactsManifest": "reference-library/retailco/m2-artefacts-manifest.json",
+    "approvedContractId": "contract-proj-retailco-bf26-v1.0-approved",
+    "approvedContractStatus": "APPROVED"
+  },
+  "governanceInvariants": {
+    "engineNeutralModel": true,
+    "noInventedSchedules": true,
+    "noInventedDurations": true,
+    "noInventedThresholds": true,
+    "workloadAttainmentSeparatedFromNfrs": true,
+    "ambiguousCriteriaExcludedFromThresholds": true,
+    "noEmbeddedSecrets": true,
+    "credentialReferencesOnly": true,
+    "deterministicNonCryptographicDriftChecksum": true,
+    "stableRuntimeDecoupledFromGeneratedBundle": true
+  },
+  "canonicalTestDefinition": {
+    "id": "test-def-proj-retailco-bf2026-v1.0",
+    "version": "v1.0",
+    "status": "READY_FOR_EXECUTION",
+    "isExecutable": true,
+    "engineeringIntent": "FORECAST",
+    "boundContract": {
+      "id": "contract-proj-retailco-bf26-v1.0-approved",
+      "version": "v1.0",
+      "status": "APPROVED"
+    },
+    "workloadAttainmentRequirement": {
+      "metric": "Target Workload Arrival Demand",
+      "targetValue": 8.75,
+      "unit": "orders/second",
+      "evaluationType": "WORKLOAD_DEMAND",
+      "isPrerequisiteForEvaluation": true
+    },
+    "schedule": {
+      "executionModel": "OPEN",
+      "totalDurationSeconds": 1320,
+      "peakArrivalRate": 8.75,
+      "rateUnit": "orders/second",
+      "stagesCount": 3,
+      "stages": [
+        { "durationSeconds": 300, "targetArrivalRate": 8.75, "description": "Ramp-up (5m)" },
+        { "durationSeconds": 900, "targetArrivalRate": 8.75, "description": "Steady-state peak (15m)" },
+        { "durationSeconds": 120, "targetArrivalRate": 0, "description": "Ramp-down (2m)" }
+      ]
+    },
+    "journeys": [
+      { "key": "browse", "name": "Browse Catalog", "weight": 0.55, "percentage": 55, "stepsCount": 1 },
+      { "key": "search", "name": "Search Catalog", "weight": 0.20, "percentage": 20, "stepsCount": 1 },
+      { "key": "basket", "name": "Basket Operations", "weight": 0.15, "percentage": 15, "stepsCount": 1 },
+      { "key": "checkout", "name": "Order Checkout", "weight": 0.08, "percentage": 8, "stepsCount": 1 },
+      { "key": "account", "name": "Account Overview", "weight": 0.02, "percentage": 2, "stepsCount": 1 }
+    ],
+    "acceptanceCriteriaPartition": {
+      "definedExecutableCount": 2,
+      "ambiguousExcludedCount": 0,
+      "criteria": [
+        {
+          "id": "ac-checkout-latency",
+          "metric": "Checkout Response Time",
+          "target": "p95 < 2000ms",
+          "percentile": 95,
+          "thresholdValue": 2000,
+          "unit": "ms",
+          "status": "DEFINED"
+        },
+        {
+          "id": "ac-global-error-rate",
+          "metric": "HTTP Error Rate",
+          "target": "< 0.5%",
+          "thresholdValue": 0.005,
+          "unit": "rate",
+          "status": "DEFINED"
+        }
+      ]
+    },
+    "targetEnvironment": {
+      "baseUrlRef": "http://reference-lab.retailco.internal:8080",
+      "isSupplied": true
+    },
+    "credentialReferences": [
+      {
+        "provider": "ENV_VAR",
+        "referenceId": "RETAILCO_CHECKOUT_AUTH_TOKEN",
+        "purpose": "Checkout API Authorization"
+      }
+    ]
+  },
+  "expectedK6ExecutionBundle": {
+    "isExecutable": true,
+    "executorType": "ramping-arrival-rate",
+    "scenarios": {
+      "count": 1,
+      "rate": 1,
+      "timeUnit": "1s",
+      "stagesCount": 3
+    },
+    "thresholds": {
+      "count": 2,
+      "expectedKeys": [
+        "http_req_duration{journey:checkout}",
+        "http_req_failed"
+      ],
+      "expressions": {
+        "http_req_duration{journey:checkout}": ["p(95)<2000"],
+        "http_req_failed": ["rate<0.005"]
+      },
+      "workloadAttainmentThresholdInjected": false
+    },
+    "files": [
+      { "filename": "config.json", "language": "json" },
+      { "filename": "journeys.js", "language": "javascript" },
+      { "filename": "entrypoint.js", "language": "javascript" }
+    ],
+    "secretLeakCheck": {
+      "rawSecretsFound": false,
+      "rawPasswordsFound": false,
+      "envVarReferencesUsed": true
+    }
+  }
+}
