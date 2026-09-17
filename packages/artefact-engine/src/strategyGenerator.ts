@@ -16,7 +16,16 @@ export interface ArtefactGenerationOptions {
   contract: PerformanceContract;
   intelligenceItems?: IntelligenceItem[];
   projectSummary?: ProjectSummary;
+  /**
+   * Explicit ISO timestamp representing the artefact generation event.
+   * If not provided, clock() will be called to capture the generation time.
+   */
   generationTimestamp?: string;
+  /**
+   * Optional clock function returning an ISO timestamp string.
+   * Used when generationTimestamp is omitted.
+   */
+  clock?: () => string;
   artefactVersion?: string;
   author?: string;
   organisation?: string;
@@ -34,11 +43,14 @@ export function generatePerformanceStrategy(
     contract,
     intelligenceItems = [],
     projectSummary,
-    generationTimestamp = contract.createdAt || '2026-09-16T00:00:00.000Z',
     artefactVersion = 'v0.1-draft',
     author = 'PECP Governance Engine',
     organisation = projectSummary?.organisation || 'Customer Organisation'
   } = options;
+
+  const generationTimestamp =
+    options.generationTimestamp ??
+    (options.clock ? options.clock() : new Date().toISOString());
 
   const fingerprint = computeContractFingerprint(contract);
   const isBlocked =
@@ -93,7 +105,7 @@ export function generatePerformanceStrategy(
       ['Generated Date', generationTimestamp, 'Deterministic timestamp'],
       ['Bound Performance Contract ID', contract.id, 'Authoritative upstream source'],
       ['Bound Contract Version', contract.version, 'Must match contract version'],
-      ['Contract Fingerprint', fingerprint, 'Enables automated drift and staleness detection'],
+      ['Contract Fingerprint', fingerprint, 'Deterministic non-cryptographic drift checksum'],
       ['Engineering Intent', contract.engineeringIntent, 'Authoritative PE intent (Constitution §6)'],
       ['Author / Generator', author, 'Governed engine compilation'],
       ['Organisation', organisation, 'Owning organisation']
@@ -266,10 +278,6 @@ export function generatePerformanceStrategy(
     }
   });
 
-  if (assumptionsList.length === 0) {
-    assumptionsList.push('Steady-state equilibrium assumed across operational test windows.');
-  }
-
   const assumptionRows = assumptionsList.map((a, idx) => [
     `ASSUMP-${idx + 1}`,
     a,
@@ -285,23 +293,33 @@ export function generatePerformanceStrategy(
     });
   }
 
+  riskCallouts.push({
+    type: 'GUIDANCE',
+    text: 'PECP Methodology Guidance: All mathematical calculations require auditable assumptions. When specific operational conditions (such as cache hit ratios or concurrency distributions) are assumed, they must be recorded in canonical intelligence.'
+  });
+
   sections.push({
     id: 'sec-6-risks-assumptions',
     sectionNumber: '6.0',
     title: 'Performance Risks & Assumptions',
-    status: riskCallouts.length > 0 ? 'BLOCKED' : 'COMPLETE',
+    status: riskCallouts.some((c) => c.type === 'BLOCKER') ? 'BLOCKED' : 'COMPLETE',
     summary: 'Governed engineering assumptions and unmitigated performance risks.',
     paragraphs: [
-      'Every calculation in PECP carries explicit mathematical assumptions. In accordance with Constitution §7, assumptions are auditable and cannot be silently introduced.'
+      assumptionsList.length > 0
+        ? 'Every calculation in PECP carries explicit mathematical assumptions. In accordance with Constitution §7, assumptions are auditable and cannot be silently introduced.'
+        : 'No explicit project-specific assumptions are recorded in canonical intelligence.'
     ],
-    tables: [
-      {
-        id: 'table-assumptions',
-        caption: 'Governed Engineering Assumptions',
-        headers: ['ID', 'Assumption Statement', 'Origin'],
-        rows: assumptionRows
-      }
-    ],
+    tables:
+      assumptionRows.length > 0
+        ? [
+            {
+              id: 'table-assumptions',
+              caption: 'Governed Engineering Assumptions',
+              headers: ['ID', 'Assumption Statement', 'Origin'],
+              rows: assumptionRows
+            }
+          ]
+        : undefined,
     callouts: riskCallouts.length > 0 ? riskCallouts : undefined
   });
 
@@ -490,38 +508,45 @@ export function generatePerformanceStrategy(
   });
 
   // 11. Test Types / Engineering Activities
+  const approvedThroughputCalc = contract.workloadCalculations.find(
+    (c) => c.outputParameter === 'order_throughput_per_second' || c.outputParameter.includes('throughput')
+  );
+  const peakDemandLabel = approvedThroughputCalc
+    ? `${approvedThroughputCalc.outputValue} ${approvedThroughputCalc.unit || 'ops/sec'} (Approved Peak Demand)`
+    : 'Approved Target Peak Demand';
+
   const testTypesTable: ArtefactTable = {
     id: 'table-test-types',
-    caption: 'Planned Performance Engineering Test Activities',
-    headers: ['Activity / Test Type', 'Objective', 'Target Workload', 'Duration', 'Key Precondition'],
+    caption: 'Proposed Performance Engineering Activities [PECP Methodology Guidance]',
+    headers: ['Activity / Test Type', 'Methodology Objective', 'Workload Target', 'Execution Duration', 'Project Definition Status'],
     rows: [
       [
         'Baseline Calibration',
         'Measure single-user baseline latency and verify test script telemetry',
-        '1 virtual user',
-        '10 minutes',
-        'Environment validated, data seeded'
+        'NOT_SUPPLIED (Single-user baseline target unresolved)',
+        'NOT_SUPPLIED (Unresolved baseline duration)',
+        'PROPOSED (Guidance) — Parameters NOT_SUPPLIED'
       ],
       [
         'Peak Load Test',
-        `Evaluate system under approved peak workload demand (${contract.workloadCalculations.find(c => c.outputParameter === 'order_throughput_per_second')?.outputValue || 'Approved'} orders/sec)`,
-        '100% target peak demand',
-        '60 minutes steady state',
-        'Baseline calibration passed'
+        'Evaluate system under approved peak workload demand',
+        peakDemandLabel,
+        'NOT_SUPPLIED (Unresolved steady-state duration)',
+        'PROPOSED (Guidance) — Duration NOT_SUPPLIED'
       ],
       [
         'Endurance / Soak Test',
         'Identify memory leaks, connection pool exhaustion, and slow resource degradation',
-        '80-100% peak demand',
-        '4 - 8 hours',
-        'Peak load test stable'
+        'NOT_SUPPLIED (Unresolved sustained load ratio)',
+        'NOT_SUPPLIED (Unresolved soak window)',
+        'PROPOSED (Guidance) — Parameters NOT_SUPPLIED'
       ],
       [
         'Headroom / Stress Test',
         'Quantify breaking threshold and recovery behavior beyond peak capacity',
-        '120% - 150% peak demand',
-        'Stepped ramp to saturation',
-        'Peak load test complete'
+        'NOT_SUPPLIED (Unresolved stress increments)',
+        'NOT_SUPPLIED (Unresolved ramp profile)',
+        'PROPOSED (Guidance) — Parameters NOT_SUPPLIED'
       ]
     ]
   };
@@ -530,12 +555,19 @@ export function generatePerformanceStrategy(
     id: 'sec-11-test-types',
     sectionNumber: '11.0',
     title: 'Test Types & Engineering Activities',
-    status: 'COMPLETE',
-    summary: 'Specific testing activities structured beneath the primary engineering intent.',
+    status: 'UNRESOLVED',
+    summary: 'Specific testing activities proposed beneath the primary engineering intent.',
     paragraphs: [
-      'Each testing activity evaluates a distinct performance dimension and carries defined entry conditions and duration parameters.'
+      `The testing activity types outlined below represent standard PECP performance engineering methodology beneath the ${contract.engineeringIntent} intent.`,
+      'Project-specific execution parameters including ramp durations, steady-state windows, and soak/stress boundaries have not been supplied in canonical intelligence and remain UNRESOLVED.'
     ],
-    tables: [testTypesTable]
+    tables: [testTypesTable],
+    callouts: [
+      {
+        type: 'GUIDANCE',
+        text: 'PECP Methodology Guidance: The engineering activities listed above are methodological proposals. Concrete execution schedules, virtual user distributions, ramp rates, and soak durations must be formally supplied in canonical intelligence and approved before test execution.'
+      }
+    ]
   });
 
   // 12. Environment Strategy
@@ -552,7 +584,7 @@ export function generatePerformanceStrategy(
   } else {
     envStatus = 'NOT_SUPPLIED';
     envParagraphs.push(
-      'Test environment architecture, hardware sizing, database replica parity, and network isolation specifications have not been supplied in canonical intelligence.'
+      'Test environment architecture, target topology, and infrastructure configuration have not been supplied in canonical intelligence.'
     );
     envCallouts.push({
       type: 'WARNING',
@@ -585,7 +617,7 @@ export function generatePerformanceStrategy(
   } else {
     dataStatus = 'NOT_SUPPLIED';
     dataParagraphs.push(
-      'Test data volumes, synthetic customer account pools, SKU catalog cardinality, and payment virtualization specifications have not been supplied in canonical intelligence.'
+      'Test data strategy, data volume requirements, and test datasets have not been supplied in canonical intelligence.'
     );
     dataCallouts.push({
       type: 'WARNING',
@@ -598,7 +630,7 @@ export function generatePerformanceStrategy(
     sectionNumber: '13.0',
     title: 'Test Data Strategy',
     status: dataStatus,
-    summary: 'Data volume requirements, synthetic provisioning, and account pooling.',
+    summary: 'Data volume requirements, test dataset specifications, and provisioning strategy.',
     paragraphs: dataParagraphs,
     callouts: dataCallouts.length > 0 ? dataCallouts : undefined,
     sourceIntelligenceIds: testDataItems.map((i) => i.id)
@@ -618,7 +650,7 @@ export function generatePerformanceStrategy(
   } else {
     obsStatus = 'NOT_SUPPLIED';
     obsParagraphs.push(
-      'Observability tooling, APM distributed tracing agents, server telemetry endpoints, and database connection collectors have not been supplied in canonical intelligence.'
+      'Observability configuration, metric collection endpoints, and telemetry tooling have not been supplied in canonical intelligence.'
     );
     obsCallouts.push({
       type: 'WARNING',
@@ -631,7 +663,7 @@ export function generatePerformanceStrategy(
     sectionNumber: '14.0',
     title: 'Observability & Telemetry Strategy',
     status: obsStatus,
-    summary: 'Distributed tracing, APM integration, server utilization telemetry, and saturation metrics.',
+    summary: 'Telemetry collection and system metric aggregation.',
     paragraphs: obsParagraphs,
     callouts: obsCallouts.length > 0 ? obsCallouts : undefined,
     sourceIntelligenceIds: observabilityItems.map((i) => i.id)
@@ -644,13 +676,12 @@ export function generatePerformanceStrategy(
     headers: ['Condition Category', 'Criterion', 'Governance Verification Rule'],
     rows: [
       ['Entry Condition', 'Performance Contract Approved', 'Upstream Performance Contract must be approved and not blocked'],
-      ['Entry Condition', 'Environment Parity Confirmed', 'Test environment validated, baseline latency calibrated'],
-      ['Entry Condition', 'Test Data Seeded & Partitioned', 'Sufficient SKU and customer account pools available'],
+      ['Entry Condition', 'Environment Parity Confirmed', 'Target environment configuration defined and verified against canonical criteria'],
+      ['Entry Condition', 'Test Data Provisioned', 'Required test datasets provisioned and partitioned'],
       ['Exit Condition', 'Workload Demand Attained', 'Test run achieved target throughput without test runner saturation'],
-      ['Exit Condition', 'All Acceptance Criteria Evaluated', 'Automated gates evaluated against defined percentile thresholds'],
+      ['Exit Condition', 'All Acceptance Criteria Evaluated', 'Every defined canonical acceptance criterion evaluated against target thresholds'],
       ['Exit Condition', 'Zero Blocking Defects', 'No unresolved critical or blocking performance defects open'],
-      ['Abort Condition', 'Error Rate > 5%', 'Test automatically aborted if unhandled 5xx errors exceed 5% of requests'],
-      ['Abort Condition', 'Sustained Infrastructure Saturation', 'CPU/Memory saturation > 95% sustained for > 5 minutes']
+      ['Abort Condition', 'Governed Circuit Breaker', 'Test run aborted if execution environment fails or unrecoverable non-SUT error occurs']
     ]
   };
 
@@ -663,7 +694,13 @@ export function generatePerformanceStrategy(
     paragraphs: [
       'Strict entry and exit criteria prevent wasteful execution in uncalibrated environments and ensure auditability of performance evidence.'
     ],
-    tables: [governanceTable]
+    tables: [governanceTable],
+    callouts: [
+      {
+        type: 'GUIDANCE',
+        text: 'PECP Methodology Guidance: Generic governance stage gates apply across all engagements. Project-specific abort thresholds and acceptance limits must derive strictly from canonical intelligence and Performance Contract specifications.'
+      }
+    ]
   });
 
   // 16. Unresolved Decisions / Blockers

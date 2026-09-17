@@ -277,6 +277,121 @@ describe('PECP Engineering Artefact Engine (M2)', () => {
       expect(md).toContain('## 7.0 Workload Strategy & Required Demand');
       expect(md).toContain('| 8.75 orders/second |');
       expect(md).toContain('> ⛔ **BLOCKER**');
+      expect(md).toContain('> 💡 **PECP METHODOLOGY GUIDANCE**');
+    });
+  });
+
+  describe('5. M2.1 Artefact Governance Gate Compliance', () => {
+    it('does not invent execution schedules or durations in Test Plan or Strategy', () => {
+      const strategy = generatePerformanceStrategy({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE
+      });
+
+      const testPlan = generatePerformanceTestPlan({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE
+      });
+
+      // Section 11 of Strategy
+      const stratSec11 = strategy.sections.find((s) => s.sectionNumber === '11.0');
+      expect(stratSec11?.status).toBe('UNRESOLVED');
+      expect(stratSec11?.callouts?.some((c) => c.type === 'GUIDANCE')).toBe(true);
+      const stratRows = stratSec11?.tables?.[0].rows || [];
+      expect(stratRows.every((r) => String(r[3]).includes('NOT_SUPPLIED'))).toBe(true);
+
+      // Section 9 of Test Plan
+      const planSec9 = testPlan.sections.find((s) => s.sectionNumber === '9.0');
+      expect(planSec9?.status).toBe('UNRESOLVED');
+      expect(planSec9?.callouts?.some((c) => c.type === 'GUIDANCE')).toBe(true);
+      const planRows = planSec9?.tables?.[0].rows || [];
+      expect(planRows.every((r) => String(r[4]).includes('NOT_SUPPLIED'))).toBe(true);
+    });
+
+    it('does not fabricate assumptions in Strategy Section 6.0', () => {
+      const strategy = generatePerformanceStrategy({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE
+      });
+
+      const sec6 = strategy.sections.find((s) => s.sectionNumber === '6.0');
+      expect(sec6).toBeDefined();
+
+      const tableRows = sec6?.tables?.[0]?.rows || [];
+      // Must not fabricate "Steady-state equilibrium assumed across operational test windows"
+      expect(tableRows.some((r) => String(r[1]).includes('Steady-state equilibrium assumed'))).toBe(false);
+
+      // Must include PECP methodology guidance
+      const guidanceCallout = sec6?.callouts?.find((c) => c.type === 'GUIDANCE');
+      expect(guidanceCallout).toBeDefined();
+      expect(guidanceCallout?.text).toContain('PECP Methodology Guidance');
+    });
+
+    it('documents fingerprint as non-cryptographic drift checksum', () => {
+      const strategy = generatePerformanceStrategy({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE
+      });
+
+      const sec1 = strategy.sections.find((s) => s.sectionNumber === '1.0');
+      const fpRow = sec1?.tables?.[0].rows.find((r) => r[0] === 'Contract Fingerprint');
+      expect(fpRow?.[2]).toBe('Deterministic non-cryptographic drift checksum');
+    });
+
+    it('respects generation timestamp semantics with explicit timestamp or clock', () => {
+      const fixedTime = '2026-11-20T14:30:00.000Z';
+      const strategy = generatePerformanceStrategy({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        generationTimestamp: fixedTime
+      });
+
+      expect(strategy.generationTimestamp).toBe(fixedTime);
+      const sec1 = strategy.sections.find((s) => s.sectionNumber === '1.0');
+      const genRow = sec1?.tables?.[0].rows.find((r) => r[0] === 'Generated Date');
+      expect(genRow?.[1]).toBe(fixedTime);
+
+      const clockTime = '2026-12-01T09:00:00.000Z';
+      const plan = generatePerformanceTestPlan({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE,
+        clock: () => clockTime
+      });
+
+      expect(plan.generationTimestamp).toBe(clockTime);
+    });
+
+    it('does not invent abort thresholds in Section 14 or Section 15', () => {
+      const strategy = generatePerformanceStrategy({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE
+      });
+
+      const testPlan = generatePerformanceTestPlan({
+        contract: postResolutionContract,
+        intelligenceItems: RETAILCO_M1_POST_RESOLUTION_ITEMS_FIXTURE,
+        projectSummary: RETAILCO_PROJECT_FIXTURE
+      });
+
+      // Strategy Section 15: no hardcoded "Error Rate > 5%" or "saturation > 95%"
+      const stratSec15 = strategy.sections.find((s) => s.sectionNumber === '15.0');
+      const govRows = stratSec15?.tables?.[0].rows || [];
+      expect(govRows.some((r) => String(r[1]).includes('Error Rate > 5%'))).toBe(false);
+      expect(govRows.some((r) => String(r[1]).includes('saturation > 95%'))).toBe(false);
+
+      // Test Plan Section 14: PASS condition does not invent "< 1%" error budget when not in contract
+      const planSec14 = testPlan.sections.find((s) => s.sectionNumber === '14.0');
+      const evalRows = planSec14?.tables?.[0].rows || [];
+      const passRow = evalRows.find((r) => r[0] === 'PASS');
+      expect(passRow?.[2]).not.toContain('< 1%');
+      expect(passRow?.[2]).toContain('Every defined canonical acceptance criterion passes');
     });
   });
 });

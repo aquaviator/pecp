@@ -34,9 +34,12 @@ function renderCallout(callout: ArtefactCallout): string {
       ? '⚠️'
       : callout.type === 'ASSUMPTION'
       ? '📌'
+      : callout.type === 'GUIDANCE'
+      ? '💡'
       : 'ℹ️';
 
-  return `> ${icon} **${callout.type}**: ${callout.text}\n`;
+  const label = callout.type === 'GUIDANCE' ? 'PECP METHODOLOGY GUIDANCE' : callout.type;
+  return `> ${icon} **${label}**: ${callout.text}\n`;
 }
 
 /**

@@ -5,8 +5,10 @@ import {
 } from '@pecp/pe-domain';
 
 /**
- * Computes a deterministic string hash/fingerprint of a Performance Contract.
+ * Computes a deterministic, non-cryptographic drift checksum/fingerprint of a Performance Contract.
  * Detects structural or value drift in calculations, criteria, readiness, or issues.
+ * Uses 32-bit FNV-1a for lightweight, environment-agnostic drift detection.
+ * NOTE: This is a deterministic drift checksum, NOT a cryptographic hash or signature.
  */
 export function computeContractFingerprint(contract: PerformanceContract): string {
   const digestPayload = {

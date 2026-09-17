@@ -20,7 +20,17 @@
     "documentControl": {
       "boundContractId": "contract-proj-retailco-bf26-v0.1-draft",
       "boundContractVersion": "v0.1-draft",
-      "hasContractFingerprint": true
+      "hasContractFingerprint": true,
+      "fingerprintSemantics": "non-cryptographic-drift-checksum"
+    },
+    "assumptions": {
+      "inventedAssumptions": false,
+      "defaultSteadyStateEquilibriumInjected": false
+    },
+    "testActivities": {
+      "inventedSchedules": false,
+      "status": "UNRESOLVED",
+      "methodologyGuidanceDistinguished": true
     },
     "workloadStrategy": {
       "approvedDemand": {
@@ -94,6 +104,15 @@
       "requiredDemandPerSecond": 8.75,
       "concurrencyStatus": "BLOCKED"
     },
+    "executionScenarios": {
+      "inventedSchedules": false,
+      "status": "UNRESOLVED",
+      "methodologyGuidanceDistinguished": true
+    },
+    "preconditions": {
+      "unsourcedToolingPreconditions": false,
+      "methodologyGuidanceDistinguished": true
+    },
     "acceptanceCriteria": {
       "ambiguousCount": 1,
       "definedCount": 0
@@ -101,7 +120,9 @@
     "passFailEvaluationRules": {
       "passRequiresDemandAttainment": true,
       "failCondition": "Breach of defined criteria under attained demand",
-      "inconclusiveCondition": "Failure to attain required workload demand or criteria non-evaluable"
+      "inconclusiveCondition": "Failure to attain required workload demand or criteria non-evaluable",
+      "inventedThresholds": false,
+      "thresholdsTraceToCanonicalCriteria": true
     },
     "executableScriptsGenerated": false,
     "unresolvedBlockersCarried": true

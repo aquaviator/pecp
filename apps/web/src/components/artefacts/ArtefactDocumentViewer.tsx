@@ -15,7 +15,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   Info,
-  Sparkles
+  Sparkles,
+  Lightbulb
 } from 'lucide-react';
 import {
   EngineeringArtefact,
@@ -382,6 +383,8 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
                           ? 'bg-amber-950/40 border-amber-800 text-amber-200'
                           : callout.type === 'ASSUMPTION'
                           ? 'bg-indigo-950/40 border-indigo-800 text-indigo-200'
+                          : callout.type === 'GUIDANCE'
+                          ? 'bg-violet-950/40 border-violet-800 text-violet-200'
                           : 'bg-sky-950/40 border-sky-800 text-sky-200'
                       }`}
                     >
@@ -391,12 +394,14 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
                         <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                       ) : callout.type === 'ASSUMPTION' ? (
                         <Layers className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                      ) : callout.type === 'GUIDANCE' ? (
+                        <Lightbulb className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
                       ) : (
                         <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                       )}
                       <div className="space-y-0.5">
                         <span className="font-bold uppercase tracking-wider text-[10px]">
-                          {callout.type}
+                          {callout.type === 'GUIDANCE' ? 'PECP Methodology Guidance' : callout.type}
                         </span>
                         <p className="leading-relaxed">{callout.text}</p>
                       </div>

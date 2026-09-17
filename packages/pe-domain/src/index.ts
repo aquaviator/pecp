@@ -374,7 +374,7 @@ export type ArtefactSectionStatus =
   | 'NOT_SUPPLIED'
   | 'BLOCKED';
 
-export type ArtefactCalloutType = 'INFO' | 'WARNING' | 'BLOCKER' | 'ASSUMPTION';
+export type ArtefactCalloutType = 'INFO' | 'WARNING' | 'BLOCKER' | 'ASSUMPTION' | 'GUIDANCE';
 
 export interface ArtefactCallout {
   id?: string;

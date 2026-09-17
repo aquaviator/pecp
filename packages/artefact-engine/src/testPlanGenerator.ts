@@ -25,11 +25,14 @@ export function generatePerformanceTestPlan(
     contract,
     intelligenceItems = [],
     projectSummary,
-    generationTimestamp = contract.createdAt || '2026-09-16T00:00:00.000Z',
     artefactVersion = 'v0.1-draft',
     author = 'PECP Governance Engine',
     organisation = projectSummary?.organisation || 'Customer Organisation'
   } = options;
+
+  const generationTimestamp =
+    options.generationTimestamp ??
+    (options.clock ? options.clock() : new Date().toISOString());
 
   const fingerprint = computeContractFingerprint(contract);
   const isBlocked =
@@ -81,7 +84,7 @@ export function generatePerformanceTestPlan(
       ['Generated Date', generationTimestamp, 'Deterministic timestamp'],
       ['Bound Performance Contract ID', contract.id, 'Upstream authoritative contract'],
       ['Bound Contract Version', contract.version, 'Must match contract version'],
-      ['Contract Fingerprint', fingerprint, 'Drift detection digest'],
+      ['Contract Fingerprint', fingerprint, 'Deterministic non-cryptographic drift checksum'],
       ['Engineering Intent', contract.engineeringIntent, 'Authoritative PE intent'],
       ['Author / Generator', author, 'Governed generation engine'],
       ['Organisation', organisation, 'Owning organisation']
@@ -352,40 +355,40 @@ export function generatePerformanceTestPlan(
 
   const scenariosTable: ArtefactTable = {
     id: 'table-scenarios',
-    caption: 'Defined Execution Scenarios',
-    headers: ['Scenario ID', 'Scenario Name', 'Workload Target', 'Ramp Profile', 'Steady State', 'Evaluation Goal'],
+    caption: 'Proposed Execution Scenarios [PECP Methodology Guidance]',
+    headers: ['Scenario ID', 'Proposed Scenario', 'Workload Target', 'Ramp Profile', 'Steady State Window', 'Project Definition Status'],
     rows: [
       [
         'SCEN-01',
         'Baseline Health Calibration',
-        'Low load (single user)',
-        'Immediate',
-        '10 mins',
-        'Verify zero script errors and baseline response times'
+        'NOT_SUPPLIED (Single-user baseline target unresolved)',
+        'NOT_SUPPLIED',
+        'NOT_SUPPLIED',
+        'PROPOSED (Guidance) — Schedule NOT_SUPPLIED'
       ],
       [
         'SCEN-02',
         'Peak Load Capacity Test',
-        `100% Demand (${throughputText})`,
-        '15 min stepped ramp',
-        '60 mins',
-        'Validate all defined acceptance criteria at full projected volume'
+        `${throughputText} (Approved Peak Demand)`,
+        'NOT_SUPPLIED',
+        'NOT_SUPPLIED',
+        'PROPOSED (Guidance) — Schedule NOT_SUPPLIED'
       ],
       [
         'SCEN-03',
-        'Soak / Endurance Test',
-        `80% - 100% Demand (${throughputText})`,
-        '15 min ramp',
-        '4 hours',
-        'Detect memory leakage, pool exhaustion, and slow degradation'
+        'Endurance / Soak Test',
+        'NOT_SUPPLIED (Sustained load ratio unresolved)',
+        'NOT_SUPPLIED',
+        'NOT_SUPPLIED',
+        'PROPOSED (Guidance) — Schedule NOT_SUPPLIED'
       ],
       [
         'SCEN-04',
         'Stress / Headroom Discovery',
-        'Stepped 120% -> 150% demand',
-        '10% steps every 10 mins',
-        'Until saturation',
-        'Determine breaking threshold and graceful degradation cliff'
+        'NOT_SUPPLIED (Stress target unresolved)',
+        'NOT_SUPPLIED',
+        'NOT_SUPPLIED',
+        'PROPOSED (Guidance) — Schedule NOT_SUPPLIED'
       ]
     ]
   };
@@ -394,13 +397,20 @@ export function generatePerformanceTestPlan(
     id: 'sec-9-scenarios',
     sectionNumber: '9.0',
     title: 'Test Scenarios & Workload Schedules',
-    status: 'COMPLETE',
-    summary: 'Structured execution schedules for evaluating system stability across operational profiles.',
+    status: 'UNRESOLVED',
+    summary: 'Structured execution scenarios proposed beneath the primary engineering intent.',
     paragraphs: [
-      'Scenarios are designed to exercise the system through controlled workload ramps, sustained steady states, and saturation sweeps.',
-      'Note (M2 Scope): Executable test scripts (e.g. k6) are not generated in this work package. Script generation will occur in M3 following contract approval.'
+      `Scenarios represent proposed engineering activities beneath the ${contract.engineeringIntent} intent.`,
+      'Execution parameters including ramp durations, steady-state windows, and soak/stress boundaries have not been supplied in canonical intelligence and remain UNRESOLVED.',
+      'Note (M2 Scope): Executable test scripts (e.g. k6) are not generated in this work package. Script generation will occur in M3 following contract and scenario approval.'
     ],
-    tables: [scenariosTable]
+    tables: [scenariosTable],
+    callouts: [
+      {
+        type: 'GUIDANCE',
+        text: 'PECP Methodology Guidance: Planned testing types represent proposed engineering activities beneath the FORECAST intent. Exact execution durations, ramp rates, soak windows, and stress increments have not been supplied in canonical intelligence and remain UNRESOLVED.'
+      }
+    ]
   });
 
   // 10. Environment
@@ -417,7 +427,7 @@ export function generatePerformanceTestPlan(
   } else {
     envStatus = 'NOT_SUPPLIED';
     envParagraphs.push(
-      'Target test environment infrastructure, hardware scaling ratios, and database configuration have not been supplied in canonical intelligence.'
+      'Target test environment infrastructure, architecture specifications, and hardware scaling ratios have not been supplied in canonical intelligence.'
     );
     envCallouts.push({
       type: 'WARNING',
@@ -450,7 +460,7 @@ export function generatePerformanceTestPlan(
   } else {
     dataStatus = 'NOT_SUPPLIED';
     dataParagraphs.push(
-      'Test data volumes, synthetic user account pools, SKU inventory counts, and credential partitions have not been supplied in canonical intelligence.'
+      'Test data strategy, data volume requirements, and test datasets have not been supplied in canonical intelligence.'
     );
     dataCallouts.push({
       type: 'WARNING',
@@ -463,7 +473,7 @@ export function generatePerformanceTestPlan(
     sectionNumber: '11.0',
     title: 'Test Data & Synthetic Datasets',
     status: dataStatus,
-    summary: 'Data volume requirements, credential pooling, and data isolation.',
+    summary: 'Data volume requirements, test dataset specifications, and provisioning strategy.',
     paragraphs: dataParagraphs,
     callouts: dataCallouts.length > 0 ? dataCallouts : undefined,
     sourceIntelligenceIds: testDataItems.map((i) => i.id)
@@ -483,7 +493,7 @@ export function generatePerformanceTestPlan(
   } else {
     obsStatus = 'NOT_SUPPLIED';
     obsParagraphs.push(
-      'Observability agents, APM distributed tracing configurations, and server utilization metric endpoints have not been supplied in canonical intelligence.'
+      'Observability configuration, metric collection endpoints, and telemetry tooling have not been supplied in canonical intelligence.'
     );
     obsCallouts.push({
       type: 'WARNING',
@@ -496,7 +506,7 @@ export function generatePerformanceTestPlan(
     sectionNumber: '12.0',
     title: 'Observability & Evidence Collection',
     status: obsStatus,
-    summary: 'Telemetry collection, APM tracing, and diagnostic metric aggregation.',
+    summary: 'Telemetry collection and system metric aggregation.',
     paragraphs: obsParagraphs,
     callouts: obsCallouts.length > 0 ? obsCallouts : undefined,
     sourceIntelligenceIds: observabilityItems.map((i) => i.id)
@@ -510,9 +520,21 @@ export function generatePerformanceTestPlan(
     rows: [
       ['Contract Approval', 'Performance Contract formally approved (not BLOCKED)', 'PECP governance check'],
       ['Blocker Resolution', 'Zero active blocking issues in canonical model', 'Automated readiness gate'],
-      ['Environment Readiness', 'Target environment healthy, baseline latency verified', 'Ping / smoke test check'],
-      ['Test Data Provisioning', 'Synthetic accounts seeded and validated', 'Account login smoke test'],
-      ['Observability Readiness', 'APM tracing collectors receiving active telemetry', 'Collector heartbeat verify']
+      [
+        'Environment Readiness',
+        hasSuppliedContent(environmentItems) ? 'Environment validated against canonical criteria' : 'Target environment configuration defined and verified',
+        hasSuppliedContent(environmentItems) ? 'Canonical environment verification' : 'NOT_SUPPLIED (Environment intelligence required)'
+      ],
+      [
+        'Test Data Provisioning',
+        hasSuppliedContent(testDataItems) ? 'Test data provisioned and partitioned' : 'Test datasets and provisioning strategy defined',
+        hasSuppliedContent(testDataItems) ? 'Canonical data validation' : 'NOT_SUPPLIED (Test data intelligence required)'
+      ],
+      [
+        'Observability Readiness',
+        hasSuppliedContent(observabilityItems) ? 'Observability endpoints and telemetry validated' : 'Telemetry collection endpoints mapped and active',
+        hasSuppliedContent(observabilityItems) ? 'Canonical telemetry verification' : 'NOT_SUPPLIED (Observability intelligence required)'
+      ]
     ]
   };
 
@@ -525,7 +547,13 @@ export function generatePerformanceTestPlan(
     paragraphs: [
       'To prevent invalid runs and false performance evidence, execution is blocked until all preconditions below are certified.'
     ],
-    tables: [preconditionsTable]
+    tables: [preconditionsTable],
+    callouts: [
+      {
+        type: 'GUIDANCE',
+        text: 'PECP Methodology Guidance: Execution preconditions ensure tests are only run against calibrated environments. Tooling-specific verification procedures must trace to canonical intelligence definitions.'
+      }
+    ]
   });
 
   // 14. Pass / Fail / Inconclusive Rules
@@ -537,22 +565,22 @@ export function generatePerformanceTestPlan(
       [
         'PASS',
         'System satisfies all non-functional acceptance criteria under required workload demand.',
-        '1. Required workload demand achieved.\n2. All defined acceptance criteria pass.\n3. Error rate within budget (< 1%).\n4. Infrastructure within saturation ceilings.'
+        '1. Required workload demand achieved.\n2. Every defined canonical acceptance criterion passes.'
       ],
       [
         'FAIL',
         'System breached one or more acceptance criteria under required workload demand.',
-        '1. Required workload demand achieved.\n2. One or more acceptance criteria breached (e.g. latency ceiling exceeded).'
+        '1. Required workload demand achieved.\n2. One or more defined canonical acceptance criteria fail.'
       ],
       [
         'PASS_WITH_OBSERVATION',
         'Core criteria passed, but sub-critical anomalies observed.',
-        '1. Required demand achieved.\n2. Primary criteria passed.\n3. Non-blocking observation noted (e.g. temporary queue spike).'
+        '1. Required workload demand achieved.\n2. Defined blocking criteria pass.\n3. Governed non-blocking observations exist.'
       ],
       [
         'INCONCLUSIVE',
         'Test run could not be authoritatively evaluated.',
-        '1. Required workload demand was NOT attained (e.g. test harness bottleneck, cloud throttling).\n2. Unhandled test script abort or network failure.\n3. Acceptance criteria ambiguous or non-evaluable.'
+        '1. Required workload demand was NOT attained (e.g. test harness bottleneck, cloud throttling).\n2. Test run aborted for non-SUT environmental or execution reasons.\n3. Required acceptance criteria are ambiguous or non-evaluable.'
       ]
     ]
   };
@@ -566,7 +594,13 @@ export function generatePerformanceTestPlan(
     paragraphs: [
       'In PECP, test runs are classified according to strict evidentiary rules. A run where the load generator failed to deliver the required demand cannot be graded as PASS or FAIL—it is strictly INCONCLUSIVE.'
     ],
-    tables: [evaluationRulesTable]
+    tables: [evaluationRulesTable],
+    callouts: [
+      {
+        type: 'GUIDANCE',
+        text: 'PECP Methodology Guidance: Governed release gates require workload demand attainment before evaluating acceptance criteria. Numeric pass/fail thresholds derive exclusively from canonical acceptance criteria.'
+      }
+    ]
   });
 
   // 15. Risks / Assumptions / Blockers
