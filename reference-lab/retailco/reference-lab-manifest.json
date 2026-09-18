@@ -85,6 +85,15 @@
       "authRequired": false,
       "payloadRequired": false,
       "description": "Customer past order history"
+    },
+    {
+      "id": "route-metrics",
+      "path": "/api/v1/metrics",
+      "method": "GET",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": false,
+      "description": "Reference Lab internal telemetry and business attainment event counter cross-check"
     }
   ]
 }

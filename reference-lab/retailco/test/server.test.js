@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { createRetailCoLabServer } from '../src/server.js';
 
 test('RetailCo Reference Lab Service Tests', async (t) => {
-  const EPHEMERAL_TOKEN = 'ephemeral-lab-token-xyz-123';
+  const EPHEMERAL_TOKEN = `ephemeral-lab-token-${crypto.randomUUID()}`;
   const lab = createRetailCoLabServer({
     port: 0, // ephemeral port
     authToken: EPHEMERAL_TOKEN,

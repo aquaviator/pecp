@@ -19,18 +19,23 @@
     "id": "test-def-proj-retailco-bf2026-v1.0",
     "version": "v1.0",
     "status": "READY_FOR_EXECUTION",
+    "fingerprint": "fp-02c71036",
     "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
-    "sourceContractVersion": "v1.0"
+    "sourceContractVersion": "v1.0",
+    "sourceContractFingerprint": "fp-0dad9ae4"
   },
   "k6Runtime": {
     "version": "1.0.0",
-    "sourceId": "pecp-k6-runtime-v1.0.0",
+    "sourceId": "pecp-stable-k6-runtime-v1.0.0",
     "entrypoint": "entrypoint.js",
     "bundleFiles": [
       "config.json",
       "journeys.js",
-      "entrypoint.js"
-    ]
+      "entrypoint.js",
+      "runtime.js"
+    ],
+    "bundleFingerprint": "fp-2d4ec79a",
+    "testDefinitionFingerprint": "fp-02c71036"
   },
   "governedWorkload": {
     "schedulerArrivalPopulation": "JOURNEY_ITERATION",
@@ -68,29 +73,33 @@
   },
   "expectedHealthyThresholds": [
     {
-      "criterionId": "nfr-021-checkout-latency",
+      "criterionId": "ac-checkout-latency",
       "metric": "http_req_duration{journey:checkout}",
       "aggregation": "p(95)",
       "operator": "<",
       "threshold": 2000,
-      "unit": "ms"
+      "unit": "ms",
+      "expression": "p(95)<2000"
     },
     {
-      "criterionId": "nfr-022-system-error-rate",
+      "criterionId": "ac-global-error-rate",
       "metric": "http_req_failed",
       "aggregation": "rate",
       "operator": "<",
       "threshold": 0.005,
-      "unit": "percentage"
+      "unit": "rate",
+      "expression": "rate<0.005"
     }
   ],
   "preflightChecks": {
     "contractApproved": true,
     "testDefinitionCompiled": true,
+    "k6BundleCompiled": true,
     "referenceLabManifestAligned": true,
     "referenceLabRoutesVerified": true,
     "credentialBindingsDefined": true,
     "populationSemanticsHardened": true,
+    "thresholdsBoundToApprovedContract": true,
     "targetResolvable": true,
     "liveExecutionNotStarted": true
   }

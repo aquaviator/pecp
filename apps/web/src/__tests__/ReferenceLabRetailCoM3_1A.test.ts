@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRetailCoLabServer } from '../../../../reference-lab/retailco/src/server.js';
@@ -9,11 +10,18 @@ import {
   RETAILCO_M3_POPULATION_RELATIONSHIP,
   RETAILCO_M3_WORKLOAD_SCHEDULE
 } from '../fixtures/retailco/m3ExecutionFixture';
-import { compileTestDefinition } from '@pecp/test-engine';
+import {
+  compileTestDefinition,
+  compileK6Bundle,
+  buildExecutionPreflightManifest,
+  validateExecutionPreflightManifest,
+  PECP_STABLE_K6_RUNTIME_VERSION,
+  PECP_STABLE_K6_RUNTIME_SOURCE_ID
+} from '@pecp/test-engine';
 import { RETAILCO_PROJECT_FIXTURE } from '../fixtures/retailco/projectFixture';
 
 describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
-  const EPHEMERAL_TOKEN = 'test-token-vault-runtime-8989';
+  const EPHEMERAL_TOKEN = `test-token-${crypto.randomUUID()}`;
   let lab: ReturnType<typeof createRetailCoLabServer>;
   let baseUrl: string;
 
@@ -154,6 +162,15 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       expect(Array.isArray(data.orders)).toBe(true);
       expect(data.orders.length).toBeGreaterThanOrEqual(2);
     });
+
+    it('GET /api/v1/metrics exposes service telemetry and business event counters', async () => {
+      const res = await fetch(`${baseUrl}/api/v1/metrics`);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.service).toBe('retailco-reference-lab');
+      expect(typeof data.businessAttainmentEvents.order_created).toBe('number');
+      expect(data.businessAttainmentEvents.order_created).toBeGreaterThanOrEqual(1);
+    });
   });
 
   describe('2. Reference Lab Manifest Agreement', () => {
@@ -163,7 +180,7 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
     );
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-    it('manifest describes all 5 canonical RetailCo journeys', () => {
+    it('manifest describes all 5 canonical RetailCo journeys and /api/v1/metrics route', () => {
       for (const journey of RETAILCO_M3_JOURNEYS) {
         for (const step of journey.steps) {
           const matchedRoute = manifest.routes.find(
@@ -193,29 +210,228 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
           }
         }
       }
+
+      const metricsRoute = manifest.routes.find((r: any) => r.path === '/api/v1/metrics');
+      expect(metricsRoute).toBeDefined();
+      expect(metricsRoute.method).toBe('GET');
+      expect(metricsRoute.expectedStatus).toBe(200);
+      expect(metricsRoute.authRequired).toBe(false);
     });
   });
 
-  describe('3. Preflight Manifest Artefact', () => {
+  describe('3. Preflight Manifest Artefact & Binding Integrity Gate', () => {
     const preflightPath = path.resolve(
       __dirname,
       '../../../../reference-library/retailco/m3-preflight-manifest.json'
     );
-    const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+    const labManifestPath = path.resolve(
+      __dirname,
+      '../../../../reference-lab/retailco/reference-lab-manifest.json'
+    );
+    const labManifest = JSON.parse(fs.readFileSync(labManifestPath, 'utf8'));
 
-    it('records preflight configuration with READY_FOR_LIVE_EXECUTION', () => {
-      expect(preflight.status).toBe('READY_FOR_LIVE_EXECUTION');
-      expect(preflight.service).toBe('retailco-reference-lab');
-      expect(preflight.targetEnvironment.defaultBaseUrl).toBe('http://localhost:8080');
-      expect(preflight.governedWorkload.schedulerPeakRate.value).toBe(109.375);
-      expect(preflight.governedWorkload.businessWorkloadAttainment.targetValue).toBe(8.75);
-      expect(preflight.governedWorkload.populationRelationship.contributionPerSuccessfulEvent).toBe(1);
-      expect(preflight.credentialBindings.requiredReferences[0].referenceId).toBe(
-        'RETAILCO_CHECKOUT_AUTH_TOKEN'
+    const compiledTestDef = compileTestDefinition({
+      contract: RETAILCO_M3_APPROVED_CONTRACT,
+      projectSummary: RETAILCO_PROJECT_FIXTURE,
+      version: 'v1.0',
+      executionIntelligence: RETAILCO_M3_EXECUTION_INTELLIGENCE
+    });
+
+    const compiledBundle = compileK6Bundle({
+      testDefinition: compiledTestDef,
+      generatedAt: '2026-09-18T10:30:00Z'
+    });
+
+    it('builds a deterministic preflight manifest bound to compiled test definition and k6 bundle', () => {
+      const builtManifest = buildExecutionPreflightManifest({
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest,
+        preflightTimestamp: '2026-09-18T10:30:00Z'
+      });
+
+      expect(builtManifest.status).toBe('READY_FOR_LIVE_EXECUTION');
+      expect(builtManifest.canonicalTestDefinition.id).toBe(compiledTestDef.id);
+      expect(builtManifest.canonicalTestDefinition.fingerprint).toBe(compiledTestDef.fingerprint);
+      expect(builtManifest.canonicalTestDefinition.sourceContractId).toBe(compiledTestDef.sourceContractId);
+      expect(builtManifest.canonicalTestDefinition.sourceContractFingerprint).toBe(compiledTestDef.sourceContractFingerprint);
+
+      expect(builtManifest.k6Runtime.version).toBe(PECP_STABLE_K6_RUNTIME_VERSION);
+      expect(builtManifest.k6Runtime.sourceId).toBe(PECP_STABLE_K6_RUNTIME_SOURCE_ID);
+      expect(builtManifest.k6Runtime.bundleFingerprint).toBe(compiledBundle.fingerprint);
+      expect(builtManifest.k6Runtime.testDefinitionFingerprint).toBe(compiledBundle.testDefinitionFingerprint);
+      expect(builtManifest.k6Runtime.bundleFiles).toContain('runtime.js');
+
+      // Acceptance criteria check
+      const checkoutThresh = builtManifest.expectedHealthyThresholds.find(
+        (t) => t.criterionId === 'ac-checkout-latency'
       );
-      expect(preflight.preflightChecks.contractApproved).toBe(true);
-      expect(preflight.preflightChecks.testDefinitionCompiled).toBe(true);
-      expect(preflight.preflightChecks.targetResolvable).toBe(true);
+      expect(checkoutThresh).toBeDefined();
+      expect(checkoutThresh?.metric).toBe('http_req_duration{journey:checkout}');
+      expect(checkoutThresh?.expression).toBe('p(95)<2000');
+
+      const errorThresh = builtManifest.expectedHealthyThresholds.find(
+        (t) => t.criterionId === 'ac-global-error-rate'
+      );
+      expect(errorThresh).toBeDefined();
+      expect(errorThresh?.metric).toBe('http_req_failed');
+      expect(errorThresh?.unit).toBe('rate');
+      expect(errorThresh?.expression).toBe('rate<0.005');
+    });
+
+    it('validates authoritative m3-preflight-manifest.json against compiled outputs with zero drift', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+
+      const validation = validateExecutionPreflightManifest(preflight, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest
+      });
+
+      expect(validation.issues).toEqual([]);
+      expect(validation.isValid).toBe(true);
+      expect(validation.status).toBe('READY_FOR_LIVE_EXECUTION');
+
+      expect(preflight.status).toBe('READY_FOR_LIVE_EXECUTION');
+      expect(preflight.canonicalTestDefinition.fingerprint).toBe(compiledTestDef.fingerprint);
+      expect(preflight.canonicalTestDefinition.sourceContractFingerprint).toBe(compiledTestDef.sourceContractFingerprint);
+      expect(preflight.k6Runtime.sourceId).toBe(PECP_STABLE_K6_RUNTIME_SOURCE_ID);
+      expect(preflight.k6Runtime.version).toBe(PECP_STABLE_K6_RUNTIME_VERSION);
+      expect(preflight.k6Runtime.bundleFingerprint).toBe(compiledBundle.fingerprint);
+      expect(preflight.k6Runtime.bundleFiles).toContain('runtime.js');
+
+      // Criterion IDs must match approved contract
+      const criteriaIds = preflight.expectedHealthyThresholds.map((t: any) => t.criterionId);
+      expect(criteriaIds).toContain('ac-checkout-latency');
+      expect(criteriaIds).toContain('ac-global-error-rate');
+
+      // Error rate unit must not be percentage
+      const errorRateThresh = preflight.expectedHealthyThresholds.find(
+        (t: any) => t.metric === 'http_req_failed'
+      );
+      expect(errorRateThresh.unit).toBe('rate');
+    });
+
+    it('rejects preflight when test definition fingerprint drifts', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const drifted = {
+        ...preflight,
+        canonicalTestDefinition: {
+          ...preflight.canonicalTestDefinition,
+          fingerprint: 'fp-drifted-fake-9999'
+        }
+      };
+
+      const result = validateExecutionPreflightManifest(drifted, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.status).toBe('PREFLIGHT_BLOCKED');
+      expect(result.issues.some((i) => i.field === 'canonicalTestDefinition.fingerprint')).toBe(true);
+    });
+
+    it('rejects preflight when k6 bundle runtime sourceId drifts', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const drifted = {
+        ...preflight,
+        k6Runtime: {
+          ...preflight.k6Runtime,
+          sourceId: 'pecp-k6-runtime-v0.9.0'
+        }
+      };
+
+      const result = validateExecutionPreflightManifest(drifted, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.field === 'k6Runtime.sourceId')).toBe(true);
+    });
+
+    it('rejects preflight when bundle files list is missing runtime.js', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const drifted = {
+        ...preflight,
+        k6Runtime: {
+          ...preflight.k6Runtime,
+          bundleFiles: ['config.json', 'journeys.js', 'entrypoint.js']
+        }
+      };
+
+      const result = validateExecutionPreflightManifest(drifted, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.field === 'k6Runtime.bundleFiles')).toBe(true);
+    });
+
+    it('rejects preflight when threshold criterion ID does not match approved contract', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const drifted = {
+        ...preflight,
+        expectedHealthyThresholds: [
+          {
+            criterionId: 'unapproved-random-criterion',
+            metric: 'http_req_duration{journey:checkout}',
+            aggregation: 'p(95)',
+            operator: '<',
+            threshold: 2000,
+            unit: 'ms',
+            expression: 'p(95)<2000'
+          }
+        ]
+      };
+
+      const result = validateExecutionPreflightManifest(drifted, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.field.includes('unapproved-random-criterion'))).toBe(true);
+    });
+
+    it('rejects preflight when error rate threshold unit is percentage instead of rate/fraction', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const drifted = {
+        ...preflight,
+        expectedHealthyThresholds: preflight.expectedHealthyThresholds.map((t: any) =>
+          t.metric === 'http_req_failed' ? { ...t, unit: 'percentage' } : t
+        )
+      };
+
+      const result = validateExecutionPreflightManifest(drifted, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.field.includes('unit'))).toBe(true);
+    });
+
+    it('blocks preflight when live execution has already started', () => {
+      const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+
+      const result = validateExecutionPreflightManifest(preflight, {
+        testDefinition: compiledTestDef,
+        bundle: compiledBundle,
+        referenceLabManifest: labManifest,
+        liveExecutionStarted: true
+      });
+
+      expect(result.isValid).toBe(false);
+      expect(result.status).toBe('PREFLIGHT_BLOCKED');
+      expect(result.issues.some((i) => i.field === 'preflightChecks.liveExecutionNotStarted')).toBe(true);
     });
   });
 
