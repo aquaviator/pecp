@@ -243,13 +243,13 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       generatedAt: '2026-09-18T10:30:00Z'
     });
 
-    const getVerifiedTargetProbe = async (): Promise<TargetProbeResult> => {
+    const getVerifiedTargetProbe = async (targetUrl: string = 'http://localhost:8080'): Promise<TargetProbeResult> => {
       const healthRes = await fetch(`${baseUrl}/health`);
       const readyRes = await fetch(`${baseUrl}/ready`);
       const healthData = (await healthRes.json().catch(() => ({}))) as { status?: string };
       const readyData = (await readyRes.json().catch(() => ({}))) as { status?: string };
       return {
-        baseUrl,
+        baseUrl: targetUrl,
         healthStatus: healthData.status || 'healthy',
         readyStatus: readyData.status || 'ready',
         verifiedAt: '2026-09-18T10:30:00Z',
@@ -855,7 +855,9 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
           healthStatus: 'degraded',
           readyStatus: 'ready',
           verifiedAt: '2026-09-18T10:30:00Z',
-          isResolvable: false
+          isResolvable: false,
+          httpStatusHealth: 500,
+          httpStatusReady: 200
         };
 
         const manifest = buildExecutionPreflightManifest({
@@ -929,6 +931,539 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
 
         expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
         expect(manifest.preflightChecks.credentialBindingsDefined).toBe(false);
+      });
+    });
+
+    describe('M3.1A.3: Preflight Binding Completeness Gate', () => {
+      it('blocks and invalidates when manifest asserts READY_FOR_LIVE_EXECUTION but one preflight check is false', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+        const tampered = {
+          ...preflight,
+          status: 'READY_FOR_LIVE_EXECUTION',
+          preflightChecks: {
+            ...preflight.preflightChecks,
+            referenceLabRoutesVerified: false
+          }
+        };
+
+        const result = validateExecutionPreflightManifest(tampered, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.status).toBe('PREFLIGHT_BLOCKED');
+        expect(result.issues.some((i) => i.field === 'preflightChecks.referenceLabRoutesVerified')).toBe(true);
+        expect(result.issues.some((i) => i.field === 'status')).toBe(true);
+      });
+
+      it('blocks when source contract is APPROVED but has wrong contract id, version, or fingerprint', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        // 1. Wrong source contract ID
+        const badIdContract = { ...RETAILCO_M3_APPROVED_CONTRACT, id: 'contract-wrong-id' };
+        const resultBadId = validateExecutionPreflightManifest(preflight, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: badIdContract,
+          targetProbe: probe
+        });
+        expect(resultBadId.isValid).toBe(false);
+        expect(resultBadId.issues.some((i) => i.field === 'canonicalTestDefinition.sourceContractId')).toBe(true);
+
+        // 2. Wrong source contract version
+        const badVersionContract = { ...RETAILCO_M3_APPROVED_CONTRACT, version: 'v2.0' };
+        const resultBadVersion = validateExecutionPreflightManifest(preflight, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: badVersionContract,
+          targetProbe: probe
+        });
+        expect(resultBadVersion.isValid).toBe(false);
+        expect(resultBadVersion.issues.some((i) => i.field === 'canonicalTestDefinition.sourceContractVersion')).toBe(true);
+
+        // 3. Wrong source contract fingerprint (modified contract content)
+        const driftedContract = {
+          ...RETAILCO_M3_APPROVED_CONTRACT,
+          engineeringIntent: 'CERTIFICATION' as const
+        };
+        const resultDrift = validateExecutionPreflightManifest(preflight, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: driftedContract,
+          targetProbe: probe
+        });
+        expect(resultDrift.isValid).toBe(false);
+        expect(resultDrift.issues.some((i) => i.field === 'canonicalTestDefinition.sourceContractFingerprint')).toBe(true);
+      });
+
+      it('blocks when one required threshold is deleted from the manifest', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+        const deletedThreshold = {
+          ...preflight,
+          expectedHealthyThresholds: preflight.expectedHealthyThresholds.filter(
+            (t: any) => t.criterionId !== 'ac-checkout-latency'
+          )
+        };
+
+        const result = validateExecutionPreflightManifest(deletedThreshold, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.issues.some((i) => i.field === 'expectedHealthyThresholds.ac-checkout-latency')).toBe(true);
+      });
+
+      it('blocks when a threshold has an unknown criterion id not in approved contract', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+        const unknownCriterion = {
+          ...preflight,
+          expectedHealthyThresholds: [
+            ...preflight.expectedHealthyThresholds,
+            {
+              criterionId: 'unapproved-invented-criterion-id',
+              metric: 'http_req_duration{journey:checkout}',
+              aggregation: 'p(95)',
+              operator: '<',
+              threshold: 2000,
+              unit: 'ms',
+              expression: 'p(95)<2000'
+            }
+          ]
+        };
+
+        const result = validateExecutionPreflightManifest(unknownCriterion, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.issues.some((i) => i.field === 'expectedHealthyThresholds.unapproved-invented-criterion-id')).toBe(true);
+      });
+
+      it('blocks when threshold operator, value, unit, or compiled expression drifts', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        // Operator drift
+        const opDrift = {
+          ...preflight,
+          expectedHealthyThresholds: preflight.expectedHealthyThresholds.map((t: any) =>
+            t.criterionId === 'ac-checkout-latency' ? { ...t, operator: '<=' } : t
+          )
+        };
+        expect(
+          validateExecutionPreflightManifest(opDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('operator'))
+        ).toBe(true);
+
+        // Value drift
+        const valDrift = {
+          ...preflight,
+          expectedHealthyThresholds: preflight.expectedHealthyThresholds.map((t: any) =>
+            t.criterionId === 'ac-checkout-latency' ? { ...t, threshold: 1500 } : t
+          )
+        };
+        expect(
+          validateExecutionPreflightManifest(valDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('threshold'))
+        ).toBe(true);
+
+        // Unit drift
+        const unitDrift = {
+          ...preflight,
+          expectedHealthyThresholds: preflight.expectedHealthyThresholds.map((t: any) =>
+            t.criterionId === 'ac-checkout-latency' ? { ...t, unit: 'seconds' } : t
+          )
+        };
+        expect(
+          validateExecutionPreflightManifest(unitDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('unit'))
+        ).toBe(true);
+
+        // Expression drift
+        const exprDrift = {
+          ...preflight,
+          expectedHealthyThresholds: preflight.expectedHealthyThresholds.map((t: any) =>
+            t.criterionId === 'ac-checkout-latency' ? { ...t, expression: 'p(99)<2000' } : t
+          )
+        };
+        expect(
+          validateExecutionPreflightManifest(exprDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('expression'))
+        ).toBe(true);
+      });
+
+      it('blocks when scheduler arrival population, peak rate, or unit drifts', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        // Arrival population drift
+        const popDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            schedulerArrivalPopulation: 'VIRTUAL_USERS'
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(popDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.schedulerArrivalPopulation')
+        ).toBe(true);
+
+        // Peak rate drift
+        const rateDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            schedulerPeakRate: { ...preflight.governedWorkload.schedulerPeakRate, value: 200 }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(rateDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.schedulerPeakRate.value')
+        ).toBe(true);
+
+        // Unit drift
+        const rateUnitDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            schedulerPeakRate: { ...preflight.governedWorkload.schedulerPeakRate, unit: 'req/s' }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(rateUnitDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.schedulerPeakRate.unit')
+        ).toBe(true);
+      });
+
+      it('blocks when attainment target value, metric, or unit drifts', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        // Target value drift
+        const targetValDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            businessWorkloadAttainment: { ...preflight.governedWorkload.businessWorkloadAttainment, targetValue: 50 }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(targetValDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.businessWorkloadAttainment.targetValue')
+        ).toBe(true);
+
+        // Metric drift
+        const metricDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            businessWorkloadAttainment: { ...preflight.governedWorkload.businessWorkloadAttainment, metric: 'revenue' }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(metricDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.businessWorkloadAttainment.metric')
+        ).toBe(true);
+
+        // Unit drift
+        const unitDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            businessWorkloadAttainment: { ...preflight.governedWorkload.businessWorkloadAttainment, unit: 'items/second' }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(unitDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.businessWorkloadAttainment.unit')
+        ).toBe(true);
+      });
+
+      it('blocks when population relationship drifts', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        const idDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            populationRelationship: { ...preflight.governedWorkload.populationRelationship, id: 'wrong-rel-id' }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(idDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.populationRelationship.id')
+        ).toBe(true);
+
+        const shareDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            populationRelationship: { ...preflight.governedWorkload.populationRelationship, journeyShare: 0.5 }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(shareDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.populationRelationship.journeyShare')
+        ).toBe(true);
+
+        const contribDrift = {
+          ...preflight,
+          governedWorkload: {
+            ...preflight.governedWorkload,
+            populationRelationship: { ...preflight.governedWorkload.populationRelationship, contributionPerSuccessfulEvent: 5 }
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(contribDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'governedWorkload.populationRelationship.contributionPerSuccessfulEvent')
+        ).toBe(true);
+      });
+
+      it('blocks when bound credential has wrong route, auth scheme, or provider', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        // Wrong route
+        const wrongRoute = {
+          ...preflight,
+          credentialBindings: {
+            ...preflight.credentialBindings,
+            requiredReferences: preflight.credentialBindings.requiredReferences.map((r: any) => ({
+              ...r,
+              enforcedRoute: '/api/v1/wrong/path'
+            }))
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(wrongRoute, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('enforcedRoute'))
+        ).toBe(true);
+
+        // Wrong scheme
+        const wrongScheme = {
+          ...preflight,
+          credentialBindings: {
+            ...preflight.credentialBindings,
+            requiredReferences: preflight.credentialBindings.requiredReferences.map((r: any) => ({
+              ...r,
+              enforcedScheme: 'Basic'
+            }))
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(wrongScheme, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('enforcedScheme'))
+        ).toBe(true);
+
+        // Wrong provider
+        const wrongProvider = {
+          ...preflight,
+          credentialBindings: {
+            ...preflight.credentialBindings,
+            requiredReferences: preflight.credentialBindings.requiredReferences.map((r: any) => ({
+              ...r,
+              provider: 'VAULT'
+            }))
+          }
+        };
+        expect(
+          validateExecutionPreflightManifest(wrongProvider, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field.includes('provider'))
+        ).toBe(true);
+      });
+
+      it('blocks when target probe origin does not match Test Definition target environment', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const mismatchedProbe: TargetProbeResult = {
+          baseUrl: 'http://unauthorized-remote-host:9999',
+          healthStatus: 'healthy',
+          readyStatus: 'ready',
+          verifiedAt: '2026-09-18T10:30:00Z',
+          isResolvable: true,
+          httpStatusHealth: 200,
+          httpStatusReady: 200
+        };
+
+        const result = validateExecutionPreflightManifest(preflight, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: mismatchedProbe
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.status).toBe('PREFLIGHT_BLOCKED');
+        expect(result.issues.some((i) => i.field === 'targetProbe.baseUrl')).toBe(true);
+      });
+
+      it('blocks when probe /health or /ready status is not 200 or not healthy/ready', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+
+        const unhealthyProbe: TargetProbeResult = {
+          baseUrl: 'http://localhost:8080',
+          healthStatus: 'degraded',
+          readyStatus: 'ready',
+          verifiedAt: '2026-09-18T10:30:00Z',
+          isResolvable: true,
+          httpStatusHealth: 503,
+          httpStatusReady: 200
+        };
+
+        const result = validateExecutionPreflightManifest(preflight, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: unhealthyProbe
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.status).toBe('PREFLIGHT_BLOCKED');
+        expect(result.issues.some((i) => i.field === 'targetProbe.httpStatusHealth')).toBe(true);
+        expect(result.issues.some((i) => i.field === 'targetProbe.healthStatus')).toBe(true);
+      });
+
+      it('blocks when Reference Lab service name, serviceVersion, or routeManifestVersion drifts', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+        const probe = await getVerifiedTargetProbe();
+
+        // Service name drift
+        const svcDrift = { ...preflight, service: 'wrong-service' };
+        expect(
+          validateExecutionPreflightManifest(svcDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'service')
+        ).toBe(true);
+
+        // Service version drift
+        const verDrift = { ...preflight, serviceVersion: '9.9.9' };
+        expect(
+          validateExecutionPreflightManifest(verDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'serviceVersion')
+        ).toBe(true);
+
+        // Route manifest version drift
+        const routeVerDrift = { ...preflight, routeManifestVersion: '9.9.9' };
+        expect(
+          validateExecutionPreflightManifest(routeVerDrift, {
+            testDefinition: compiledTestDef,
+            bundle: compiledBundle,
+            referenceLabManifest: labManifest,
+            sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+            targetProbe: probe
+          }).issues.some((i) => i.field === 'routeManifestVersion')
+        ).toBe(true);
       });
     });
   });
