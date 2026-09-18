@@ -77,7 +77,7 @@ At minimum tests must fail if any of these drift:
 - provider thresholds;
 - Reference Lab manifest version.
 
-## 5. Test count clarity
+## 5. Ephemeral test credential law\n\nRemove committed token-like literals from the M3.1A test suite.\n\nGenerate the checkout test credential at test runtime using Node `crypto` (`randomUUID` / `randomBytes`) or equivalent. The generated value may be passed into the in-process lab server and request headers, but must not be committed, logged, echoed, or written to manifests.\n\nAdd/retain a test proving error responses never echo the generated credential.\n\n## 6. Reference Lab route-manifest completeness\n\nIf `/metrics` / `/api/v1/metrics` remains a supported Reference Lab surface, add it to `reference-lab-manifest.json` and verify its method/status/auth semantics. If it is intentionally internal and not part of the supported surface, remove the completion-report/documentation claim that it is an authoritative exposed route.\n\nPrefer documenting it because M3.1B can use it as an independent Reference Lab business-event cross-check.\n\n## 7. Test count clarity
 
 Keep the root test pipeline as:
 
@@ -86,7 +86,7 @@ Keep the root test pipeline as:
 
 Completion report should state both counts separately and the combined total. Current verified baseline is 149 Vitest tests plus 10 Reference Lab native tests.
 
-## 6. CI
+## 8. CI
 
 From clean root run:
 
