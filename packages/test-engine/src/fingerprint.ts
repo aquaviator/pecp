@@ -24,6 +24,7 @@ export function computeTestDefinitionFingerprint(def: Omit<TestDefinition, 'fing
     sourceContractId: def.sourceContractId,
     sourceContractVersion: def.sourceContractVersion,
     sourceContractFingerprint: def.sourceContractFingerprint,
+    sourceContractStatus: def.sourceContractStatus,
     scenarios: def.scenarios.map((s) => ({
       id: s.id,
       schedule: {

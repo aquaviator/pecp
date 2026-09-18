@@ -13,16 +13,23 @@
     "envVarOverride": "TARGET_BASE_URL",
     "protocol": "HTTP",
     "port": 8080,
-    "host": "localhost"
+    "host": "localhost",
+    "verifiedProbe": {
+      "verifiedAt": "2026-09-18T10:30:00Z",
+      "healthStatus": "healthy",
+      "readyStatus": "ready",
+      "isResolvable": true
+    }
   },
   "canonicalTestDefinition": {
     "id": "test-def-proj-retailco-bf2026-v1.0",
     "version": "v1.0",
     "status": "READY_FOR_EXECUTION",
-    "fingerprint": "fp-02c71036",
+    "fingerprint": "fp-6911db94",
     "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
     "sourceContractVersion": "v1.0",
-    "sourceContractFingerprint": "fp-0dad9ae4"
+    "sourceContractFingerprint": "fp-0dad9ae4",
+    "sourceContractStatus": "APPROVED"
   },
   "k6Runtime": {
     "version": "1.0.0",
@@ -34,8 +41,8 @@
       "entrypoint.js",
       "runtime.js"
     ],
-    "bundleFingerprint": "fp-2d4ec79a",
-    "testDefinitionFingerprint": "fp-02c71036"
+    "bundleFingerprint": "fp-9546266a",
+    "testDefinitionFingerprint": "fp-6911db94"
   },
   "governedWorkload": {
     "schedulerArrivalPopulation": "JOURNEY_ITERATION",

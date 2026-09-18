@@ -296,6 +296,8 @@ export type ContractStatus =
   | 'APPROVED'
   | 'SUPERSEDED';
 
+export type PerformanceContractStatus = ContractStatus;
+
 export type AcceptanceCriterionStatus =
   | 'DEFINED'
   | 'AMBIGUOUS'
@@ -710,6 +712,7 @@ export interface TestDefinition {
   sourceContractId: string;
   sourceContractVersion: string;
   sourceContractFingerprint: string;
+  sourceContractStatus?: PerformanceContractStatus;
   fingerprint: string; // Deterministic non-cryptographic drift checksum
   generationTimestamp: string;
   scenarios: TestScenario[];

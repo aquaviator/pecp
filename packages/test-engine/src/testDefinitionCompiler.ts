@@ -733,6 +733,7 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
     sourceContractId: contract.id,
     sourceContractVersion: contract.version,
     sourceContractFingerprint: contractFingerprint,
+    sourceContractStatus: contract.status,
     generationTimestamp,
     scenarios: [scenario],
     journeys,

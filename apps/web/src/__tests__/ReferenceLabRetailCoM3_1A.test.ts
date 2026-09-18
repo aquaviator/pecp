@@ -15,6 +15,7 @@ import {
   compileK6Bundle,
   buildExecutionPreflightManifest,
   validateExecutionPreflightManifest,
+  TargetProbeResult,
   PECP_STABLE_K6_RUNTIME_VERSION,
   PECP_STABLE_K6_RUNTIME_SOURCE_ID
 } from '@pecp/test-engine';
@@ -242,11 +243,30 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       generatedAt: '2026-09-18T10:30:00Z'
     });
 
-    it('builds a deterministic preflight manifest bound to compiled test definition and k6 bundle', () => {
+    const getVerifiedTargetProbe = async (): Promise<TargetProbeResult> => {
+      const healthRes = await fetch(`${baseUrl}/health`);
+      const readyRes = await fetch(`${baseUrl}/ready`);
+      const healthData = (await healthRes.json().catch(() => ({}))) as { status?: string };
+      const readyData = (await readyRes.json().catch(() => ({}))) as { status?: string };
+      return {
+        baseUrl,
+        healthStatus: healthData.status || 'healthy',
+        readyStatus: readyData.status || 'ready',
+        verifiedAt: '2026-09-18T10:30:00Z',
+        isResolvable: healthRes.status === 200 && readyRes.status === 200,
+        httpStatusHealth: healthRes.status,
+        httpStatusReady: readyRes.status
+      };
+    };
+
+    it('builds a deterministic preflight manifest bound to compiled test definition and k6 bundle', async () => {
+      const probe = await getVerifiedTargetProbe();
       const builtManifest = buildExecutionPreflightManifest({
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
         referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe,
         preflightTimestamp: '2026-09-18T10:30:00Z'
       });
 
@@ -255,6 +275,7 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       expect(builtManifest.canonicalTestDefinition.fingerprint).toBe(compiledTestDef.fingerprint);
       expect(builtManifest.canonicalTestDefinition.sourceContractId).toBe(compiledTestDef.sourceContractId);
       expect(builtManifest.canonicalTestDefinition.sourceContractFingerprint).toBe(compiledTestDef.sourceContractFingerprint);
+      expect(builtManifest.canonicalTestDefinition.sourceContractStatus).toBe('APPROVED');
 
       expect(builtManifest.k6Runtime.version).toBe(PECP_STABLE_K6_RUNTIME_VERSION);
       expect(builtManifest.k6Runtime.sourceId).toBe(PECP_STABLE_K6_RUNTIME_SOURCE_ID);
@@ -277,15 +298,23 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       expect(errorThresh?.metric).toBe('http_req_failed');
       expect(errorThresh?.unit).toBe('rate');
       expect(errorThresh?.expression).toBe('rate<0.005');
+
+      // Target environment check
+      expect(builtManifest.targetEnvironment.verifiedProbe).toBeDefined();
+      expect(builtManifest.targetEnvironment.verifiedProbe?.isResolvable).toBe(true);
+      expect(builtManifest.preflightChecks.targetResolvable).toBe(true);
     });
 
-    it('validates authoritative m3-preflight-manifest.json against compiled outputs with zero drift', () => {
+    it('validates authoritative m3-preflight-manifest.json against compiled outputs with zero drift', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
 
       const validation = validateExecutionPreflightManifest(preflight, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
-        referenceLabManifest: labManifest
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe
       });
 
       expect(validation.issues).toEqual([]);
@@ -295,6 +324,7 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       expect(preflight.status).toBe('READY_FOR_LIVE_EXECUTION');
       expect(preflight.canonicalTestDefinition.fingerprint).toBe(compiledTestDef.fingerprint);
       expect(preflight.canonicalTestDefinition.sourceContractFingerprint).toBe(compiledTestDef.sourceContractFingerprint);
+      expect(preflight.canonicalTestDefinition.sourceContractStatus).toBe('APPROVED');
       expect(preflight.k6Runtime.sourceId).toBe(PECP_STABLE_K6_RUNTIME_SOURCE_ID);
       expect(preflight.k6Runtime.version).toBe(PECP_STABLE_K6_RUNTIME_VERSION);
       expect(preflight.k6Runtime.bundleFingerprint).toBe(compiledBundle.fingerprint);
@@ -312,8 +342,9 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       expect(errorRateThresh.unit).toBe('rate');
     });
 
-    it('rejects preflight when test definition fingerprint drifts', () => {
+    it('rejects preflight when test definition fingerprint drifts', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
       const drifted = {
         ...preflight,
         canonicalTestDefinition: {
@@ -325,7 +356,9 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       const result = validateExecutionPreflightManifest(drifted, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
-        referenceLabManifest: labManifest
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe
       });
 
       expect(result.isValid).toBe(false);
@@ -333,8 +366,9 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       expect(result.issues.some((i) => i.field === 'canonicalTestDefinition.fingerprint')).toBe(true);
     });
 
-    it('rejects preflight when k6 bundle runtime sourceId drifts', () => {
+    it('rejects preflight when k6 bundle runtime sourceId drifts', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
       const drifted = {
         ...preflight,
         k6Runtime: {
@@ -346,15 +380,18 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       const result = validateExecutionPreflightManifest(drifted, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
-        referenceLabManifest: labManifest
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe
       });
 
       expect(result.isValid).toBe(false);
       expect(result.issues.some((i) => i.field === 'k6Runtime.sourceId')).toBe(true);
     });
 
-    it('rejects preflight when bundle files list is missing runtime.js', () => {
+    it('rejects preflight when bundle files list is missing runtime.js', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
       const drifted = {
         ...preflight,
         k6Runtime: {
@@ -366,15 +403,18 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       const result = validateExecutionPreflightManifest(drifted, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
-        referenceLabManifest: labManifest
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe
       });
 
       expect(result.isValid).toBe(false);
       expect(result.issues.some((i) => i.field === 'k6Runtime.bundleFiles')).toBe(true);
     });
 
-    it('rejects preflight when threshold criterion ID does not match approved contract', () => {
+    it('rejects preflight when threshold criterion ID does not match approved contract', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
       const drifted = {
         ...preflight,
         expectedHealthyThresholds: [
@@ -393,15 +433,18 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       const result = validateExecutionPreflightManifest(drifted, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
-        referenceLabManifest: labManifest
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe
       });
 
       expect(result.isValid).toBe(false);
       expect(result.issues.some((i) => i.field.includes('unapproved-random-criterion'))).toBe(true);
     });
 
-    it('rejects preflight when error rate threshold unit is percentage instead of rate/fraction', () => {
+    it('rejects preflight when error rate threshold unit is percentage instead of rate/fraction', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
       const drifted = {
         ...preflight,
         expectedHealthyThresholds: preflight.expectedHealthyThresholds.map((t: any) =>
@@ -412,26 +455,481 @@ describe('M3.1A Reference Lab Foundation & Execution Preflight', () => {
       const result = validateExecutionPreflightManifest(drifted, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
-        referenceLabManifest: labManifest
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe
       });
 
       expect(result.isValid).toBe(false);
       expect(result.issues.some((i) => i.field.includes('unit'))).toBe(true);
     });
 
-    it('blocks preflight when live execution has already started', () => {
+    it('blocks preflight when live execution has already started', async () => {
       const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+      const probe = await getVerifiedTargetProbe();
 
       const result = validateExecutionPreflightManifest(preflight, {
         testDefinition: compiledTestDef,
         bundle: compiledBundle,
         referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe,
         liveExecutionStarted: true
       });
 
       expect(result.isValid).toBe(false);
       expect(result.status).toBe('PREFLIGHT_BLOCKED');
       expect(result.issues.some((i) => i.field === 'preflightChecks.liveExecutionNotStarted')).toBe(true);
+    });
+
+    // -------------------------------------------------------------------------
+    // M3.1A.2 Preflight Authority & No-Fallback Gate Requirements
+    // -------------------------------------------------------------------------
+
+    describe('M3.1A.2 Requirement 2: Contract Approval Binding (Governed State, not text)', () => {
+      it('proves a contract id containing "approved" does not pass when governed status is not APPROVED', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const unapprovedContractDef = {
+          ...compiledTestDef,
+          sourceContractId: 'contract-proj-retailco-bf26-v1.0-approved', // contains "approved"
+          sourceContractStatus: 'DRAFT' as any
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: unapprovedContractDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.contractApproved).toBe(false);
+
+        const validation = validateExecutionPreflightManifest(manifest, {
+          testDefinition: unapprovedContractDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          targetProbe: probe
+        });
+
+        expect(validation.isValid).toBe(false);
+        expect(validation.status).toBe('PREFLIGHT_BLOCKED');
+        expect(validation.issues.some((i) => i.field === 'canonicalTestDefinition.sourceContractStatus')).toBe(true);
+      });
+    });
+
+    describe('M3.1A.2 Requirement 1 & 6: Preflight No-Fallback Gate on Parameters & Thresholds', () => {
+      it('blocks preflight when latency criterion is missing percentile (no fallback p(95))', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithMissingPercentile = {
+          ...compiledTestDef,
+          executableCriteria: compiledTestDef.executableCriteria.map((c) =>
+            c.id === 'ac-checkout-latency' ? { ...c, percentile: undefined } : c
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithMissingPercentile as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.thresholdsBoundToApprovedContract).toBe(false);
+      });
+
+      it('blocks preflight when criterion is missing operator (no fallback <)', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithMissingOp = {
+          ...compiledTestDef,
+          executableCriteria: compiledTestDef.executableCriteria.map((c) =>
+            c.id === 'ac-checkout-latency' ? { ...c, operator: undefined } : c
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithMissingOp as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.thresholdsBoundToApprovedContract).toBe(false);
+      });
+
+      it('blocks preflight when criterion is missing thresholdValue (no fallback 0)', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithMissingVal = {
+          ...compiledTestDef,
+          executableCriteria: compiledTestDef.executableCriteria.map((c) =>
+            c.id === 'ac-checkout-latency' ? { ...c, thresholdValue: undefined } : c
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithMissingVal as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.thresholdsBoundToApprovedContract).toBe(false);
+      });
+
+      it('blocks preflight when scheduler arrival population is missing (no fallback)', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defMissingPop = {
+          ...compiledTestDef,
+          scenarios: [
+            {
+              ...compiledTestDef.scenarios[0],
+              workloadSchedule: {
+                ...compiledTestDef.scenarios[0].workloadSchedule,
+                arrivalPopulation: undefined
+              }
+            }
+          ]
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defMissingPop as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.populationSemanticsHardened).toBe(false);
+      });
+
+      it('blocks preflight when workload attainment target/unit is missing (no fallback 8.75 orders/sec)', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defMissingAttainment = {
+          ...compiledTestDef,
+          workloadAttainment: undefined
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defMissingAttainment as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.populationSemanticsHardened).toBe(false);
+      });
+
+      it('blocks preflight when population relationship is missing or incomplete (no fallback)', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defMissingPopRel = {
+          ...compiledTestDef,
+          populationRelationship: undefined
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defMissingPopRel as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.populationSemanticsHardened).toBe(false);
+      });
+
+      it('blocks preflight when target environment URL is missing or invalid (no fallback localhost:8080)', () => {
+        const defMissingUrl = {
+          ...compiledTestDef,
+          scenarios: [
+            {
+              ...compiledTestDef.scenarios[0],
+              targetEnvironmentBaseUrlRef: ''
+            }
+          ]
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defMissingUrl as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT
+          // Note: no targetProbe provided
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.targetResolvable).toBe(false);
+        expect(manifest.targetEnvironment.defaultBaseUrl).toBe('');
+      });
+    });
+
+    describe('M3.1A.2 Requirement 3: Semantic Reference Lab Route Alignment', () => {
+      it('blocks preflight when canonical journey step has no matching route in Reference Lab manifest', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithMissingRoute = {
+          ...compiledTestDef,
+          journeys: compiledTestDef.journeys.map((j) =>
+            j.key === 'checkout'
+              ? {
+                  ...j,
+                  steps: [
+                    ...j.steps,
+                    {
+                      id: 'step-unsupported-extra',
+                      name: 'Unsupported Route',
+                      method: 'POST' as const,
+                      path: '/api/v1/orders/non-existent-action'
+                    }
+                  ]
+                }
+              : j
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithMissingRoute,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.referenceLabRoutesVerified).toBe(false);
+      });
+
+      it('blocks preflight when canonical journey step HTTP method does not match Reference Lab route', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithWrongMethod = {
+          ...compiledTestDef,
+          journeys: compiledTestDef.journeys.map((j) =>
+            j.key === 'browse'
+              ? {
+                  ...j,
+                  steps: j.steps.map((st) =>
+                    st.path.includes('featured') ? { ...st, method: 'DELETE' as const } : st
+                  )
+                }
+              : j
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithWrongMethod,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.referenceLabRoutesVerified).toBe(false);
+      });
+
+      it('blocks preflight when canonical journey step expected status does not match Reference Lab route', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithWrongStatus = {
+          ...compiledTestDef,
+          journeys: compiledTestDef.journeys.map((j) =>
+            j.key === 'checkout'
+              ? {
+                  ...j,
+                  steps: j.steps.map((st) =>
+                    st.path.includes('checkout') ? { ...st, expectedStatusCode: 200 } : st // lab route specifies 201
+                  )
+                }
+              : j
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithWrongStatus,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.referenceLabRoutesVerified).toBe(false);
+      });
+
+      it('blocks preflight when route manifest has payloadRequired=false for step with request payload', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const mutatedLabManifest = {
+          ...labManifest,
+          routes: labManifest.routes.map((r: any) =>
+            r.path.includes('checkout') ? { ...r, payloadRequired: false } : r
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: mutatedLabManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.referenceLabRoutesVerified).toBe(false);
+      });
+
+      it('blocks preflight when route manifest has authRequired=false for step with credential reference', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const mutatedLabManifest = {
+          ...labManifest,
+          routes: labManifest.routes.map((r: any) =>
+            r.path.includes('checkout') ? { ...r, authRequired: false } : r
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: mutatedLabManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.referenceLabRoutesVerified).toBe(false);
+      });
+
+      it('blocks preflight when business event contribution is missing or mismatched on required route', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const mutatedLabManifest = {
+          ...labManifest,
+          routes: labManifest.routes.map((r: any) =>
+            r.path.includes('checkout')
+              ? {
+                  ...r,
+                  businessEventContribution: {
+                    ...r.businessEventContribution,
+                    expectedStatus: 200 // step expects 201
+                  }
+                }
+              : r
+          )
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: mutatedLabManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.referenceLabRoutesVerified).toBe(false);
+      });
+    });
+
+    describe('M3.1A.2 Requirement 4: Target Resolvability Evidence', () => {
+      it('blocks preflight when targetProbe evidence is not provided (targetResolvable=false)', () => {
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT
+          // targetProbe omitted
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.targetResolvable).toBe(false);
+      });
+
+      it('blocks preflight when targetProbe reports healthStatus not healthy or isResolvable false', async () => {
+        const degradedProbe: TargetProbeResult = {
+          baseUrl,
+          healthStatus: 'degraded',
+          readyStatus: 'ready',
+          verifiedAt: '2026-09-18T10:30:00Z',
+          isResolvable: false
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: degradedProbe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.targetResolvable).toBe(false);
+      });
+
+      it('validator rejects manifest claiming targetResolvable=true without supplied verified targetProbe evidence', async () => {
+        const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+
+        const validation = validateExecutionPreflightManifest(preflight, {
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT
+          // targetProbe omitted in validation context
+        });
+
+        expect(validation.isValid).toBe(false);
+        expect(validation.issues.some((i) => i.field === 'preflightChecks.targetResolvable')).toBe(true);
+      });
+    });
+
+    describe('M3.1A.2 Requirement 5: Derived Credential Bindings', () => {
+      it('derives credential route and authScheme directly from journey step and Reference Lab route manifest', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: compiledTestDef,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.credentialBindings.requiredReferences.length).toBe(1);
+        const ref = manifest.credentialBindings.requiredReferences[0];
+        expect(ref.referenceId).toBe('RETAILCO_CHECKOUT_AUTH_TOKEN');
+        expect(ref.enforcedRoute).toBe('/api/v1/orders/checkout');
+        expect(ref.enforcedScheme).toBe('Bearer');
+      });
+
+      it('blocks preflight when credential reference is not bound to any canonical journey step', async () => {
+        const probe = await getVerifiedTargetProbe();
+        const defWithOrphanCred = {
+          ...compiledTestDef,
+          credentialReferences: [
+            ...compiledTestDef.credentialReferences,
+            {
+              referenceId: 'ORPHAN_CREDENTIAL',
+              provider: 'ENV_VAR',
+              purpose: 'Unknown',
+              environmentVariableName: 'ORPHAN_TOKEN'
+            }
+          ]
+        };
+
+        const manifest = buildExecutionPreflightManifest({
+          testDefinition: defWithOrphanCred as any,
+          bundle: compiledBundle,
+          referenceLabManifest: labManifest,
+          sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+          targetProbe: probe
+        });
+
+        expect(manifest.status).toBe('PREFLIGHT_BLOCKED');
+        expect(manifest.preflightChecks.credentialBindingsDefined).toBe(false);
+      });
     });
   });
 
