@@ -35,7 +35,7 @@ The preflight manifest currently declares `READY_FOR_LIVE_EXECUTION`, but severa
 3. `k6Runtime.bundleFiles` lists only `config.json`, `journeys.js`, and `entrypoint.js`; executable M3 bundles also package `runtime.js`.
 4. The preflight acceptance criterion ids (`nfr-021-checkout-latency`, `nfr-022-system-error-rate`) do not match the approved M3 contract criterion ids (`ac-checkout-latency`, `ac-global-error-rate`).
 5. The error-rate threshold is recorded as value `0.005` with unit `percentage`; the governed contract/provider representation is a rate/fraction of `0.005`.
-6. Existing preflight tests assert selected literal values but do not prove that the manifest is bound to freshly compiled Test Definition / k6 bundle metadata.
+6. Existing preflight tests assert selected literal values but do not prove that the manifest is bound to freshly compiled Test Definition / k6 bundle metadata.\n7. The M3.1A Vitest suite hard-codes `EPHEMERAL_TOKEN = 'test-token-vault-runtime-8989'`. The work package explicitly required test credentials to be generated ephemerally at runtime rather than committed as raw token-like values.\n8. The Reference Lab server exposes `/metrics` / `/api/v1/metrics`, but the authoritative route manifest does not describe that stable route even though the completion report presents it as part of the lab surface.
 
 These are binding-integrity defects, not Reference Lab implementation defects.
 
