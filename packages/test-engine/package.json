@@ -10,6 +10,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./execution": {
+      "types": "./src/referenceExecutionHarness.ts",
+      "import": "./src/referenceExecutionHarness.ts",
+      "default": "./src/referenceExecutionHarness.ts"
     }
   },
   "dependencies": {

@@ -41,7 +41,7 @@
       "entrypoint.js",
       "runtime.js"
     ],
-    "bundleFingerprint": "fp-9546266a",
+    "bundleFingerprint": "fp-38c91b77",
     "testDefinitionFingerprint": "fp-6911db94"
   },
   "governedWorkload": {

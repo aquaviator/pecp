@@ -558,7 +558,20 @@ import { businessAttainmentEvents } from './runtime.js';
 import { JOURNEY_WEIGHTS, JOURNEY_RUNNER_MAP } from './journeys.js';
 
 // Load generated options and thresholds
-export const options = JSON.parse(open('./config.json'));
+export const options = (() => {
+  const cfg = JSON.parse(open('./config.json'));
+  if (cfg.scenarios) {
+    for (const k of Object.keys(cfg.scenarios)) {
+      const sc = cfg.scenarios[k];
+      if (sc.stages && Array.isArray(sc.stages)) {
+        sc.stages = sc.stages.map(function (st) {
+          return Object.assign({}, st, { target: Math.round(st.target) });
+        });
+      }
+    }
+  }
+  return cfg;
+})();
 
 // Re-export metrics for k6 engine discovery
 export { workloadArrivalDemand, workloadAttainmentRate, businessAttainmentEvents };
