@@ -1,0 +1,19 @@
+{
+  "name": "@pecp/reference-lab-retailco",
+  "version": "1.0.0",
+  "description": "Deterministic Reference Performance Lab for RetailCo M3 execution",
+  "type": "module",
+  "main": "./src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "pecp",
+    "reference-lab",
+    "retailco",
+    "performance-engineering"
+  ],
+  "author": "PECP",
+  "license": "ISC"
+}

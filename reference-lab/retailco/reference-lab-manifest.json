@@ -1,0 +1,90 @@
+{
+  "service": "retailco-reference-lab",
+  "version": "1.0.0",
+  "environment": "REFERENCE_LAB",
+  "defaultPort": 8080,
+  "description": "Deterministic Reference Performance Lab for RetailCo M3 execution testing",
+  "routes": [
+    {
+      "id": "route-health",
+      "path": "/health",
+      "method": "GET",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": false,
+      "description": "Lab liveness and service metadata"
+    },
+    {
+      "id": "route-ready",
+      "path": "/ready",
+      "method": "GET",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": false,
+      "description": "Readiness probe and synthetic data profile validation"
+    },
+    {
+      "id": "route-browse-featured",
+      "path": "/api/v1/products/featured",
+      "method": "GET",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": false,
+      "description": "Featured catalog products listing"
+    },
+    {
+      "id": "route-search",
+      "path": "/api/v1/products/search",
+      "method": "GET",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": false,
+      "description": "Product catalog search query"
+    },
+    {
+      "id": "route-basket-items",
+      "path": "/api/v1/basket/items",
+      "method": "POST",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": true,
+      "requiredPayloadFields": [
+        "sku",
+        "quantity"
+      ],
+      "description": "Add SKU item to basket"
+    },
+    {
+      "id": "route-orders-checkout",
+      "path": "/api/v1/orders/checkout",
+      "method": "POST",
+      "expectedStatus": 201,
+      "authRequired": true,
+      "authHeader": "Authorization",
+      "authScheme": "Bearer",
+      "payloadRequired": true,
+      "requiredPayloadFields": [
+        "basketId",
+        "paymentMethod",
+        "shippingAddressId"
+      ],
+      "businessEventContribution": {
+        "eventKey": "order_created",
+        "metric": "orders",
+        "unit": "orders",
+        "contribution": 1,
+        "expectedStatus": 201
+      },
+      "description": "Submit basket order checkout"
+    },
+    {
+      "id": "route-customers-me-orders",
+      "path": "/api/v1/customers/me/orders",
+      "method": "GET",
+      "expectedStatus": 200,
+      "authRequired": false,
+      "payloadRequired": false,
+      "description": "Customer past order history"
+    }
+  ]
+}

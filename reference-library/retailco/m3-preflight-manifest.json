@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "manifestType": "M3_EXECUTION_PREFLIGHT",
+  "milestone": "M3.1A",
+  "service": "retailco-reference-lab",
+  "serviceVersion": "1.0.0",
+  "routeManifestVersion": "1.0.0",
+  "preflightTimestamp": "2026-09-18T10:30:00Z",
+  "status": "READY_FOR_LIVE_EXECUTION",
+  "targetEnvironment": {
+    "strategy": "LOCALHOST_RESOLVABLE",
+    "defaultBaseUrl": "http://localhost:8080",
+    "envVarOverride": "TARGET_BASE_URL",
+    "protocol": "HTTP",
+    "port": 8080,
+    "host": "localhost"
+  },
+  "canonicalTestDefinition": {
+    "id": "test-def-proj-retailco-bf2026-v1.0",
+    "version": "v1.0",
+    "status": "READY_FOR_EXECUTION",
+    "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
+    "sourceContractVersion": "v1.0"
+  },
+  "k6Runtime": {
+    "version": "1.0.0",
+    "sourceId": "pecp-k6-runtime-v1.0.0",
+    "entrypoint": "entrypoint.js",
+    "bundleFiles": [
+      "config.json",
+      "journeys.js",
+      "entrypoint.js"
+    ]
+  },
+  "governedWorkload": {
+    "schedulerArrivalPopulation": "JOURNEY_ITERATION",
+    "schedulerPeakRate": {
+      "value": 109.375,
+      "unit": "journey_iterations/second"
+    },
+    "businessWorkloadAttainment": {
+      "metric": "orders",
+      "targetValue": 8.75,
+      "unit": "orders/second"
+    },
+    "populationRelationship": {
+      "id": "rel-retailco-bf26-orders-to-iterations",
+      "formulaIdentifier": "TARGET_DIVIDED_BY_JOURNEY_SHARE",
+      "relevantJourneyKey": "checkout",
+      "journeyShare": 0.08,
+      "contributionPerSuccessfulEvent": 1,
+      "derivedSchedulerRate": 109.375
+    },
+    "checkoutContribution": "1 order"
+  },
+  "credentialBindings": {
+    "requiredReferences": [
+      {
+        "provider": "ENV_VAR",
+        "referenceId": "RETAILCO_CHECKOUT_AUTH_TOKEN",
+        "purpose": "Checkout API Authorization",
+        "enforcedRoute": "/api/v1/orders/checkout",
+        "enforcedScheme": "Bearer"
+      }
+    ],
+    "ephemeralAtRuntime": true,
+    "noHardcodedSecrets": true
+  },
+  "expectedHealthyThresholds": [
+    {
+      "criterionId": "nfr-021-checkout-latency",
+      "metric": "http_req_duration{journey:checkout}",
+      "aggregation": "p(95)",
+      "operator": "<",
+      "threshold": 2000,
+      "unit": "ms"
+    },
+    {
+      "criterionId": "nfr-022-system-error-rate",
+      "metric": "http_req_failed",
+      "aggregation": "rate",
+      "operator": "<",
+      "threshold": 0.005,
+      "unit": "percentage"
+    }
+  ],
+  "preflightChecks": {
+    "contractApproved": true,
+    "testDefinitionCompiled": true,
+    "referenceLabManifestAligned": true,
+    "referenceLabRoutesVerified": true,
+    "credentialBindingsDefined": true,
+    "populationSemanticsHardened": true,
+    "targetResolvable": true,
+    "liveExecutionNotStarted": true
+  }
+}

@@ -172,7 +172,7 @@ describe('PECP Canonical Test Definition Engine (M3.0)', () => {
 
       // Target environment base URL is populated
       expect(testDef.scenarios[0].targetEnvironmentBaseUrlRef).toBe(
-        'http://reference-lab.retailco.internal:8080'
+        'http://localhost:8080'
       );
     });
 

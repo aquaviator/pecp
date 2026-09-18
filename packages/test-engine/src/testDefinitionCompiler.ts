@@ -436,6 +436,73 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
         blockingReasons.push(`Population relationship business target (${populationRelationship.inputBusinessTarget.value}) does not match contract target (${workloadAttainment.targetValue}).`);
       }
 
+      // 7.1 Units / population consistency
+      if (populationRelationship.inputBusinessTarget.unit !== workloadAttainment.unit) {
+        issues.push({
+          id: 'issue-population-rel-unit-mismatch',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'inputBusinessTarget.unit',
+          description: `Population relationship business target unit ("${populationRelationship.inputBusinessTarget.unit}") does not match contract workload attainment unit ("${workloadAttainment.unit}").`,
+          remediationGuidance: 'Ensure inputBusinessTarget.unit matches the contract workload attainment requirement unit.'
+        });
+        blockingReasons.push(`Population relationship business target unit ("${populationRelationship.inputBusinessTarget.unit}") does not match contract unit ("${workloadAttainment.unit}").`);
+      }
+
+      if (schedule.arrivalPopulation && populationRelationship.outputSchedulerRate.population !== schedule.arrivalPopulation) {
+        issues.push({
+          id: 'issue-population-rel-arrival-population-mismatch',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'outputSchedulerRate.population',
+          description: `Population relationship output population ("${populationRelationship.outputSchedulerRate.population}") does not match schedule arrival population ("${schedule.arrivalPopulation}").`,
+          remediationGuidance: 'Align outputSchedulerRate.population with schedule.arrivalPopulation.'
+        });
+        blockingReasons.push(`Population relationship output population ("${populationRelationship.outputSchedulerRate.population}") does not match schedule arrival population ("${schedule.arrivalPopulation}").`);
+      }
+
+      if (populationRelationship.outputSchedulerRate.unit !== schedule.rateUnit) {
+        issues.push({
+          id: 'issue-population-rel-rate-unit-mismatch',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'outputSchedulerRate.unit',
+          description: `Population relationship output rate unit ("${populationRelationship.outputSchedulerRate.unit}") does not match schedule rate unit ("${schedule.rateUnit}").`,
+          remediationGuidance: 'Align outputSchedulerRate.unit with schedule.rateUnit.'
+        });
+        blockingReasons.push(`Population relationship output rate unit ("${populationRelationship.outputSchedulerRate.unit}") does not match schedule rate unit ("${schedule.rateUnit}").`);
+      }
+
+      if (journeys.length > 1 && populationRelationship.inputBusinessTarget.unit === populationRelationship.outputSchedulerRate.unit) {
+        issues.push({
+          id: 'issue-population-rel-silent-unit-equivalence',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'outputSchedulerRate.unit',
+          description: `Mixed-journey workload cannot equate business attainment unit ("${populationRelationship.inputBusinessTarget.unit}") directly with scheduler arrival rate unit ("${populationRelationship.outputSchedulerRate.unit}").`,
+          remediationGuidance: 'Distinguish between business event attainment unit and mixed-journey scheduler arrival rate unit.'
+        });
+        blockingReasons.push(`Mixed-journey workload equates business unit with scheduler arrival unit ("${populationRelationship.outputSchedulerRate.unit}").`);
+      }
+
+      // 7.2 Business-event contribution consistency
+      const hasValidContribution =
+        typeof populationRelationship.contributionPerSuccessfulEvent === 'number' &&
+        Number.isFinite(populationRelationship.contributionPerSuccessfulEvent) &&
+        populationRelationship.contributionPerSuccessfulEvent > 0;
+
+      if (!hasValidContribution) {
+        issues.push({
+          id: 'issue-population-rel-invalid-contribution',
+          type: 'POPULATION_RELATIONSHIP_MISMATCH',
+          severity: 'BLOCKING',
+          parameter: 'contributionPerSuccessfulEvent',
+          description: `Population relationship contributionPerSuccessfulEvent must be a positive finite number (received ${populationRelationship.contributionPerSuccessfulEvent}).`,
+          remediationGuidance: 'Specify a positive finite contribution per successful event.'
+        });
+        blockingReasons.push(`Invalid population relationship contribution (${populationRelationship.contributionPerSuccessfulEvent}).`);
+      }
+
       const targetJourney = journeys.find((j) => j.key === populationRelationship.relevantJourneyKey);
       if (!targetJourney) {
         issues.push({
@@ -460,33 +527,110 @@ export function compileTestDefinition(options: CompileTestDefinitionOptions): Te
           blockingReasons.push(`Population relationship journey share (${populationRelationship.journeyShare}) does not match journey weight (${targetJourney.weight}).`);
         }
 
-        // Check math: targetValue / (journeyShare * contribution)
-        const contribution = populationRelationship.contributionPerSuccessfulEvent || 1;
-        const expectedSchedulerRate =
-          populationRelationship.inputBusinessTarget.value / (populationRelationship.journeyShare * contribution);
-        if (Math.abs(populationRelationship.outputSchedulerRate.value - expectedSchedulerRate) > 0.01) {
+        // At least one governed step in target journey emits the relevant business event
+        const stepsWithContribution = (targetJourney.steps || []).filter(
+          (s) => Boolean(s.businessEventContribution)
+        );
+
+        if (stepsWithContribution.length === 0) {
           issues.push({
-            id: 'issue-population-rel-math-mismatch',
+            id: 'issue-population-rel-no-event-step',
             type: 'POPULATION_RELATIONSHIP_MISMATCH',
             severity: 'BLOCKING',
-            parameter: 'outputSchedulerRate.value',
-            description: `Derived scheduler rate (${populationRelationship.outputSchedulerRate.value}) does not match formula target / (share * contribution) (expected ~${expectedSchedulerRate.toFixed(3)}).`,
-            remediationGuidance: 'Ensure outputSchedulerRate is accurately computed from inputBusinessTarget / (journeyShare * contribution).'
+            parameter: 'relevantJourneyKey',
+            description: `Referenced journey "${targetJourney.name}" (${targetJourney.key}) has no governed step emitting a business event contribution.`,
+            remediationGuidance: 'Ensure at least one step in the target journey defines businessEventContribution.'
           });
-          blockingReasons.push(`Derived scheduler rate (${populationRelationship.outputSchedulerRate.value}) does not match formula derivation (expected ~${expectedSchedulerRate.toFixed(3)}).`);
+          blockingReasons.push(`Referenced journey "${targetJourney.key}" has no step emitting business event contribution.`);
+        } else {
+          for (const step of stepsWithContribution) {
+            const eventContrib = step.businessEventContribution!;
+            // Emitted contribution matches relationship contribution
+            if (hasValidContribution && eventContrib.contribution !== populationRelationship.contributionPerSuccessfulEvent) {
+              issues.push({
+                id: `issue-step-event-contrib-mismatch-${step.id}`,
+                type: 'POPULATION_RELATIONSHIP_MISMATCH',
+                severity: 'BLOCKING',
+                parameter: 'businessEventContribution.contribution',
+                description: `Step "${step.name}" (${step.id}) business event contribution (${eventContrib.contribution}) does not match population relationship contributionPerSuccessfulEvent (${populationRelationship.contributionPerSuccessfulEvent}).`,
+                remediationGuidance: 'Align step businessEventContribution with the population relationship contribution.'
+              });
+              blockingReasons.push(`Step "${step.id}" business event contribution mismatch (${eventContrib.contribution} vs ${populationRelationship.contributionPerSuccessfulEvent}).`);
+            }
+
+            // Governed success status used for event agrees with step expected status
+            if (eventContrib.expectedStatus !== step.expectedStatusCode) {
+              issues.push({
+                id: `issue-step-event-status-mismatch-${step.id}`,
+                type: 'POPULATION_RELATIONSHIP_MISMATCH',
+                severity: 'BLOCKING',
+                parameter: 'businessEventContribution.expectedStatus',
+                description: `Step "${step.name}" (${step.id}) business event expectedStatus (${eventContrib.expectedStatus}) does not match step expectedStatusCode (${step.expectedStatusCode}).`,
+                remediationGuidance: 'Ensure business event expectedStatus equals step expectedStatusCode.'
+              });
+              blockingReasons.push(`Step "${step.id}" business event expected status mismatch (${eventContrib.expectedStatus} vs ${step.expectedStatusCode}).`);
+            }
+
+            // Event metric/unit semantics agree with workload-attainment relationship where applicable
+            const attainmentBaseUnit = (workloadAttainment.unit || '').split('/')[0].trim().toLowerCase();
+            const eventUnit = (eventContrib.unit || '').toLowerCase();
+            const eventMetric = (eventContrib.metric || '').toLowerCase();
+
+            const metricAgrees =
+              !eventMetric ||
+              workloadAttainment.metric.toLowerCase().includes(eventMetric) ||
+              workloadAttainment.unit.toLowerCase().includes(eventMetric) ||
+              (attainmentBaseUnit && eventMetric.includes(attainmentBaseUnit));
+
+            const unitAgrees =
+              !eventUnit ||
+              !attainmentBaseUnit ||
+              attainmentBaseUnit.includes(eventUnit) ||
+              eventUnit.includes(attainmentBaseUnit);
+
+            if (!metricAgrees || !unitAgrees) {
+              issues.push({
+                id: `issue-step-event-metric-mismatch-${step.id}`,
+                type: 'POPULATION_RELATIONSHIP_MISMATCH',
+                severity: 'BLOCKING',
+                parameter: 'businessEventContribution.metric',
+                description: `Step "${step.name}" (${step.id}) event metric/unit ("${eventContrib.metric}" / "${eventContrib.unit}") does not agree with contract workload attainment ("${workloadAttainment.metric}" / "${workloadAttainment.unit}").`,
+                remediationGuidance: 'Ensure step event metric and unit align with the contract attainment semantics.'
+              });
+              blockingReasons.push(`Step "${step.id}" event metric/unit mismatch ("${eventContrib.metric}" vs "${workloadAttainment.unit}").`);
+            }
+          }
         }
 
-        // Validate schedule.peakArrivalRate matches outputSchedulerRate
-        if (Math.abs(schedule.peakArrivalRate - populationRelationship.outputSchedulerRate.value) > 0.01) {
-          issues.push({
-            id: 'issue-schedule-rel-peak-rate-mismatch',
-            type: 'POPULATION_RELATIONSHIP_MISMATCH',
-            severity: 'BLOCKING',
-            parameter: 'schedule.peakArrivalRate',
-            description: `Schedule peakArrivalRate (${schedule.peakArrivalRate}) does not match derived population relationship scheduler rate (${populationRelationship.outputSchedulerRate.value}).`,
-            remediationGuidance: 'Align schedule peakArrivalRate and stage targets with the derived scheduler arrival rate.'
-          });
-          blockingReasons.push(`Schedule peakArrivalRate (${schedule.peakArrivalRate}) does not match population relationship rate (${populationRelationship.outputSchedulerRate.value}).`);
+        // Check math: targetValue / (journeyShare * contribution) - NO fallback
+        if (hasValidContribution && populationRelationship.journeyShare > 0) {
+          const contribution = populationRelationship.contributionPerSuccessfulEvent;
+          const expectedSchedulerRate =
+            populationRelationship.inputBusinessTarget.value / (populationRelationship.journeyShare * contribution);
+          if (Math.abs(populationRelationship.outputSchedulerRate.value - expectedSchedulerRate) > 0.01) {
+            issues.push({
+              id: 'issue-population-rel-math-mismatch',
+              type: 'POPULATION_RELATIONSHIP_MISMATCH',
+              severity: 'BLOCKING',
+              parameter: 'outputSchedulerRate.value',
+              description: `Derived scheduler rate (${populationRelationship.outputSchedulerRate.value}) does not match formula target / (share * contribution) (expected ~${expectedSchedulerRate.toFixed(3)}).`,
+              remediationGuidance: 'Ensure outputSchedulerRate is accurately computed from inputBusinessTarget / (journeyShare * contribution).'
+            });
+            blockingReasons.push(`Derived scheduler rate (${populationRelationship.outputSchedulerRate.value}) does not match formula derivation (expected ~${expectedSchedulerRate.toFixed(3)}).`);
+          }
+
+          // Validate schedule.peakArrivalRate matches outputSchedulerRate
+          if (Math.abs(schedule.peakArrivalRate - populationRelationship.outputSchedulerRate.value) > 0.01) {
+            issues.push({
+              id: 'issue-schedule-rel-peak-rate-mismatch',
+              type: 'POPULATION_RELATIONSHIP_MISMATCH',
+              severity: 'BLOCKING',
+              parameter: 'schedule.peakArrivalRate',
+              description: `Schedule peakArrivalRate (${schedule.peakArrivalRate}) does not match derived population relationship scheduler rate (${populationRelationship.outputSchedulerRate.value}).`,
+              remediationGuidance: 'Align schedule peakArrivalRate and stage targets with the derived scheduler arrival rate.'
+            });
+            blockingReasons.push(`Schedule peakArrivalRate (${schedule.peakArrivalRate}) does not match population relationship rate (${populationRelationship.outputSchedulerRate.value}).`);
+          }
         }
       }
     }

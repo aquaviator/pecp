@@ -831,7 +831,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
               <pre className="p-3 bg-slate-900 rounded font-mono text-xs text-sky-300 overflow-x-auto">
 {`# Execute using stable runtime and generated bundle
 k6 run \\
-  -e TARGET_BASE_URL="http://reference-lab.retailco.internal:8080" \\
+  -e TARGET_BASE_URL="http://localhost:8080" \\
   -e RETAILCO_CHECKOUT_AUTH_TOKEN="$VAULT_CHECKOUT_SECRET" \\
   entrypoint.js`}
               </pre>

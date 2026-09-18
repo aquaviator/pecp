@@ -103,7 +103,7 @@
       ]
     },
     "targetEnvironment": {
-      "baseUrlRef": "http://reference-lab.retailco.internal:8080",
+      "baseUrlRef": "http://localhost:8080",
       "isSupplied": true
     },
     "credentialReferences": [

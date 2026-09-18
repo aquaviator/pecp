@@ -199,7 +199,7 @@ export const RETAILCO_M3_EXECUTION_INTELLIGENCE: ExecutionIntelligenceOverrides 
   schedule: RETAILCO_M3_WORKLOAD_SCHEDULE,
   journeys: RETAILCO_M3_JOURNEYS,
   populationRelationship: RETAILCO_M3_POPULATION_RELATIONSHIP,
-  targetEnvironmentBaseUrlRef: 'http://reference-lab.retailco.internal:8080',
+  targetEnvironmentBaseUrlRef: 'http://localhost:8080',
   testDataIdentifiers: [
     'customer_account_pool_100k',
     'sku_catalog_active_50k',
@@ -216,16 +216,16 @@ export const RETAILCO_M3_EXECUTION_INTELLIGENCE: ExecutionIntelligenceOverrides 
     {
       id: 'precond-env-lab',
       category: 'ENVIRONMENT',
-      statement: 'Reference Lab environment online and accessible at http://reference-lab.retailco.internal:8080',
+      statement: 'Reference Lab environment online and accessible at http://localhost:8080',
       isSatisfied: true,
       verificationMethod: 'HTTP GET /health probe'
     },
     {
       id: 'precond-data-pool',
       category: 'TEST_DATA',
-      statement: '100,000 customer accounts and 50,000 active SKUs seeded in Reference Lab database',
+      statement: 'Synthetic customer account pool (100k profile) and active SKU catalog (50k profile) verified in Reference Lab',
       isSatisfied: true,
-      verificationMethod: 'SQL SELECT count(*) on test data tables'
+      verificationMethod: 'Profile readiness validation on HTTP GET /ready probe'
     },
     {
       id: 'precond-gov-approved',
