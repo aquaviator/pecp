@@ -1,0 +1,76 @@
+name: Governed Reference Execution (M3.1B)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode (canonical full 22-min run vs smoke diagnostic)'
+        required: true
+        default: 'smoke_diagnostic'
+        type: choice
+        options:
+          - smoke_diagnostic
+          - canonical
+      smoke_duration_seconds:
+        description: 'Duration in seconds for diagnostic smoke run'
+        required: false
+        default: 10
+        type: number
+
+jobs:
+  reference-execution:
+    name: Governed k6 Reference Execution
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies (deterministic)
+        run: npm ci
+
+      - name: Install Pinned k6 Engine (v0.54.0)
+        run: |
+          echo "Installing pinned k6 v0.54.0..."
+          curl -sL https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz | tar -xz
+          sudo mv k6-v0.54.0-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Verify Pinned Engine Version
+        run: |
+          K6_VER=$(k6 version | awk '{print $2}')
+          if [ "$K6_VER" != "v0.54.0" ]; then
+            echo "ERROR: Expected k6 v0.54.0, got $K6_VER"
+            exit 1
+          fi
+          echo "Verified pinned k6 engine version: $K6_VER"
+
+      - name: Run Governed Reference Execution
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ "${{ inputs.mode }}" = "canonical" ]; then
+            echo "Starting CANONICAL 1320s governed reference execution..."
+            npx vite-node --config apps/web/vite.config.ts scripts/run-governed-reference-execution.ts -- --mode=canonical
+          else
+            echo "Starting SMOKE_DIAGNOSTIC governed reference execution (${{ inputs.smoke_duration_seconds }}s)..."
+            npx vite-node --config apps/web/vite.config.ts scripts/run-governed-reference-execution.ts -- --mode=smoke_diagnostic --smoke-duration=${{ inputs.smoke_duration_seconds }}
+          fi
+
+      - name: Upload Execution Evidence Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m3-1b-evidence-${{ inputs.mode }}-${{ github.run_id }}
+          path: evidence/m3-1b/
+          retention-days: 90

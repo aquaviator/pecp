@@ -14,7 +14,9 @@
     "preview": "npm --workspace=apps/web run preview",
     "lint": "npm --workspace=apps/web run lint",
     "test:reference-lab": "npm --prefix reference-lab/retailco test",
-    "test": "npm --workspace=apps/web run test && npm run test:reference-lab"
+    "test": "npm --workspace=apps/web run test && npm run test:reference-lab",
+    "exec:reference": "vite-node --config apps/web/vite.config.ts scripts/run-governed-reference-execution.ts -- --mode=canonical",
+    "exec:reference:smoke": "vite-node --config apps/web/vite.config.ts scripts/run-governed-reference-execution.ts -- --mode=smoke_diagnostic"
   },
   "dependencies": {
     "clsx": "^2.1.1",

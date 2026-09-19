@@ -1,0 +1,196 @@
+{
+  "runId": "pecp-ref-smoke_diagnostic-1789738460485",
+  "executionMode": "SMOKE_DIAGNOSTIC",
+  "operationalStatus": "EXECUTION_COMPLETED",
+  "commitSha": "UNAVAILABLE",
+  "timestamps": {
+    "startedAt": "2026-09-18T13:34:20.486Z",
+    "completedAt": "2026-09-18T13:34:28.766Z",
+    "durationSeconds": 8.28
+  },
+  "engine": {
+    "name": "k6",
+    "version": "0.54.0",
+    "fullVersionString": "k6 v0.54.0 (commit/baba871c8a, go1.23.1, linux/amd64)",
+    "isPinnedExpected": true,
+    "binaryPath": "k6"
+  },
+  "target": {
+    "baseUrl": "http://localhost:24642",
+    "probeResult": {
+      "baseUrl": "http://localhost:24642",
+      "verifiedAt": "2026-09-18T13:34:20.486Z",
+      "healthStatus": "healthy",
+      "readyStatus": "ready",
+      "isResolvable": true,
+      "httpStatusHealth": 200,
+      "httpStatusReady": 200
+    }
+  },
+  "pecpBinding": {
+    "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
+    "sourceContractVersion": "v1.0",
+    "sourceContractFingerprint": "fp-0dad9ae4",
+    "sourceContractStatus": "APPROVED",
+    "testDefinitionId": "test-def-proj-retailco-bf2026-v1.0",
+    "testDefinitionVersion": "v1.0",
+    "testDefinitionFingerprint": "fp-6911db94",
+    "bundleFingerprint": "fp-f6f5d12c",
+    "runtimeVersion": "1.0.0",
+    "runtimeSourceId": "pecp-stable-k6-runtime-v1.0.0",
+    "schedulerArrival": {
+      "population": "JOURNEY_ITERATION",
+      "peakRate": 109.375,
+      "unit": "journey_iterations/second"
+    },
+    "businessAttainment": {
+      "metric": "orders",
+      "targetValue": 8.75,
+      "unit": "orders/second"
+    }
+  },
+  "preflight": {
+    "manifestTimestamp": "2026-09-18T13:34:20.480Z",
+    "status": "READY_FOR_LIVE_EXECUTION",
+    "isValid": true,
+    "blockingReasons": []
+  },
+  "credentials": [
+    {
+      "referenceId": "RETAILCO_CHECKOUT_AUTH_TOKEN",
+      "purpose": "Checkout API Authorization",
+      "provider": "ENV_VAR",
+      "injectedAs": "TARGET_BASE_URL & k6 -e RETAILCO_CHECKOUT_AUTH_TOKEN",
+      "maskedValue": "***REDACTED_EPHEMERAL***"
+    }
+  ],
+  "materializedFiles": [
+    {
+      "filename": "config.json",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/config.json",
+      "sizeBytes": 3244,
+      "checksum": "b318e89d13ac542bd1162b661a4130c141b0d8c1bf705b743c0598efa3712af3"
+    },
+    {
+      "filename": "journeys.js",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/journeys.js",
+      "sizeBytes": 3623,
+      "checksum": "337f9df6501043d3482e4eb815b540e92c9e6531386c22c7d7cc552432e0e6f8"
+    },
+    {
+      "filename": "entrypoint.js",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/entrypoint.js",
+      "sizeBytes": 1796,
+      "checksum": "2efd1eaed1d2dbf537bd626e56049cda909868c1799e2f8798e9516106ec7f0e"
+    },
+    {
+      "filename": "runtime.js",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/runtime.js",
+      "sizeBytes": 4305,
+      "checksum": "77392806b817c69db9b494ffb7c7cbb76d06244e185544e3b7218c8b7257ee91"
+    }
+  ],
+  "k6ExitCode": 0,
+  "rawArtefacts": {
+    "summaryJson": {
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/summary.json",
+      "sizeBytes": 5271,
+      "checksum": "49349d61859870794e055e88ce670346b26f78a2d027241d38074f533fb97c01"
+    },
+    "stdoutLog": {
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/k6-stdout.log",
+      "sizeBytes": 1460,
+      "checksum": "e40dc381b90b2f905bbf3677304933d67a5df0f9e2248b404957cea8ff71f69a"
+    },
+    "stderrLog": {
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/k6-stderr.log",
+      "sizeBytes": 0,
+      "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "configJson": {
+      "filename": "config.json",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/config.json",
+      "sizeBytes": 3244,
+      "checksum": "b318e89d13ac542bd1162b661a4130c141b0d8c1bf705b743c0598efa3712af3"
+    },
+    "journeysJs": {
+      "filename": "journeys.js",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/journeys.js",
+      "sizeBytes": 3623,
+      "checksum": "337f9df6501043d3482e4eb815b540e92c9e6531386c22c7d7cc552432e0e6f8"
+    },
+    "entrypointJs": {
+      "filename": "entrypoint.js",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/entrypoint.js",
+      "sizeBytes": 1796,
+      "checksum": "2efd1eaed1d2dbf537bd626e56049cda909868c1799e2f8798e9516106ec7f0e"
+    },
+    "runtimeJs": {
+      "filename": "runtime.js",
+      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/runtime.js",
+      "sizeBytes": 4305,
+      "checksum": "77392806b817c69db9b494ffb7c7cbb76d06244e185544e3b7218c8b7257ee91"
+    }
+  },
+  "referenceLabMetrics": {
+    "before": {
+      "requestCountsByRoute": {
+        "/health": 2,
+        "/ready": 2,
+        "/api/v1/metrics": 1
+      },
+      "statusCounts": {
+        "200": 5
+      },
+      "businessAttainmentEvents": {
+        "order_created": 0
+      },
+      "totalRequests": 5,
+      "capturedAt": "2026-09-18T13:34:20.548Z"
+    },
+    "after": {
+      "requestCountsByRoute": {
+        "/health": 2,
+        "/ready": 2,
+        "/api/v1/metrics": 2,
+        "/api/v1/basket/items": 1,
+        "/api/v1/products/featured": 1,
+        "/api/v1/orders/checkout": 1
+      },
+      "statusCounts": {
+        "200": 8,
+        "201": 1
+      },
+      "businessAttainmentEvents": {
+        "order_created": 1
+      },
+      "totalRequests": 9,
+      "capturedAt": "2026-09-18T13:34:28.759Z"
+    },
+    "delta": {
+      "totalRequests": 4,
+      "requestsByRoute": {
+        "/health": 0,
+        "/ready": 0,
+        "/api/v1/metrics": 1,
+        "/api/v1/basket/items": 1,
+        "/api/v1/products/featured": 1,
+        "/api/v1/orders/checkout": 1
+      },
+      "statusCounts": {
+        "200": 3,
+        "201": 1
+      },
+      "orderCreatedEvents": 1,
+      "durationSeconds": 8.211
+    }
+  },
+  "businessAttainment": {
+    "metric": "orders",
+    "orderCreatedEventsObserved": 1,
+    "targetArrivalRate": 8.75
+  },
+  "performanceVerdict": "PECP_PERFORMANCE_VERDICT_NOT_EVALUATED",
+  "verdictDisclaimer": "PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: M3.1B is strictly an execution proof. No PECP PASS/FAIL/INCONCLUSIVE performance verdict is evaluated or assigned.",
+  "issues": []
+}

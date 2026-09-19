@@ -15,7 +15,6 @@ import {
   PreflightValidationContext,
   validateExecutionPreflightManifest
 } from './preflightCompiler.js';
-import { computeBundleFingerprint, computeStringChecksum } from './fingerprint.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -61,6 +60,78 @@ export interface ReferenceLabMetricsDelta {
   durationSeconds: number;
 }
 
+export interface K6ProcessInvocation {
+  binaryPath: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  stdoutLogPath: string;
+  stderrLogPath: string;
+  summaryJsonPath: string;
+  redactedToken?: string;
+}
+
+export interface K6ProcessResult {
+  exitCode: number | null;
+  error?: Error;
+}
+
+export interface K6ExecutionAdapter {
+  checkVersion: (binaryPath?: string) => Promise<PinnedK6EngineInfo>;
+  runK6: (invocation: K6ProcessInvocation) => Promise<K6ProcessResult>;
+}
+
+export const defaultK6ExecutionAdapter: K6ExecutionAdapter = {
+  checkVersion: async (binaryPath = 'k6') => {
+    return checkPinnedK6Engine(binaryPath);
+  },
+  runK6: async (invocation: K6ProcessInvocation) => {
+    const stdoutStream = fs.createWriteStream(invocation.stdoutLogPath, { flags: 'w' });
+    const stderrStream = fs.createWriteStream(invocation.stderrLogPath, { flags: 'w' });
+    const redactedToken = invocation.redactedToken;
+
+    return new Promise<K6ProcessResult>((resolve) => {
+      try {
+        const child = spawn(invocation.binaryPath, invocation.args, {
+          cwd: invocation.cwd,
+          env: invocation.env
+        });
+
+        child.stdout.on('data', (data) => {
+          const text = redactedToken
+            ? data.toString().split(redactedToken).join('***REDACTED_EPHEMERAL***')
+            : data.toString();
+          stdoutStream.write(text);
+        });
+
+        child.stderr.on('data', (data) => {
+          const text = redactedToken
+            ? data.toString().split(redactedToken).join('***REDACTED_EPHEMERAL***')
+            : data.toString();
+          stderrStream.write(text);
+        });
+
+        child.on('error', (err) => {
+          stderrStream.write(`\nChild process spawn error: ${err.message}\n`);
+          stdoutStream.end();
+          stderrStream.end();
+          resolve({ exitCode: null, error: err });
+        });
+
+        child.on('close', (code) => {
+          stdoutStream.end();
+          stderrStream.end();
+          resolve({ exitCode: code });
+        });
+      } catch (err: any) {
+        stdoutStream.end();
+        stderrStream.end();
+        resolve({ exitCode: null, error: err });
+      }
+    });
+  }
+};
+
 export interface ReferenceExecutionOptions {
   targetBaseUrl?: string;
   outputDir: string;
@@ -74,16 +145,19 @@ export interface ReferenceExecutionOptions {
   };
   sourceContract?: PerformanceContract;
   k6Binary?: string;
+  k6Adapter?: K6ExecutionAdapter;
   ephemeralToken?: string;
   commitSha?: string;
   runId?: string;
   smokeDurationOverrideSeconds?: number;
+  executionMode?: 'CANONICAL' | 'SMOKE_DIAGNOSTIC';
   forcePreflightInvalid?: boolean;
   omitRawSummaryForTest?: boolean;
 }
 
 export interface ReferenceExecutionResult {
   runId: string;
+  executionMode: 'CANONICAL' | 'SMOKE_DIAGNOSTIC';
   operationalStatus:
     | 'EXECUTION_COMPLETED'
     | 'EXECUTION_ENGINE_FAILED'
@@ -152,7 +226,7 @@ export interface ReferenceExecutionResult {
     delta?: ReferenceLabMetricsDelta;
   };
   businessAttainment: {
-    metric: 'orders';
+    metric: string;
     orderCreatedEventsObserved: number;
     targetArrivalRate: number;
   };
@@ -410,49 +484,108 @@ export function computeReferenceLabMetricsDelta(
 }
 
 /**
- * Executes a governed reference run using the real pinned k6 engine and Reference Lab.
+ * Executes a governed reference run using the pinned k6 engine and Reference Lab.
+ * Order of Authority (M3.1B.1):
+ *   1. Preflight Validation Gate (Blocks first, before any engine evaluation or process launch)
+ *   2. Target Environment Resolvability
+ *   3. Pinned Engine Verification (checks pinned version, fails if unavailable or unpinned)
+ *   4. Bundle Materialization & Engine Execution
  */
 export async function executeReferenceRun(
   options: ReferenceExecutionOptions
 ): Promise<ReferenceExecutionResult> {
   const startedAt = new Date().toISOString();
   const startTimeMs = Date.now();
-  const runId = options.runId || `run-retailco-m3-1b-${Date.now()}`;
-  const commitSha = options.commitSha || process.env.GITHUB_SHA || 'd0d75094d4d602bb44e8ec6784346eb41c5a96db';
-  const targetBaseUrl = options.targetBaseUrl || 'http://localhost:8080';
+  const runId = options.runId || `run-pecp-reference-${Date.now()}`;
+  const commitSha = options.commitSha || process.env.GITHUB_SHA || 'UNAVAILABLE';
+  const adapter = options.k6Adapter || defaultK6ExecutionAdapter;
   const k6Binary = options.k6Binary || 'k6';
+
+  const executionMode: 'CANONICAL' | 'SMOKE_DIAGNOSTIC' =
+    options.smokeDurationOverrideSeconds !== undefined
+      ? 'SMOKE_DIAGNOSTIC'
+      : (options.executionMode || 'CANONICAL');
 
   const issues: Array<{ code: string; message: string }> = [];
 
+  // 0. Bindings extracted strictly from preflightManifest, testDefinition, and bundle (zero hardcoded project fallbacks)
+  const targetBaseUrl =
+    options.targetBaseUrl ||
+    options.preflightManifest?.targetEnvironment?.defaultBaseUrl ||
+    options.testDefinition?.scenarios?.[0]?.targetEnvironmentBaseUrlRef ||
+    '';
+
   const sourceContractId =
-    options.preflightManifest.canonicalTestDefinition.sourceContractId ||
-    options.testDefinition.sourceContractId ||
+    options.preflightManifest?.canonicalTestDefinition?.sourceContractId ||
+    options.testDefinition?.sourceContractId ||
     '';
   const sourceContractVersion =
-    options.preflightManifest.canonicalTestDefinition.sourceContractVersion ||
-    options.testDefinition.sourceContractVersion ||
-    'v1.0';
+    options.preflightManifest?.canonicalTestDefinition?.sourceContractVersion ||
+    options.testDefinition?.sourceContractVersion ||
+    '';
   const sourceContractFingerprint =
-    options.preflightManifest.canonicalTestDefinition.sourceContractFingerprint ||
-    options.testDefinition.sourceContractFingerprint ||
+    options.preflightManifest?.canonicalTestDefinition?.sourceContractFingerprint ||
+    options.testDefinition?.sourceContractFingerprint ||
     '';
   const sourceContractStatus =
-    options.preflightManifest.canonicalTestDefinition.sourceContractStatus ||
-    options.testDefinition.sourceContractStatus ||
-    'APPROVED';
+    options.preflightManifest?.canonicalTestDefinition?.sourceContractStatus ||
+    options.testDefinition?.sourceContractStatus ||
+    '';
 
-  const testDefId = options.testDefinition.id;
-  const testDefVersion = options.testDefinition.version;
-  const testDefFingerprint = options.testDefinition.fingerprint;
+  const testDefId = options.testDefinition?.id || '';
+  const testDefVersion = options.testDefinition?.version || '';
+  const testDefFingerprint = options.testDefinition?.fingerprint || '';
+  const bundleFingerprint = options.bundle?.fingerprint || '';
+  const runtimeVersion = options.bundle?.runtimeVersion || options.preflightManifest?.k6Runtime?.version || '';
+  const runtimeSourceId = options.bundle?.runtimeSourceId || options.preflightManifest?.k6Runtime?.sourceId || '';
 
-  // 1. Pinned engine check
-  let engineInfo: PinnedK6EngineInfo;
-  try {
-    engineInfo = await checkPinnedK6Engine(k6Binary);
-  } catch (err: any) {
+  const schedulerArrival = {
+    population: options.preflightManifest?.governedWorkload?.schedulerArrivalPopulation || '',
+    peakRate: options.preflightManifest?.governedWorkload?.schedulerPeakRate?.value ?? 0,
+    unit: options.preflightManifest?.governedWorkload?.schedulerPeakRate?.unit || ''
+  };
+
+  const businessAttainment = {
+    metric: options.preflightManifest?.governedWorkload?.businessWorkloadAttainment?.metric || '',
+    targetValue: options.preflightManifest?.governedWorkload?.businessWorkloadAttainment?.targetValue ?? 0,
+    unit: options.preflightManifest?.governedWorkload?.businessWorkloadAttainment?.unit || ''
+  };
+
+  const pecpBinding = {
+    sourceContractId,
+    sourceContractVersion,
+    sourceContractFingerprint,
+    sourceContractStatus,
+    testDefinitionId: testDefId,
+    testDefinitionVersion: testDefVersion,
+    testDefinitionFingerprint: testDefFingerprint,
+    bundleFingerprint,
+    runtimeVersion,
+    runtimeSourceId,
+    schedulerArrival,
+    businessAttainment
+  };
+
+  // Derive credentials directly from preflight manifest requiredReferences or test definition
+  const rawCreds =
+    options.preflightManifest?.credentialBindings?.requiredReferences ||
+    options.testDefinition?.credentialReferences ||
+    [];
+
+  const credentials = rawCreds.map((b: any) => ({
+    referenceId: b.referenceId,
+    purpose: b.purpose,
+    provider: b.provider,
+    injectedAs: `TARGET_BASE_URL & k6 -e ${b.referenceId}`,
+    maskedValue: '***REDACTED_EPHEMERAL***'
+  }));
+
+  // Assert target URL presence
+  if (!targetBaseUrl) {
     return {
       runId,
-      operationalStatus: 'EXECUTION_ENGINE_FAILED',
+      executionMode,
+      operationalStatus: 'TARGET_UNAVAILABLE',
       commitSha,
       timestamps: {
         startedAt,
@@ -461,39 +594,18 @@ export async function executeReferenceRun(
       },
       engine: {
         name: 'k6',
-        version: 'unavailable',
-        fullVersionString: String(err.message || err),
+        version: 'not-evaluated',
+        fullVersionString: 'Target URL was not specified or bound.',
         isPinnedExpected: false,
         binaryPath: k6Binary
       },
-      target: { baseUrl: targetBaseUrl },
-      pecpBinding: {
-        sourceContractId,
-        sourceContractVersion,
-        sourceContractFingerprint,
-        sourceContractStatus,
-        testDefinitionId: testDefId,
-        testDefinitionVersion: testDefVersion,
-        testDefinitionFingerprint: testDefFingerprint,
-        bundleFingerprint: options.bundle.fingerprint,
-        runtimeVersion: options.bundle.runtimeVersion || '1.0.0',
-        runtimeSourceId: options.bundle.runtimeSourceId || 'pecp-stable-k6-runtime-v1.0.0',
-        schedulerArrival: {
-          population: 'JOURNEY_ITERATION',
-          peakRate: 109.375,
-          unit: 'journey_iterations/second'
-        },
-        businessAttainment: {
-          metric: 'orders',
-          targetValue: 8.75,
-          unit: 'orders/second'
-        }
-      },
+      target: { baseUrl: '' },
+      pecpBinding,
       preflight: {
-        manifestTimestamp: options.preflightManifest.preflightTimestamp,
-        status: options.preflightManifest.status,
+        manifestTimestamp: options.preflightManifest?.preflightTimestamp || '',
+        status: options.preflightManifest?.status || 'UNKNOWN',
         isValid: false,
-        blockingReasons: ['PINNED_K6_ENGINE_UNAVAILABLE']
+        blockingReasons: ['TARGET_URL_MISSING']
       },
       credentials: [],
       materializedFiles: [],
@@ -501,25 +613,26 @@ export async function executeReferenceRun(
       rawArtefacts: {},
       referenceLabMetrics: {},
       businessAttainment: {
-        metric: 'orders',
+        metric: businessAttainment.metric,
         orderCreatedEventsObserved: 0,
-        targetArrivalRate: 8.75
+        targetArrivalRate: businessAttainment.targetValue
       },
       performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
       verdictDisclaimer:
-        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: M3.1B is strictly an execution proof. No performance verdict is assigned.',
-      issues: [{ code: 'PINNED_K6_ENGINE_UNAVAILABLE', message: err.message || String(err) }]
+        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Target URL missing. Preflight cannot proceed.',
+      issues: [{ code: 'TARGET_UNAVAILABLE', message: 'Target environment URL is missing or not bound.' }]
     };
   }
 
-  // 2. Preflight Gate Enforcement (Section 11)
+  // 1. FIRST AUTHORITY: Preflight Gate Enforcement (Section 2)
+  // Probe target for preflight context
   const probe = await probeReferenceLab(targetBaseUrl);
   const preflightContext: PreflightValidationContext = {
     testDefinition: options.testDefinition,
     bundle: options.bundle,
     referenceLabManifest: options.referenceLabManifest || {
-      version: options.preflightManifest.routeManifestVersion || '1.0.0',
-      service: options.preflightManifest.service || 'retailco-reference-lab'
+      version: options.preflightManifest?.routeManifestVersion || '1.0.0',
+      service: options.preflightManifest?.service || 'retailco-reference-lab'
     },
     sourceContract: options.sourceContract,
     targetProbe: probe,
@@ -538,8 +651,10 @@ export async function executeReferenceRun(
       ? ['FORCED_PREFLIGHT_FAILURE_TEST']
       : preflightValidation.issues.map((i) => i.description);
 
+    // Notice: NO k6 engine check is performed when preflight blocks launch!
     return {
       runId,
+      executionMode,
       operationalStatus: 'PREFLIGHT_BLOCKED',
       commitSha,
       timestamps: {
@@ -547,60 +662,46 @@ export async function executeReferenceRun(
         completedAt: new Date().toISOString(),
         durationSeconds: (Date.now() - startTimeMs) / 1000
       },
-      engine: engineInfo,
+      engine: {
+        name: 'k6',
+        version: 'not-evaluated',
+        fullVersionString: 'Preflight validation blocked execution before engine check.',
+        isPinnedExpected: false,
+        binaryPath: k6Binary
+      },
       target: {
         baseUrl: targetBaseUrl,
         probeResult: probe
       },
-      pecpBinding: {
-        sourceContractId,
-        sourceContractVersion,
-        sourceContractFingerprint,
-        sourceContractStatus,
-        testDefinitionId: testDefId,
-        testDefinitionVersion: testDefVersion,
-        testDefinitionFingerprint: testDefFingerprint,
-        bundleFingerprint: options.bundle.fingerprint,
-        runtimeVersion: options.bundle.runtimeVersion || '1.0.0',
-        runtimeSourceId: options.bundle.runtimeSourceId || 'pecp-stable-k6-runtime-v1.0.0',
-        schedulerArrival: {
-          population: options.preflightManifest.governedWorkload.schedulerArrivalPopulation,
-          peakRate: options.preflightManifest.governedWorkload.schedulerPeakRate.value,
-          unit: options.preflightManifest.governedWorkload.schedulerPeakRate.unit
-        },
-        businessAttainment: {
-          metric: options.preflightManifest.governedWorkload.businessWorkloadAttainment.metric,
-          targetValue: options.preflightManifest.governedWorkload.businessWorkloadAttainment.targetValue,
-          unit: options.preflightManifest.governedWorkload.businessWorkloadAttainment.unit
-        }
-      },
+      pecpBinding,
       preflight: {
         manifestTimestamp: options.preflightManifest.preflightTimestamp,
         status: options.preflightManifest.status,
         isValid: false,
         blockingReasons
       },
-      credentials: [],
+      credentials,
       materializedFiles: [],
       k6ExitCode: null,
       rawArtefacts: {},
       referenceLabMetrics: {},
       businessAttainment: {
-        metric: 'orders',
+        metric: businessAttainment.metric,
         orderCreatedEventsObserved: 0,
-        targetArrivalRate: 8.75
+        targetArrivalRate: businessAttainment.targetValue
       },
       performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
       verdictDisclaimer:
-        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Preflight validation failure blocked process launch.',
+        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Preflight validation failure blocked process launch. Zero engine/process calls were made.',
       issues: blockingReasons.map((r) => ({ code: 'PREFLIGHT_BLOCKED', message: r }))
     };
   }
 
-  // 3. Target Reachability Check
+  // 2. SECOND AUTHORITY: Target Reachability Check
   if (!probe.isResolvable) {
     return {
       runId,
+      executionMode,
       operationalStatus: 'TARGET_UNAVAILABLE',
       commitSha,
       timestamps: {
@@ -608,63 +709,133 @@ export async function executeReferenceRun(
         completedAt: new Date().toISOString(),
         durationSeconds: (Date.now() - startTimeMs) / 1000
       },
-      engine: engineInfo,
+      engine: {
+        name: 'k6',
+        version: 'not-evaluated',
+        fullVersionString: 'Target unavailable blocked execution before engine check.',
+        isPinnedExpected: false,
+        binaryPath: k6Binary
+      },
       target: {
         baseUrl: targetBaseUrl,
         probeResult: probe
       },
-      pecpBinding: {
-        sourceContractId,
-        sourceContractVersion,
-        sourceContractFingerprint,
-        sourceContractStatus,
-        testDefinitionId: testDefId,
-        testDefinitionVersion: testDefVersion,
-        testDefinitionFingerprint: testDefFingerprint,
-        bundleFingerprint: options.bundle.fingerprint,
-        runtimeVersion: options.bundle.runtimeVersion || '1.0.0',
-        runtimeSourceId: options.bundle.runtimeSourceId || 'pecp-stable-k6-runtime-v1.0.0',
-        schedulerArrival: {
-          population: options.preflightManifest.governedWorkload.schedulerArrivalPopulation,
-          peakRate: options.preflightManifest.governedWorkload.schedulerPeakRate.value,
-          unit: options.preflightManifest.governedWorkload.schedulerPeakRate.unit
-        },
-        businessAttainment: {
-          metric: options.preflightManifest.governedWorkload.businessWorkloadAttainment.metric,
-          targetValue: options.preflightManifest.governedWorkload.businessWorkloadAttainment.targetValue,
-          unit: options.preflightManifest.governedWorkload.businessWorkloadAttainment.unit
-        }
-      },
+      pecpBinding,
       preflight: {
         manifestTimestamp: options.preflightManifest.preflightTimestamp,
         status: options.preflightManifest.status,
         isValid: true,
         blockingReasons: []
       },
-      credentials: [],
+      credentials,
       materializedFiles: [],
       k6ExitCode: null,
       rawArtefacts: {},
       referenceLabMetrics: {},
       businessAttainment: {
-        metric: 'orders',
+        metric: businessAttainment.metric,
         orderCreatedEventsObserved: 0,
-        targetArrivalRate: 8.75
+        targetArrivalRate: businessAttainment.targetValue
       },
       performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
       verdictDisclaimer:
         'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Target environment is unresolvable or unhealthy.',
-      issues: [{ code: 'TARGET_UNAVAILABLE', message: `Target at ${targetBaseUrl} is not resolvable.` }]
+      issues: [{ code: 'TARGET_UNAVAILABLE', message: `Target at ${targetBaseUrl} is unresolvable or unhealthy.` }]
     };
   }
 
-  // 4. Ephemeral credential generation (Section 7)
-  const ephemeralToken = options.ephemeralToken || generateEphemeralCheckoutToken();
+  // 3. THIRD AUTHORITY: Pinned Engine Availability & Version Verification (Section 3, 4)
+  let engineInfo: PinnedK6EngineInfo;
+  try {
+    engineInfo = await adapter.checkVersion(k6Binary);
+  } catch (err: any) {
+    return {
+      runId,
+      executionMode,
+      operationalStatus: 'EXECUTION_ENGINE_FAILED',
+      commitSha,
+      timestamps: {
+        startedAt,
+        completedAt: new Date().toISOString(),
+        durationSeconds: (Date.now() - startTimeMs) / 1000
+      },
+      engine: {
+        name: 'k6',
+        version: 'unavailable',
+        fullVersionString: err.message || String(err),
+        isPinnedExpected: false,
+        binaryPath: k6Binary
+      },
+      target: { baseUrl: targetBaseUrl, probeResult: probe },
+      pecpBinding,
+      preflight: {
+        manifestTimestamp: options.preflightManifest.preflightTimestamp,
+        status: options.preflightManifest.status,
+        isValid: true,
+        blockingReasons: []
+      },
+      credentials,
+      materializedFiles: [],
+      k6ExitCode: null,
+      rawArtefacts: {},
+      referenceLabMetrics: {},
+      businessAttainment: {
+        metric: businessAttainment.metric,
+        orderCreatedEventsObserved: 0,
+        targetArrivalRate: businessAttainment.targetValue
+      },
+      performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
+      verdictDisclaimer:
+        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Engine verification failed.',
+      issues: [{ code: 'PINNED_K6_ENGINE_UNAVAILABLE', message: err.message || String(err) }]
+    };
+  }
 
-  // 5. Materialize bundle to outputDir
+  if (!engineInfo.isPinnedExpected) {
+    return {
+      runId,
+      executionMode,
+      operationalStatus: 'EXECUTION_ENGINE_FAILED',
+      commitSha,
+      timestamps: {
+        startedAt,
+        completedAt: new Date().toISOString(),
+        durationSeconds: (Date.now() - startTimeMs) / 1000
+      },
+      engine: engineInfo,
+      target: { baseUrl: targetBaseUrl, probeResult: probe },
+      pecpBinding,
+      preflight: {
+        manifestTimestamp: options.preflightManifest.preflightTimestamp,
+        status: options.preflightManifest.status,
+        isValid: true,
+        blockingReasons: []
+      },
+      credentials,
+      materializedFiles: [],
+      k6ExitCode: null,
+      rawArtefacts: {},
+      referenceLabMetrics: {},
+      businessAttainment: {
+        metric: businessAttainment.metric,
+        orderCreatedEventsObserved: 0,
+        targetArrivalRate: businessAttainment.targetValue
+      },
+      performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
+      verdictDisclaimer:
+        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Engine version does not match pinned expected version.',
+      issues: [{
+        code: 'UNPINNED_K6_ENGINE',
+        message: `Engine version "${engineInfo.version}" does not match pinned expected version "${PINNED_K6_VERSION_EXPECTED}".`
+      }]
+    };
+  }
+
+  // 4. FOURTH AUTHORITY: Ephemeral credential generation & Bundle materialization
+  const ephemeralToken = options.ephemeralToken || generateEphemeralCheckoutToken();
   const materialization = materializeK6Bundle(options.bundle, options.outputDir);
 
-  // 6. Pre-execution metrics snapshot (Section 9)
+  // 5. Pre-execution metrics snapshot (Section 9)
   let metricsBefore: ReferenceLabMetricsSnapshot;
   try {
     metricsBefore = await queryReferenceLabMetrics(targetBaseUrl);
@@ -679,71 +850,56 @@ export async function executeReferenceRun(
     issues.push({ code: 'PRE_METRICS_FETCH_FAILED', message: err.message || String(err) });
   }
 
-  // 7. Execute real k6 binary (Section 3, 5, 8)
+  // 6. Execute k6 via injected execution adapter
   const stdoutLogPath = path.join(options.outputDir, 'k6-stdout.log');
   const stderrLogPath = path.join(options.outputDir, 'k6-stderr.log');
   const summaryJsonPath = path.join(options.outputDir, 'summary.json');
-
-  const stdoutStream = fs.createWriteStream(stdoutLogPath, { flags: 'w' });
-  const stderrStream = fs.createWriteStream(stderrLogPath, { flags: 'w' });
 
   const k6Args = [
     'run',
     '--summary-export',
     summaryJsonPath,
     '-e',
-    `TARGET_BASE_URL=${targetBaseUrl}`,
-    '-e',
-    `RETAILCO_CHECKOUT_AUTH_TOKEN=${ephemeralToken}`,
-    path.join(options.outputDir, 'entrypoint.js')
+    `TARGET_BASE_URL=${targetBaseUrl}`
   ];
 
+  // Dynamically inject all derived credential references into k6 environment
+  const childEnv: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    TARGET_BASE_URL: targetBaseUrl
+  };
+  for (const cred of rawCreds) {
+    k6Args.push('-e', `${cred.referenceId}=${ephemeralToken}`);
+    childEnv[cred.referenceId] = ephemeralToken;
+  }
+
   if (options.smokeDurationOverrideSeconds) {
-    // For fast automated test verification only (Section 11)
     k6Args.unshift('--duration', `${options.smokeDurationOverrideSeconds}s`);
   }
 
+  k6Args.push(path.join(options.outputDir, 'entrypoint.js'));
+
   let k6ExitCode: number | null = null;
-
   try {
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(k6Binary, k6Args, {
-        cwd: options.outputDir,
-        env: {
-          ...process.env,
-          TARGET_BASE_URL: targetBaseUrl,
-          RETAILCO_CHECKOUT_AUTH_TOKEN: ephemeralToken
-        }
-      });
-
-      child.stdout.on('data', (data) => {
-        // Redact any accidental raw credential exposure in stream (Section 7)
-        const text = data.toString().split(ephemeralToken).join('***REDACTED_EPHEMERAL***');
-        stdoutStream.write(text);
-      });
-
-      child.stderr.on('data', (data) => {
-        const text = data.toString().split(ephemeralToken).join('***REDACTED_EPHEMERAL***');
-        stderrStream.write(text);
-      });
-
-      child.on('error', (err) => {
-        stderrStream.write(`\nChild process spawn error: ${err.message}\n`);
-        reject(err);
-      });
-
-      child.on('close', (code) => {
-        k6ExitCode = code;
-        stdoutStream.end();
-        stderrStream.end();
-        resolve();
-      });
+    const procResult = await adapter.runK6({
+      binaryPath: k6Binary,
+      args: k6Args,
+      cwd: options.outputDir,
+      env: childEnv,
+      stdoutLogPath,
+      stderrLogPath,
+      summaryJsonPath,
+      redactedToken: ephemeralToken
     });
+    k6ExitCode = procResult.exitCode;
+    if (procResult.error) {
+      issues.push({ code: 'K6_EXECUTION_ERROR', message: procResult.error.message || String(procResult.error) });
+    }
   } catch (err: any) {
     issues.push({ code: 'K6_EXECUTION_ERROR', message: err.message || String(err) });
   }
 
-  // 8. Post-execution metrics snapshot (Section 9)
+  // 7. Post-execution metrics snapshot
   let metricsAfter: ReferenceLabMetricsSnapshot;
   try {
     metricsAfter = await queryReferenceLabMetrics(targetBaseUrl);
@@ -760,7 +916,7 @@ export async function executeReferenceRun(
 
   const metricsDelta = computeReferenceLabMetricsDelta(metricsBefore, metricsAfter);
 
-  // 9. Inspect raw artefacts on disk
+  // 8. Inspect raw artefacts on disk
   if (options.omitRawSummaryForTest && fs.existsSync(summaryJsonPath)) {
     fs.unlinkSync(summaryJsonPath);
   }
@@ -801,7 +957,7 @@ export async function executeReferenceRun(
     if (f.filename === 'runtime.js') rawArtefacts.runtimeJs = f;
   }
 
-  // 10. Audit: Ensure credential value is NEVER in logs or files (Section 7)
+  // 9. Security Audit: Ensure credential value is NEVER in logs or manifest files
   for (const p of [stdoutLogPath, stderrLogPath, summaryJsonPath]) {
     if (fs.existsSync(p)) {
       const content = fs.readFileSync(p, 'utf8');
@@ -837,6 +993,7 @@ export async function executeReferenceRun(
 
   const result: ReferenceExecutionResult = {
     runId,
+    executionMode,
     operationalStatus,
     commitSha,
     timestamps: {
@@ -849,43 +1006,14 @@ export async function executeReferenceRun(
       baseUrl: targetBaseUrl,
       probeResult: probe
     },
-    pecpBinding: {
-      sourceContractId,
-      sourceContractVersion,
-      sourceContractFingerprint,
-      sourceContractStatus,
-      testDefinitionId: testDefId,
-      testDefinitionVersion: testDefVersion,
-      testDefinitionFingerprint: testDefFingerprint,
-      bundleFingerprint: options.bundle.fingerprint,
-      runtimeVersion: options.bundle.runtimeVersion || '1.0.0',
-      runtimeSourceId: options.bundle.runtimeSourceId || 'pecp-stable-k6-runtime-v1.0.0',
-      schedulerArrival: {
-        population: options.preflightManifest.governedWorkload.schedulerArrivalPopulation,
-        peakRate: options.preflightManifest.governedWorkload.schedulerPeakRate.value,
-        unit: options.preflightManifest.governedWorkload.schedulerPeakRate.unit
-      },
-      businessAttainment: {
-        metric: options.preflightManifest.governedWorkload.businessWorkloadAttainment.metric,
-        targetValue: options.preflightManifest.governedWorkload.businessWorkloadAttainment.targetValue,
-        unit: options.preflightManifest.governedWorkload.businessWorkloadAttainment.unit
-      }
-    },
+    pecpBinding,
     preflight: {
       manifestTimestamp: options.preflightManifest.preflightTimestamp,
       status: options.preflightManifest.status,
       isValid: true,
       blockingReasons: []
     },
-    credentials: [
-      {
-        referenceId: 'RETAILCO_CHECKOUT_AUTH_TOKEN',
-        purpose: 'Checkout API Authorization',
-        provider: 'ENV_VAR',
-        injectedAs: 'TARGET_BASE_URL & k6 -e RETAILCO_CHECKOUT_AUTH_TOKEN',
-        maskedValue: '***REDACTED_EPHEMERAL***'
-      }
-    ],
+    credentials,
     materializedFiles: materialization.files,
     k6ExitCode,
     rawArtefacts,
@@ -895,9 +1023,9 @@ export async function executeReferenceRun(
       delta: metricsDelta
     },
     businessAttainment: {
-      metric: 'orders',
+      metric: businessAttainment.metric,
       orderCreatedEventsObserved: metricsDelta.orderCreatedEvents,
-      targetArrivalRate: 8.75
+      targetArrivalRate: businessAttainment.targetValue
     },
     performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
     verdictDisclaimer:
@@ -905,7 +1033,7 @@ export async function executeReferenceRun(
     issues
   };
 
-  // Write machine-readable execution manifest (Section 10)
+  // Write machine-readable execution manifest to output directory
   const manifestPath = path.join(options.outputDir, 'execution-manifest.json');
   fs.writeFileSync(manifestPath, JSON.stringify(result, null, 2), 'utf8');
 
