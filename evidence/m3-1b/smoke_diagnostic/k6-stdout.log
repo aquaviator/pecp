@@ -9,37 +9,19 @@
         script: /app/applet/evidence/m3-1b/smoke_diagnostic/entrypoint.js
         output: -
 
-     scenarios: (100.00%) 1 scenario, 1 max VUs, 35s max duration (incl. graceful stop):
-              * default: 1 looping VUs for 5s (gracefulStop: 30s)
+     scenarios: (100.00%) 1 scenario, 1 max VUs, 32s max duration (incl. graceful stop):
+              * default: 1 looping VUs for 2s (gracefulStop: 30s)
 
 
 running (01.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
-default   [  20% ] 1 VUs  1.0s/5s
+default   [  50% ] 1 VUs  1.0s/2s
 
 running (02.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
-default   [  40% ] 1 VUs  2.0s/5s
-
-running (03.0s), 1/1 VUs, 1 complete and 0 interrupted iterations
-default   [  60% ] 1 VUs  3.0s/5s
-
-running (04.0s), 1/1 VUs, 1 complete and 0 interrupted iterations
-default   [  80% ] 1 VUs  4.0s/5s
-
-running (05.0s), 1/1 VUs, 2 complete and 0 interrupted iterations
-default   [ 100% ] 1 VUs  5.0s/5s
-
-running (06.0s), 1/1 VUs, 2 complete and 0 interrupted iterations
-default ↓ [ 100% ] 1 VUs  5s
-
-running (07.0s), 1/1 VUs, 2 complete and 0 interrupted iterations
-default ↓ [ 100% ] 1 VUs  5s
-
-running (08.0s), 1/1 VUs, 2 complete and 0 interrupted iterations
-default ↓ [ 100% ] 1 VUs  5s
+default   [ 100% ] 1 VUs  2.0s/2s
 
 --- PECP k6 Test Execution Summary ---
 Test Definition: test-def-proj-retailco-bf2026-v1.0
 Status: COMPLETED
 
-running (08.0s), 0/1 VUs, 3 complete and 0 interrupted iterations
-default ✓ [ 100% ] 1 VUs  5s
+running (02.0s), 0/1 VUs, 1 complete and 0 interrupted iterations
+default ✓ [ 100% ] 1 VUs  2s

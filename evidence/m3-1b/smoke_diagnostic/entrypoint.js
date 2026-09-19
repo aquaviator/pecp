@@ -2,7 +2,7 @@
 // PECP Governed k6 Entrypoint
 // Source Test Definition: test-def-proj-retailco-bf2026-v1.0
 // Engineering Intent: FORECAST
-// Target Environment Ref: http://localhost:24642
+// Target Environment Ref: http://localhost:25914
 // Fingerprint: fp-6911db94 (Deterministic drift checksum)
 // Architecture: Thin orchestration delegating to PECP Stable k6 Runtime
 // ============================================================================
@@ -29,7 +29,7 @@ export const options = (() => {
 // Re-export metrics for k6 engine discovery
 export { workloadArrivalDemand, workloadAttainmentRate, businessAttainmentEvents };
 
-const BASE_URL = __ENV['TARGET_BASE_URL'] || 'http://localhost:24642';
+const BASE_URL = __ENV['TARGET_BASE_URL'] || 'http://localhost:25914';
 
 export default function () {
   executeIteration(JOURNEY_RUNNER_MAP, JOURNEY_WEIGHTS, BASE_URL, {});

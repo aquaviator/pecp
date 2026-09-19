@@ -1,12 +1,12 @@
 {
-  "runId": "pecp-ref-smoke_diagnostic-1789833509181",
-  "executionMode": "SMOKE_DIAGNOSTIC",
+  "runId": "pecp-ref-canonical-1789833553392",
+  "executionMode": "CANONICAL",
   "operationalStatus": "EXECUTION_COMPLETED",
   "commitSha": "UNAVAILABLE",
   "timestamps": {
-    "startedAt": "2026-09-19T15:58:29.182Z",
-    "completedAt": "2026-09-19T15:58:31.462Z",
-    "durationSeconds": 2.28
+    "startedAt": "2026-09-19T15:59:13.393Z",
+    "completedAt": "2026-09-19T16:21:15.335Z",
+    "durationSeconds": 1321.942
   },
   "engine": {
     "name": "k6",
@@ -16,10 +16,10 @@
     "binaryPath": "k6"
   },
   "target": {
-    "baseUrl": "http://localhost:25914",
+    "baseUrl": "http://localhost:53112",
     "probeResult": {
-      "baseUrl": "http://localhost:25914",
-      "verifiedAt": "2026-09-19T15:58:29.182Z",
+      "baseUrl": "http://localhost:53112",
+      "verifiedAt": "2026-09-19T15:59:13.393Z",
       "healthStatus": "healthy",
       "readyStatus": "ready",
       "isResolvable": true,
@@ -35,7 +35,7 @@
     "testDefinitionId": "test-def-proj-retailco-bf2026-v1.0",
     "testDefinitionVersion": "v1.0",
     "testDefinitionFingerprint": "fp-6911db94",
-    "bundleFingerprint": "fp-1b28e761",
+    "bundleFingerprint": "fp-915ad285",
     "runtimeVersion": "1.0.0",
     "runtimeSourceId": "pecp-stable-k6-runtime-v1.0.0",
     "schedulerArrival": {
@@ -50,7 +50,7 @@
     }
   },
   "preflight": {
-    "manifestTimestamp": "2026-09-19T15:58:29.038Z",
+    "manifestTimestamp": "2026-09-19T15:59:13.271Z",
     "status": "READY_FOR_LIVE_EXECUTION",
     "isValid": true,
     "blockingReasons": []
@@ -67,25 +67,25 @@
   "materializedFiles": [
     {
       "filename": "config.json",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/config.json",
+      "path": "/app/applet/evidence/m3-1b/canonical/config.json",
       "sizeBytes": 3244,
-      "checksum": "b8e85634700754838bfc89e12c33df9cddbb61faf320aadd8cf0feaaec8d6754"
+      "checksum": "cdd714a43d8626e2a25cdca5d03b63b4a4ee669dfd7dd95f97c753288156a2e6"
     },
     {
       "filename": "journeys.js",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/journeys.js",
+      "path": "/app/applet/evidence/m3-1b/canonical/journeys.js",
       "sizeBytes": 3623,
-      "checksum": "9b153d148a8efc09b2aebb06ff79eb8af9290516a159d62f89737774f664e59d"
+      "checksum": "3be744e3d93f019d9ed10dc2f9e128dc839a24ceb12345818132585199731bf4"
     },
     {
       "filename": "entrypoint.js",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/entrypoint.js",
+      "path": "/app/applet/evidence/m3-1b/canonical/entrypoint.js",
       "sizeBytes": 1796,
-      "checksum": "955fad4e7bf15bfdb542da17a8896575c9fbd47178ffb7457b31554c368bd862"
+      "checksum": "c2e6f9d26ef96ac3d82a4f1c2a9ddfd786333c192c184cafdef37c9d51bbbea5"
     },
     {
       "filename": "runtime.js",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/runtime.js",
+      "path": "/app/applet/evidence/m3-1b/canonical/runtime.js",
       "sizeBytes": 4305,
       "checksum": "77392806b817c69db9b494ffb7c7cbb76d06244e185544e3b7218c8b7257ee91"
     }
@@ -93,41 +93,41 @@
   "k6ExitCode": 0,
   "rawArtefacts": {
     "summaryJson": {
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/summary.json",
-      "sizeBytes": 4319,
-      "checksum": "38eaca9b9cd26ea9cca9fd39fd08e16c49c54fb926601a2e8da85ba06ac1e091"
+      "path": "/app/applet/evidence/m3-1b/canonical/summary.json",
+      "sizeBytes": 7042,
+      "checksum": "daabfb48c9713c1f2364bc0b595c34715aeaa09bb62d7313d51a6965bdb29c92"
     },
     "stdoutLog": {
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/k6-stdout.log",
-      "sizeBytes": 863,
-      "checksum": "98026be2f29e0dd5b6b469aaf0d919b6161a5f090f034e35d19dc1a121ab3077"
+      "path": "/app/applet/evidence/m3-1b/canonical/k6-stdout.log",
+      "sizeBytes": 222645,
+      "checksum": "7f9093a253c301e6e61411d6710ce79096438ee7203d1f0ee19554a939cbe9ed"
     },
     "stderrLog": {
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/k6-stderr.log",
+      "path": "/app/applet/evidence/m3-1b/canonical/k6-stderr.log",
       "sizeBytes": 0,
       "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "configJson": {
       "filename": "config.json",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/config.json",
+      "path": "/app/applet/evidence/m3-1b/canonical/config.json",
       "sizeBytes": 3244,
-      "checksum": "b8e85634700754838bfc89e12c33df9cddbb61faf320aadd8cf0feaaec8d6754"
+      "checksum": "cdd714a43d8626e2a25cdca5d03b63b4a4ee669dfd7dd95f97c753288156a2e6"
     },
     "journeysJs": {
       "filename": "journeys.js",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/journeys.js",
+      "path": "/app/applet/evidence/m3-1b/canonical/journeys.js",
       "sizeBytes": 3623,
-      "checksum": "9b153d148a8efc09b2aebb06ff79eb8af9290516a159d62f89737774f664e59d"
+      "checksum": "3be744e3d93f019d9ed10dc2f9e128dc839a24ceb12345818132585199731bf4"
     },
     "entrypointJs": {
       "filename": "entrypoint.js",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/entrypoint.js",
+      "path": "/app/applet/evidence/m3-1b/canonical/entrypoint.js",
       "sizeBytes": 1796,
-      "checksum": "955fad4e7bf15bfdb542da17a8896575c9fbd47178ffb7457b31554c368bd862"
+      "checksum": "c2e6f9d26ef96ac3d82a4f1c2a9ddfd786333c192c184cafdef37c9d51bbbea5"
     },
     "runtimeJs": {
       "filename": "runtime.js",
-      "path": "/app/applet/evidence/m3-1b/smoke_diagnostic/runtime.js",
+      "path": "/app/applet/evidence/m3-1b/canonical/runtime.js",
       "sizeBytes": 4305,
       "checksum": "77392806b817c69db9b494ffb7c7cbb76d06244e185544e3b7218c8b7257ee91"
     }
@@ -146,42 +146,52 @@
         "order_created": 0
       },
       "totalRequests": 5,
-      "capturedAt": "2026-09-19T15:58:29.250Z"
+      "capturedAt": "2026-09-19T15:59:13.462Z"
     },
     "after": {
       "requestCountsByRoute": {
         "/health": 2,
         "/ready": 2,
         "/api/v1/metrics": 2,
-        "/api/v1/products/featured": 1
+        "/api/v1/products/search": 23855,
+        "/api/v1/products/featured": 66777,
+        "/api/v1/orders/checkout": 9761,
+        "/api/v1/basket/items": 18219,
+        "/api/v1/customers/me/orders": 2370
       },
       "statusCounts": {
-        "200": 7
+        "200": 111227,
+        "201": 9761
       },
       "businessAttainmentEvents": {
-        "order_created": 0
+        "order_created": 9761
       },
-      "totalRequests": 7,
-      "capturedAt": "2026-09-19T15:58:31.459Z"
+      "totalRequests": 120988,
+      "capturedAt": "2026-09-19T16:21:15.321Z"
     },
     "delta": {
-      "totalRequests": 2,
+      "totalRequests": 120983,
       "requestsByRoute": {
         "/health": 0,
         "/ready": 0,
         "/api/v1/metrics": 1,
-        "/api/v1/products/featured": 1
+        "/api/v1/products/search": 23855,
+        "/api/v1/products/featured": 66777,
+        "/api/v1/orders/checkout": 9761,
+        "/api/v1/basket/items": 18219,
+        "/api/v1/customers/me/orders": 2370
       },
       "statusCounts": {
-        "200": 2
+        "200": 111222,
+        "201": 9761
       },
-      "orderCreatedEvents": 0,
-      "durationSeconds": 2.209
+      "orderCreatedEvents": 9761,
+      "durationSeconds": 1321.859
     }
   },
   "businessAttainment": {
     "metric": "orders",
-    "orderCreatedEventsObserved": 0,
+    "orderCreatedEventsObserved": 9761,
     "targetArrivalRate": 8.75
   },
   "performanceVerdict": "PECP_PERFORMANCE_VERDICT_NOT_EVALUATED",

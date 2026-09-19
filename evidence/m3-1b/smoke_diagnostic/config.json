@@ -48,7 +48,7 @@
       "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
       "sourceContractVersion": "v1.0",
       "sourceContractFingerprint": "fp-0dad9ae4",
-      "generatedAt": "2026-09-18T13:34:20.475Z",
+      "generatedAt": "2026-09-19T15:58:29.033Z",
       "runtimeVersion": "1.0.0",
       "runtimeSourceId": "pecp-stable-k6-runtime-v1.0.0",
       "schedulerArrival": {
@@ -93,7 +93,7 @@
         "formulaDescription": "Provider-derived capacity: preAllocatedVUs = max(10, ceil(peakArrivalRate * 2.5)), maxVUs = max(50, ceil(peakArrivalRate * 10)), rateTimeUnit = 1s",
         "isProviderDerived": true
       },
-      "targetEnvironmentBaseUrlRef": "http://localhost:24642",
+      "targetEnvironmentBaseUrlRef": "http://localhost:25914",
       "credentialReferences": [
         {
           "provider": "ENV_VAR",

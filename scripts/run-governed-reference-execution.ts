@@ -89,7 +89,7 @@ async function main() {
   const cli = parseCliArgs();
 
   console.log('================================================================');
-  console.log(`Governed Reference Execution Orchestrator (M3.1B.1)`);
+  console.log(`Governed Reference Execution Orchestrator (M3.1B.2)`);
   console.log(`Execution Mode: ${cli.mode}`);
   if (cli.mode === 'SMOKE_DIAGNOSTIC') {
     console.log(`Diagnostic Smoke Duration Override: ${cli.smokeDurationSeconds}s`);
@@ -102,35 +102,16 @@ async function main() {
   console.log(`Target Output Directory: ${cli.outputDir}`);
   console.log('================================================================\n');
 
-  // 1. Verify Pinned k6 Engine
-  console.log(`[1/6] Verifying pinned k6 engine availability at "${cli.k6Binary}"...`);
-  let engineInfo;
-  try {
-    engineInfo = await checkPinnedK6Engine(cli.k6Binary);
-    console.log(`      Engine detected: ${engineInfo.fullVersionString}`);
-    if (!engineInfo.isPinnedExpected) {
-      console.error(
-        `FATAL: k6 version "${engineInfo.version}" does not match pinned expected version "${PINNED_K6_VERSION_EXPECTED}".`
-      );
-      process.exit(1);
-    }
-    console.log(`      Verified pinned version: v${engineInfo.version} (EXACT PIN MATCH)\n`);
-  } catch (err: any) {
-    console.error(`FATAL: Failed to verify pinned k6 engine: ${err.message}`);
-    process.exit(1);
-  }
-
-  // 2. Generate Ephemeral Credential
-  console.log(`[2/6] Generating ephemeral checkout credential for execution lifecycle...`);
+  // Step 1: Generate Ephemeral Credential
+  console.log(`[1/11] Generating ephemeral checkout credential for execution lifecycle...`);
   const ephemeralToken = generateEphemeralCheckoutToken();
-  // Mask immediately in CI environment
   if (process.env.GITHUB_ACTIONS) {
     console.log(`::add-mask::${ephemeralToken}`);
   }
-  console.log(`      Ephemeral checkout token generated (credential masked in all logs and manifests)\n`);
+  console.log(`       Ephemeral checkout token generated (credential masked in all logs and manifests)\n`);
 
-  // 3. Start Reference Lab Server
-  console.log(`[3/6] Launching RetailCo Reference Lab instance...`);
+  // Step 2: Start RetailCo Reference Lab Server
+  console.log(`[2/11] Launching RetailCo Reference Lab instance...`);
   const lab = createRetailCoLabServer({
     port: cli.port,
     authToken: ephemeralToken,
@@ -138,19 +119,20 @@ async function main() {
   });
   const { port: actualPort } = await lab.start();
   const baseUrl = `http://localhost:${actualPort}`;
-  console.log(`      Reference Lab active on ${baseUrl}`);
+  console.log(`       Reference Lab active on ${baseUrl}\n`);
 
-  // Probe target
+  // Step 3: Probe Target (/health and /ready)
+  console.log(`[3/11] Probing Reference Lab /health and /ready...`);
   const probe = await probeReferenceLab(baseUrl);
-  if (!probe.isResolvable) {
-    console.error(`FATAL: Reference Lab probe failed at ${baseUrl}: health=${probe.healthStatus}, ready=${probe.readyStatus}`);
+  if (!probe.isResolvable || probe.healthStatus !== 'healthy' || probe.readyStatus !== 'ready') {
+    console.error(`FATAL: Reference Lab probe failed at ${baseUrl}: health=${probe.healthStatus} (${probe.httpStatusHealth}), ready=${probe.readyStatus} (${probe.httpStatusReady})`);
     await lab.stop();
     process.exit(1);
   }
-  console.log(`      Target probe verified: health=${probe.healthStatus} (${probe.httpStatusHealth}), ready=${probe.readyStatus} (${probe.httpStatusReady})\n`);
+  console.log(`       Target probe verified: health=${probe.healthStatus} (${probe.httpStatusHealth}), ready=${probe.readyStatus} (${probe.httpStatusReady})\n`);
 
-  // 4. Compile Canonical Test Definition & K6 Bundle
-  console.log(`[4/6] Compiling governed Test Definition & k6 Execution Bundle...`);
+  // Step 4: Compile Governed Test Definition
+  console.log(`[4/11] Compiling governed Test Definition...`);
   const testDef = compileTestDefinition({
     contract: RETAILCO_M3_APPROVED_CONTRACT,
     projectSummary: RETAILCO_PROJECT_FIXTURE,
@@ -160,15 +142,29 @@ async function main() {
       targetEnvironmentBaseUrlRef: baseUrl
     }
   });
+  console.log(`       Test Definition Fingerprint: ${testDef.fingerprint}\n`);
 
+  // Step 5: Compile Governed k6 Execution Bundle
+  console.log(`[5/11] Compiling governed k6 execution bundle...`);
   const bundle = compileK6Bundle({
     testDefinition: testDef,
     generatedAt: new Date().toISOString()
   });
+  console.log(`       K6 Bundle Fingerprint: ${bundle.fingerprint}\n`);
 
+  // Step 6: Load Actual Reference Lab Manifest
+  console.log(`[6/11] Loading actual Reference Lab manifest...`);
   const labManifestPath = path.resolve(rootDir, 'reference-lab/retailco/reference-lab-manifest.json');
+  if (!fs.existsSync(labManifestPath)) {
+    console.error(`FATAL: Reference Lab manifest not found at ${labManifestPath}`);
+    await lab.stop();
+    process.exit(1);
+  }
   const labManifest = JSON.parse(fs.readFileSync(labManifestPath, 'utf8'));
+  console.log(`       Reference Lab manifest loaded: ${labManifest.service} v${labManifest.version}\n`);
 
+  // Step 7: Build Preflight Manifest
+  console.log(`[7/11] Building execution preflight manifest...`);
   const preflightManifest = buildExecutionPreflightManifest({
     testDefinition: testDef,
     bundle,
@@ -178,7 +174,10 @@ async function main() {
     preflightTimestamp: new Date().toISOString(),
     liveExecutionStarted: false
   });
+  console.log(`       Preflight manifest constructed at ${preflightManifest.preflightTimestamp}\n`);
 
+  // Step 8: Validate Preflight Manifest
+  console.log(`[8/11] Validating execution preflight manifest against current context...`);
   const preflightValidation = validateExecutionPreflightManifest(preflightManifest, {
     testDefinition: testDef,
     bundle,
@@ -188,27 +187,99 @@ async function main() {
     liveExecutionStarted: false
   });
 
-  if (!preflightValidation.isValid || preflightManifest.status !== 'READY_FOR_LIVE_EXECUTION') {
-    console.error(`FATAL: Preflight validation gate blocked execution:`);
+  // Step 9: Require READY_FOR_LIVE_EXECUTION with Zero Issues
+  console.log(`[9/11] Enforcing preflight authority gate (READY_FOR_LIVE_EXECUTION + zero issues)...`);
+  if (!preflightValidation.isValid || preflightManifest.status !== 'READY_FOR_LIVE_EXECUTION' || preflightValidation.issues.length > 0) {
+    console.error(`FATAL: Preflight authority gate BLOCKED execution:`);
     for (const issue of preflightValidation.issues) {
       console.error(`  - [${issue.field}] ${issue.description}`);
     }
     await lab.stop();
     process.exit(1);
   }
-  console.log(`      Preflight Manifest Status: ${preflightManifest.status} (VALIDATED GATE GREEN)`);
-  console.log(`      Test Definition Fingerprint: ${testDef.fingerprint}`);
-  console.log(`      K6 Bundle Fingerprint: ${bundle.fingerprint}\n`);
+  console.log(`       Preflight Manifest Status: ${preflightManifest.status} (VALIDATED GATE GREEN)`);
 
-  // 5. Execute Governed Reference Run
-  console.log(`[5/6] Executing governed reference run...`);
+  // Section 6 Canonical schedule integrity check
+  if (cli.mode === 'CANONICAL') {
+    console.log(`       Asserting canonical schedule identity...`);
+    const scenario = testDef.scenarios[0];
+    const duration = scenario?.workloadSchedule?.totalDurationSeconds;
+    if (duration !== 1320) {
+      console.error(`FATAL: Canonical duration mismatch: expected 1320s, got ${duration}s`);
+      await lab.stop();
+      process.exit(1);
+    }
+
+    const peakRate =
+      preflightManifest.governedWorkload?.schedulerPeakRate?.value ??
+      testDef.populationRelationship?.derivedSchedulerRate;
+    if (peakRate !== 109.375) {
+      console.error(`FATAL: Canonical peak arrival rate mismatch: expected 109.375, got ${peakRate}`);
+      await lab.stop();
+      process.exit(1);
+    }
+
+    const businessTarget =
+      preflightManifest.governedWorkload?.businessWorkloadAttainment?.targetValue ??
+      testDef.workloadAttainment?.targetValue;
+    if (businessTarget !== 8.75) {
+      console.error(`FATAL: Canonical business target mismatch: expected 8.75, got ${businessTarget}`);
+      await lab.stop();
+      process.exit(1);
+    }
+
+    const checkoutJourney = testDef.journeys.find((j) => j.id === 'journey-checkout');
+    const journeyShare =
+      checkoutJourney?.trafficShareRatio ??
+      preflightManifest.governedWorkload?.populationRelationship?.journeyShare;
+    if (journeyShare !== 0.08) {
+      console.error(`FATAL: Canonical Checkout traffic share mismatch: expected 0.08, got ${journeyShare}`);
+      await lab.stop();
+      process.exit(1);
+    }
+
+    const contribution =
+      preflightManifest.governedWorkload?.populationRelationship?.contributionPerSuccessfulEvent ?? 1;
+    if (contribution !== 1) {
+      console.error(`FATAL: Canonical Checkout contribution mismatch: expected 1, got ${contribution}`);
+      await lab.stop();
+      process.exit(1);
+    }
+
+    console.log(`       Canonical schedule verified: 1320s duration, 109.375 peak rate, 8.75 orders/s target, 0.08 Checkout share, 1 order contribution.\n`);
+  } else {
+    console.log(`       Smoke diagnostic mode active (${cli.smokeDurationSeconds}s override).\n`);
+  }
+
+  // Step 10: Only then verify that the actual k6 engine is the exact pinned version
+  console.log(`[10/11] Preflight green. Verifying authoritative pinned k6 engine at "${cli.k6Binary}"...`);
+  let engineInfo;
+  try {
+    engineInfo = await checkPinnedK6Engine(cli.k6Binary);
+    console.log(`        Engine detected: ${engineInfo.fullVersionString}`);
+    if (!engineInfo.isPinnedExpected) {
+      console.error(
+        `FATAL: k6 version "${engineInfo.version}" does not match pinned expected version "${PINNED_K6_VERSION_EXPECTED}".`
+      );
+      await lab.stop();
+      process.exit(1);
+    }
+    console.log(`        Verified pinned version: v${engineInfo.version} (EXACT PIN MATCH)\n`);
+  } catch (err: any) {
+    console.error(`FATAL: Failed to verify pinned k6 engine: ${err.message}`);
+    await lab.stop();
+    process.exit(1);
+  }
+
+  // Step 11: Execute Governed Reference Run
+  console.log(`[11/11] Executing governed reference run...`);
   if (!fs.existsSync(cli.outputDir)) {
     fs.mkdirSync(cli.outputDir, { recursive: true });
   }
 
   const runId = `pecp-ref-${cli.mode.toLowerCase()}-${Date.now()}`;
-  console.log(`      Run ID: ${runId}`);
-  console.log(`      Live run started at ${new Date().toISOString()}`);
+  console.log(`        Run ID: ${runId}`);
+  console.log(`        Live run started at ${new Date().toISOString()}`);
 
   let runResult;
   try {
@@ -231,14 +302,14 @@ async function main() {
     await lab.stop();
     process.exit(1);
   } finally {
-    // Tear down reference lab
-    console.log(`\n      Shutting down Reference Lab process...`);
+    console.log(`\n        Shutting down Reference Lab process...`);
     await lab.stop();
-    console.log(`      Reference Lab stopped.`);
+    console.log(`        Reference Lab stopped.`);
   }
 
-  // 6. Preservation and Verification Summary
-  console.log(`\n[6/6] Governed Execution Evidence Preservation & Verification:`);
+  // Preservation and Verification Summary
+  console.log(`\n================================================================`);
+  console.log(`Governed Execution Evidence Preservation & Verification:`);
   console.log(`      Operational Status: ${runResult.operationalStatus}`);
   console.log(`      k6 Exit Code: ${runResult.k6ExitCode}`);
   console.log(`      Duration: ${runResult.timestamps.durationSeconds.toFixed(1)}s`);
@@ -264,13 +335,19 @@ async function main() {
     }
   }
 
-  // Security Invariant Confirmation
+  // Security Audit: Scan all preserved files in output directory for cleartext credential
   const manifestPath = path.join(cli.outputDir, 'execution-manifest.json');
   console.log(`        - executionManifest: ${manifestPath}`);
-  const manifestRaw = fs.readFileSync(manifestPath, 'utf8');
-  if (manifestRaw.includes(ephemeralToken)) {
-    console.error(`FATAL SECURITY ERROR: Cleartext ephemeral credential detected in execution manifest!`);
-    process.exit(1);
+  const outputFiles = fs.readdirSync(cli.outputDir);
+  for (const fileName of outputFiles) {
+    const filePath = path.join(cli.outputDir, fileName);
+    if (fs.statSync(filePath).isFile()) {
+      const rawContent = fs.readFileSync(filePath, 'utf8');
+      if (rawContent.includes(ephemeralToken)) {
+        console.error(`FATAL SECURITY ERROR: Cleartext ephemeral credential detected in preserved artifact "${filePath}"!`);
+        process.exit(1);
+      }
+    }
   }
   console.log(`      Security verification: Ephemeral credential successfully masked across all artifacts.`);
 

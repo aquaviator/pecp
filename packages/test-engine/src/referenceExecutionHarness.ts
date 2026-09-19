@@ -102,6 +102,7 @@ export const defaultK6ExecutionAdapter: K6ExecutionAdapter = {
             ? data.toString().split(redactedToken).join('***REDACTED_EPHEMERAL***')
             : data.toString();
           stdoutStream.write(text);
+          process.stdout.write(text);
         });
 
         child.stderr.on('data', (data) => {
@@ -109,6 +110,7 @@ export const defaultK6ExecutionAdapter: K6ExecutionAdapter = {
             ? data.toString().split(redactedToken).join('***REDACTED_EPHEMERAL***')
             : data.toString();
           stderrStream.write(text);
+          process.stderr.write(text);
         });
 
         child.on('error', (err) => {
@@ -152,6 +154,7 @@ export interface ReferenceExecutionOptions {
   smokeDurationOverrideSeconds?: number;
   executionMode?: 'CANONICAL' | 'SMOKE_DIAGNOSTIC';
   forcePreflightInvalid?: boolean;
+  forcePreMetricsFailureForTest?: boolean;
   omitRawSummaryForTest?: boolean;
 }
 
@@ -625,15 +628,59 @@ export async function executeReferenceRun(
   }
 
   // 1. FIRST AUTHORITY: Preflight Gate Enforcement (Section 2)
+  // Reference Lab manifest metadata is mandatory (zero hardcoded fallback metadata)
+  if (!options.referenceLabManifest) {
+    return {
+      runId,
+      executionMode,
+      operationalStatus: 'PREFLIGHT_BLOCKED',
+      commitSha,
+      timestamps: {
+        startedAt,
+        completedAt: new Date().toISOString(),
+        durationSeconds: (Date.now() - startTimeMs) / 1000
+      },
+      engine: {
+        name: 'k6',
+        version: 'not-evaluated',
+        fullVersionString: 'Reference Lab manifest metadata is mandatory. Preflight validation blocked execution before engine check.',
+        isPinnedExpected: false,
+        binaryPath: k6Binary
+      },
+      target: { baseUrl: targetBaseUrl },
+      pecpBinding,
+      preflight: {
+        manifestTimestamp: options.preflightManifest?.preflightTimestamp || '',
+        status: options.preflightManifest?.status || 'UNKNOWN',
+        isValid: false,
+        blockingReasons: ['REFERENCE_LAB_MANIFEST_MISSING']
+      },
+      credentials,
+      materializedFiles: [],
+      k6ExitCode: null,
+      rawArtefacts: {},
+      referenceLabMetrics: {},
+      businessAttainment: {
+        metric: businessAttainment.metric,
+        orderCreatedEventsObserved: 0,
+        targetArrivalRate: businessAttainment.targetValue
+      },
+      performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
+      verdictDisclaimer:
+        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Reference Lab manifest metadata is mandatory and was not provided. Zero engine/process calls were made.',
+      issues: [{
+        code: 'REFERENCE_LAB_MANIFEST_MISSING',
+        message: 'Reference Lab manifest metadata is mandatory for governed reference execution and was not provided.'
+      }]
+    };
+  }
+
   // Probe target for preflight context
   const probe = await probeReferenceLab(targetBaseUrl);
   const preflightContext: PreflightValidationContext = {
     testDefinition: options.testDefinition,
     bundle: options.bundle,
-    referenceLabManifest: options.referenceLabManifest || {
-      version: options.preflightManifest?.routeManifestVersion || '1.0.0',
-      service: options.preflightManifest?.service || 'retailco-reference-lab'
-    },
+    referenceLabManifest: options.referenceLabManifest,
     sourceContract: options.sourceContract,
     targetProbe: probe,
     liveExecutionStarted: false
@@ -836,18 +883,56 @@ export async function executeReferenceRun(
   const materialization = materializeK6Bundle(options.bundle, options.outputDir);
 
   // 5. Pre-execution metrics snapshot (Section 9)
-  let metricsBefore: ReferenceLabMetricsSnapshot;
+  let metricsBefore: ReferenceLabMetricsSnapshot | undefined;
+  let preMetricsError: string | null = null;
   try {
+    if (options.forcePreMetricsFailureForTest) {
+      throw new Error('Test forced pre-metrics snapshot failure');
+    }
     metricsBefore = await queryReferenceLabMetrics(targetBaseUrl);
   } catch (err: any) {
-    metricsBefore = {
-      requestCountsByRoute: {},
-      statusCounts: {},
-      businessAttainmentEvents: { order_created: 0 },
-      totalRequests: 0,
-      capturedAt: new Date().toISOString()
+    preMetricsError = err.message || String(err);
+    issues.push({ code: 'PRE_METRICS_FETCH_FAILED', message: preMetricsError || 'Unknown pre-metrics error' });
+  }
+
+  if (executionMode === 'CANONICAL' && (!metricsBefore || preMetricsError)) {
+    return {
+      runId,
+      executionMode,
+      operationalStatus: 'EXECUTION_ENGINE_FAILED',
+      commitSha,
+      timestamps: {
+        startedAt,
+        completedAt: new Date().toISOString(),
+        durationSeconds: (Date.now() - startTimeMs) / 1000
+      },
+      engine: engineInfo,
+      target: { baseUrl: targetBaseUrl, probeResult: probe },
+      pecpBinding,
+      preflight: {
+        manifestTimestamp: options.preflightManifest.preflightTimestamp,
+        status: options.preflightManifest.status,
+        isValid: true,
+        blockingReasons: []
+      },
+      credentials,
+      materializedFiles: materialization.files,
+      k6ExitCode: null,
+      rawArtefacts: {},
+      referenceLabMetrics: {},
+      businessAttainment: {
+        metric: businessAttainment.metric,
+        orderCreatedEventsObserved: 0,
+        targetArrivalRate: businessAttainment.targetValue
+      },
+      performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',
+      verdictDisclaimer:
+        'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: Pre-execution metrics collection failed in canonical mode.',
+      issues: [{
+        code: 'PRE_METRICS_FETCH_FAILED',
+        message: `Canonical execution halted: Pre-execution metrics snapshot failed (${preMetricsError}). Zero-valued metrics must not be synthesized.`
+      }]
     };
-    issues.push({ code: 'PRE_METRICS_FETCH_FAILED', message: err.message || String(err) });
   }
 
   // 6. Execute k6 via injected execution adapter
@@ -873,7 +958,7 @@ export async function executeReferenceRun(
     childEnv[cred.referenceId] = ephemeralToken;
   }
 
-  if (options.smokeDurationOverrideSeconds) {
+  if (executionMode === 'SMOKE_DIAGNOSTIC' && options.smokeDurationOverrideSeconds) {
     k6Args.unshift('--duration', `${options.smokeDurationOverrideSeconds}s`);
   }
 
@@ -900,21 +985,19 @@ export async function executeReferenceRun(
   }
 
   // 7. Post-execution metrics snapshot
-  let metricsAfter: ReferenceLabMetricsSnapshot;
+  let metricsAfter: ReferenceLabMetricsSnapshot | undefined;
+  let postMetricsError: string | null = null;
   try {
     metricsAfter = await queryReferenceLabMetrics(targetBaseUrl);
   } catch (err: any) {
-    metricsAfter = {
-      requestCountsByRoute: {},
-      statusCounts: {},
-      businessAttainmentEvents: { order_created: 0 },
-      totalRequests: 0,
-      capturedAt: new Date().toISOString()
-    };
-    issues.push({ code: 'POST_METRICS_FETCH_FAILED', message: err.message || String(err) });
+    postMetricsError = err.message || String(err);
+    issues.push({ code: 'POST_METRICS_FETCH_FAILED', message: postMetricsError || 'Unknown post-metrics error' });
   }
 
-  const metricsDelta = computeReferenceLabMetricsDelta(metricsBefore, metricsAfter);
+  let metricsDelta: ReferenceLabMetricsDelta | undefined;
+  if (metricsBefore && metricsAfter) {
+    metricsDelta = computeReferenceLabMetricsDelta(metricsBefore, metricsAfter);
+  }
 
   // 8. Inspect raw artefacts on disk
   if (options.omitRawSummaryForTest && fs.existsSync(summaryJsonPath)) {
@@ -969,21 +1052,58 @@ export async function executeReferenceRun(
     }
   }
 
+  if (fs.existsSync(options.outputDir)) {
+    const dirEntries = fs.readdirSync(options.outputDir);
+    for (const entry of dirEntries) {
+      const entryPath = path.join(options.outputDir, entry);
+      if (fs.statSync(entryPath).isFile()) {
+        const fileContent = fs.readFileSync(entryPath, 'utf8');
+        if (fileContent.includes(ephemeralToken)) {
+          throw new Error(
+            `SECURITY INVARIANT VIOLATION: Ephemeral credential was detected in artifact "${entryPath}". Halting execution.`
+          );
+        }
+      }
+    }
+  }
+
   // Determine operational status
-  const hasRequiredEvidence =
+  const hasBasicEvidence =
     rawArtefacts.summaryJson !== undefined &&
     rawArtefacts.stdoutLog !== undefined &&
     rawArtefacts.entrypointJs !== undefined;
 
+  const hasCanonicalEvidence =
+    hasBasicEvidence &&
+    rawArtefacts.stderrLog !== undefined &&
+    rawArtefacts.configJson !== undefined &&
+    rawArtefacts.journeysJs !== undefined &&
+    rawArtefacts.runtimeJs !== undefined &&
+    materialization.verifiedByteMatch === true &&
+    metricsBefore !== undefined &&
+    metricsAfter !== undefined &&
+    metricsDelta !== undefined &&
+    !postMetricsError &&
+    pecpBinding.sourceContractId !== '' &&
+    pecpBinding.testDefinitionId !== '' &&
+    pecpBinding.bundleFingerprint !== '' &&
+    engineInfo.isPinnedExpected === true;
+
+  const isEvidenceComplete =
+    executionMode === 'CANONICAL' ? hasCanonicalEvidence : hasBasicEvidence;
+
   let operationalStatus: ReferenceExecutionResult['operationalStatus'];
-  if (k6ExitCode === 0 && hasRequiredEvidence) {
+  if (k6ExitCode === 0 && isEvidenceComplete) {
     operationalStatus = 'EXECUTION_COMPLETED';
   } else {
     operationalStatus = 'EXECUTION_ENGINE_FAILED';
-    if (!hasRequiredEvidence) {
+    if (!isEvidenceComplete) {
       issues.push({
         code: 'MISSING_RAW_EVIDENCE',
-        message: 'Required raw k6 summary or logs were not produced on disk.'
+        message:
+          executionMode === 'CANONICAL'
+            ? 'Canonical raw evidence completeness check failed: one or more required artifacts, metrics snapshots, or bindings were missing.'
+            : 'Required raw k6 summary or logs were not produced on disk.'
       });
     }
   }
@@ -1024,7 +1144,7 @@ export async function executeReferenceRun(
     },
     businessAttainment: {
       metric: businessAttainment.metric,
-      orderCreatedEventsObserved: metricsDelta.orderCreatedEvents,
+      orderCreatedEventsObserved: metricsDelta ? metricsDelta.orderCreatedEvents : 0,
       targetArrivalRate: businessAttainment.targetValue
     },
     performanceVerdict: 'PECP_PERFORMANCE_VERDICT_NOT_EVALUATED',

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -222,6 +222,7 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         k6Adapter: adapter
       });
 
@@ -274,6 +275,7 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         forcePreflightInvalid: true,
         k6Adapter: adapter
       });
@@ -281,6 +283,39 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
       expect(result.operationalStatus).toBe('PREFLIGHT_BLOCKED');
       expect(result.issues[0].code).toBe('PREFLIGHT_BLOCKED');
       // Proves ZERO engine/process calls were made even though engine check was set to throw!
+      expect(checkCalls.length).toBe(0);
+      expect(runCalls.length).toBe(0);
+    });
+
+    it('omission of Reference Lab manifest strictly blocks operational execution before engine check (ZERO calls)', async () => {
+      const { adapter, checkCalls, runCalls } = createMockK6Adapter({
+        checkVersionError: new Error('Binary check should NEVER be called on missing Reference Lab manifest!')
+      });
+
+      const probe = await probeReferenceLab(baseUrl);
+      const preflight = buildExecutionPreflightManifest({
+        testDefinition: testDef,
+        bundle,
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe,
+        preflightTimestamp: '2026-09-18T10:30:00Z',
+        liveExecutionStarted: false
+      });
+
+      const outDir = path.join(workDir, 'missing-lab-manifest-test');
+      const result = await executeReferenceRun({
+        targetBaseUrl: baseUrl,
+        outputDir: outDir,
+        testDefinition: testDef,
+        bundle,
+        preflightManifest: preflight,
+        // referenceLabManifest explicitly omitted!
+        k6Adapter: adapter
+      });
+
+      expect(result.operationalStatus).toBe('PREFLIGHT_BLOCKED');
+      expect(result.issues[0].code).toBe('REFERENCE_LAB_MANIFEST_MISSING');
       expect(checkCalls.length).toBe(0);
       expect(runCalls.length).toBe(0);
     });
@@ -320,6 +355,7 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         ephemeralToken,
         k6Adapter: adapter
       });
@@ -355,12 +391,83 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         k6Adapter: adapter,
         omitRawSummaryForTest: true
       });
 
       expect(result.operationalStatus).toBe('EXECUTION_ENGINE_FAILED');
       expect(result.issues.some((i) => i.code === 'MISSING_RAW_EVIDENCE')).toBe(true);
+    });
+
+    it('enforces canonical raw-evidence completeness across all artifacts and metrics', async () => {
+      const { adapter } = createMockK6Adapter();
+      const probe = await probeReferenceLab(baseUrl);
+      const preflight = buildExecutionPreflightManifest({
+        testDefinition: testDef,
+        bundle,
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe,
+        preflightTimestamp: '2026-09-18T10:30:00Z',
+        liveExecutionStarted: false
+      });
+
+      const outDir = path.join(workDir, 'canonical-evidence-complete-test');
+      const result = await executeReferenceRun({
+        targetBaseUrl: baseUrl,
+        outputDir: outDir,
+        testDefinition: testDef,
+        bundle,
+        preflightManifest: preflight,
+        referenceLabManifest: labManifest,
+        executionMode: 'CANONICAL',
+        k6Adapter: adapter
+      });
+
+      expect(result.operationalStatus).toBe('EXECUTION_COMPLETED');
+      expect(result.rawArtefacts.summaryJson).toBeDefined();
+      expect(result.rawArtefacts.stdoutLog).toBeDefined();
+      expect(result.rawArtefacts.stderrLog).toBeDefined();
+      expect(result.rawArtefacts.configJson).toBeDefined();
+      expect(result.rawArtefacts.journeysJs).toBeDefined();
+      expect(result.rawArtefacts.entrypointJs).toBeDefined();
+      expect(result.rawArtefacts.runtimeJs).toBeDefined();
+      expect(result.referenceLabMetrics.before).toBeDefined();
+      expect(result.referenceLabMetrics.after).toBeDefined();
+      expect(result.referenceLabMetrics.delta).toBeDefined();
+    });
+
+    it('canonical execution strictly halts on pre-run metrics failure without synthesizing zero evidence', async () => {
+      const { adapter, runCalls } = createMockK6Adapter();
+      const probe = await probeReferenceLab(baseUrl);
+      const preflight = buildExecutionPreflightManifest({
+        testDefinition: testDef,
+        bundle,
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe,
+        preflightTimestamp: '2026-09-18T10:30:00Z',
+        liveExecutionStarted: false
+      });
+
+      const outDir = path.join(workDir, 'canonical-pre-metrics-failed-test');
+      const result = await executeReferenceRun({
+        targetBaseUrl: baseUrl,
+        outputDir: outDir,
+        testDefinition: testDef,
+        bundle,
+        preflightManifest: preflight,
+        referenceLabManifest: labManifest,
+        executionMode: 'CANONICAL',
+        forcePreMetricsFailureForTest: true,
+        k6Adapter: adapter
+      });
+
+      expect(result.operationalStatus).toBe('EXECUTION_ENGINE_FAILED');
+      expect(result.issues.some((i) => i.code === 'PRE_METRICS_FETCH_FAILED')).toBe(true);
+      expect(runCalls.length).toBe(0); // Proves k6 was NOT launched!
+      expect(result.referenceLabMetrics.before).toBeUndefined(); // Proves zero evidence was NOT synthesized!
     });
 
     it('run bindings faithfully record all contract, definition, and runtime fingerprints with zero fallbacks', async () => {
@@ -383,6 +490,7 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         k6Adapter: adapter
       });
 
@@ -416,6 +524,7 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         k6Adapter: adapter
       });
 
@@ -475,6 +584,7 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
         testDefinition: testDef,
         bundle,
         preflightManifest: preflight,
+        referenceLabManifest: labManifest,
         ephemeralToken: sharedEphemeralToken,
         k6Adapter: adapter
       });
