@@ -620,5 +620,56 @@ describe('M3.1B.1 Governed Reference Execution Harness & CI Isolation Gate', () 
       expect(onDiskManifest.engine.version).toBe(PINNED_K6_VERSION_EXPECTED);
       expect(onDiskManifest.performanceVerdict).toBe('PECP_PERFORMANCE_VERDICT_NOT_EVALUATED');
     });
+
+    it('faithfully binds authoritative commit SHA, repositoryCommitSha, and workflowRunId into execution manifest', async () => {
+      const { adapter } = createMockK6Adapter();
+      const probe = await probeReferenceLab(baseUrl);
+      const preflight = buildExecutionPreflightManifest({
+        testDefinition: testDef,
+        bundle,
+        referenceLabManifest: labManifest,
+        sourceContract: RETAILCO_M3_APPROVED_CONTRACT,
+        targetProbe: probe,
+        preflightTimestamp: '2026-09-18T10:30:00Z',
+        liveExecutionStarted: false
+      });
+
+      const outDir = path.join(workDir, 'provenance-binding-test');
+      const testSha = '0177398dc8204cc2ccb69c16cc6adb36edf07dc0';
+      const testRunId = '35459190356';
+
+      const result = await executeReferenceRun({
+        targetBaseUrl: baseUrl,
+        outputDir: outDir,
+        testDefinition: testDef,
+        bundle,
+        preflightManifest: preflight,
+        referenceLabManifest: labManifest,
+        commitSha: testSha,
+        workflowRunId: testRunId,
+        k6Adapter: adapter
+      });
+
+      expect(result.operationalStatus).toBe('EXECUTION_COMPLETED');
+      expect(result.commitSha).toBe(testSha);
+      expect(result.repositoryCommitSha).toBe(testSha);
+      expect(result.workflowRunId).toBe(testRunId);
+
+      // Verify execution-manifest.json on disk contains the exact bindings
+      const manifestPath = path.join(outDir, 'execution-manifest.json');
+      const manifestOnDisk = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      expect(manifestOnDisk.commitSha).toBe(testSha);
+      expect(manifestOnDisk.repositoryCommitSha).toBe(testSha);
+      expect(manifestOnDisk.workflowRunId).toBe(testRunId);
+
+      // Verify rawArtefacts have filenames and valid metadata
+      expect(result.rawArtefacts.summaryJson?.filename).toBe('summary.json');
+      expect(result.rawArtefacts.stdoutLog?.filename).toBe('k6-stdout.log');
+      expect(result.rawArtefacts.stderrLog?.filename).toBe('k6-stderr.log');
+      expect(result.rawArtefacts.configJson?.filename).toBe('config.json');
+      expect(result.rawArtefacts.journeysJs?.filename).toBe('journeys.js');
+      expect(result.rawArtefacts.entrypointJs?.filename).toBe('entrypoint.js');
+      expect(result.rawArtefacts.runtimeJs?.filename).toBe('runtime.js');
+    });
   });
 });

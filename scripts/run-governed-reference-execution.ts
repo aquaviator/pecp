@@ -273,12 +273,18 @@ async function main() {
 
   // Step 11: Execute Governed Reference Run
   console.log(`[11/11] Executing governed reference run...`);
-  if (!fs.existsSync(cli.outputDir)) {
-    fs.mkdirSync(cli.outputDir, { recursive: true });
+  if (fs.existsSync(cli.outputDir)) {
+    console.log(`        Ensuring fresh output directory: cleaning ${cli.outputDir}`);
+    fs.rmSync(cli.outputDir, { recursive: true, force: true });
   }
+  fs.mkdirSync(cli.outputDir, { recursive: true });
 
   const runId = `pecp-ref-${cli.mode.toLowerCase()}-${Date.now()}`;
   console.log(`        Run ID: ${runId}`);
+  console.log(`        Authoritative Commit SHA: ${process.env.GITHUB_SHA || 'auto-resolved'}`);
+  if (process.env.GITHUB_RUN_ID) {
+    console.log(`        Authoritative GitHub Run ID: ${process.env.GITHUB_RUN_ID}`);
+  }
   console.log(`        Live run started at ${new Date().toISOString()}`);
 
   let runResult;
@@ -311,6 +317,10 @@ async function main() {
   console.log(`\n================================================================`);
   console.log(`Governed Execution Evidence Preservation & Verification:`);
   console.log(`      Operational Status: ${runResult.operationalStatus}`);
+  console.log(`      Commit SHA: ${runResult.commitSha}`);
+  if (runResult.workflowRunId) {
+    console.log(`      Workflow Run ID: ${runResult.workflowRunId}`);
+  }
   console.log(`      k6 Exit Code: ${runResult.k6ExitCode}`);
   console.log(`      Duration: ${runResult.timestamps.durationSeconds.toFixed(1)}s`);
   console.log(`      Performance Verdict Boundary: ${runResult.performanceVerdict}`);
@@ -349,7 +359,7 @@ async function main() {
       }
     }
   }
-  console.log(`      Security verification: Ephemeral credential successfully masked across all artifacts.`);
+  console.log(`      Security verification: NO_CREDENTIAL_LEAKAGE (Ephemeral credential successfully masked across all artifacts).`);
 
   if (runResult.operationalStatus !== 'EXECUTION_COMPLETED') {
     console.error(`\nExecution FAILED with operational status: ${runResult.operationalStatus}`);

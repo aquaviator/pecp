@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import http from 'node:http';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   K6ExecutionBundle,
@@ -134,6 +134,14 @@ export const defaultK6ExecutionAdapter: K6ExecutionAdapter = {
   }
 };
 
+export function getGitCommitSha(): string {
+  try {
+    const sha = execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (sha && sha.length >= 7) return sha;
+  } catch {}
+  return 'UNAVAILABLE';
+}
+
 export interface ReferenceExecutionOptions {
   targetBaseUrl?: string;
   outputDir: string;
@@ -150,6 +158,7 @@ export interface ReferenceExecutionOptions {
   k6Adapter?: K6ExecutionAdapter;
   ephemeralToken?: string;
   commitSha?: string;
+  workflowRunId?: string;
   runId?: string;
   smokeDurationOverrideSeconds?: number;
   executionMode?: 'CANONICAL' | 'SMOKE_DIAGNOSTIC';
@@ -167,6 +176,8 @@ export interface ReferenceExecutionResult {
     | 'TARGET_UNAVAILABLE'
     | 'PREFLIGHT_BLOCKED';
   commitSha: string;
+  repositoryCommitSha?: string;
+  workflowRunId?: string;
   timestamps: {
     startedAt: string;
     completedAt: string;
@@ -215,13 +226,13 @@ export interface ReferenceExecutionResult {
   materializedFiles: MaterializedFile[];
   k6ExitCode: number | null;
   rawArtefacts: {
-    summaryJson?: { path: string; checksum: string; sizeBytes: number };
-    stdoutLog?: { path: string; checksum: string; sizeBytes: number };
-    stderrLog?: { path: string; checksum: string; sizeBytes: number };
-    configJson?: { path: string; checksum: string; sizeBytes: number };
-    journeysJs?: { path: string; checksum: string; sizeBytes: number };
-    entrypointJs?: { path: string; checksum: string; sizeBytes: number };
-    runtimeJs?: { path: string; checksum: string; sizeBytes: number };
+    summaryJson?: { filename?: string; path: string; checksum: string; sizeBytes: number };
+    stdoutLog?: { filename?: string; path: string; checksum: string; sizeBytes: number };
+    stderrLog?: { filename?: string; path: string; checksum: string; sizeBytes: number };
+    configJson?: { filename?: string; path: string; checksum: string; sizeBytes: number };
+    journeysJs?: { filename?: string; path: string; checksum: string; sizeBytes: number };
+    entrypointJs?: { filename?: string; path: string; checksum: string; sizeBytes: number };
+    runtimeJs?: { filename?: string; path: string; checksum: string; sizeBytes: number };
   };
   referenceLabMetrics: {
     before?: ReferenceLabMetricsSnapshot;
@@ -500,7 +511,9 @@ export async function executeReferenceRun(
   const startedAt = new Date().toISOString();
   const startTimeMs = Date.now();
   const runId = options.runId || `run-pecp-reference-${Date.now()}`;
-  const commitSha = options.commitSha || process.env.GITHUB_SHA || 'UNAVAILABLE';
+  const commitSha = options.commitSha || process.env.GITHUB_SHA || getGitCommitSha();
+  const repositoryCommitSha = commitSha;
+  const workflowRunId = options.workflowRunId || process.env.GITHUB_RUN_ID || undefined;
   const adapter = options.k6Adapter || defaultK6ExecutionAdapter;
   const k6Binary = options.k6Binary || 'k6';
 
@@ -590,6 +603,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'TARGET_UNAVAILABLE',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -635,6 +650,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'PREFLIGHT_BLOCKED',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -704,6 +721,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'PREFLIGHT_BLOCKED',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -751,6 +770,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'TARGET_UNAVAILABLE',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -801,6 +822,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'EXECUTION_ENGINE_FAILED',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -844,6 +867,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'EXECUTION_ENGINE_FAILED',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -901,6 +926,8 @@ export async function executeReferenceRun(
       executionMode,
       operationalStatus: 'EXECUTION_ENGINE_FAILED',
       commitSha,
+      repositoryCommitSha,
+      workflowRunId,
       timestamps: {
         startedAt,
         completedAt: new Date().toISOString(),
@@ -1009,6 +1036,7 @@ export async function executeReferenceRun(
   if (fs.existsSync(summaryJsonPath)) {
     const buf = fs.readFileSync(summaryJsonPath);
     rawArtefacts.summaryJson = {
+      filename: 'summary.json',
       path: summaryJsonPath,
       sizeBytes: buf.length,
       checksum: computeSha256Checksum(buf)
@@ -1018,6 +1046,7 @@ export async function executeReferenceRun(
   if (fs.existsSync(stdoutLogPath)) {
     const buf = fs.readFileSync(stdoutLogPath);
     rawArtefacts.stdoutLog = {
+      filename: 'k6-stdout.log',
       path: stdoutLogPath,
       sizeBytes: buf.length,
       checksum: computeSha256Checksum(buf)
@@ -1027,6 +1056,7 @@ export async function executeReferenceRun(
   if (fs.existsSync(stderrLogPath)) {
     const buf = fs.readFileSync(stderrLogPath);
     rawArtefacts.stderrLog = {
+      filename: 'k6-stderr.log',
       path: stderrLogPath,
       sizeBytes: buf.length,
       checksum: computeSha256Checksum(buf)
@@ -1116,6 +1146,8 @@ export async function executeReferenceRun(
     executionMode,
     operationalStatus,
     commitSha,
+    repositoryCommitSha,
+    workflowRunId,
     timestamps: {
       startedAt,
       completedAt,
