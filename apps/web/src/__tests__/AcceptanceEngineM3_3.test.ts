@@ -2,13 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   evaluateAcceptance,
   compileTestDefinition,
-  ingestGovernedExecutionEvidence
+  ingestGovernedExecutionEvidence,
+  computeTestDefinitionFingerprint
 } from '@pecp/test-engine';
 import {
   PerformanceContract,
   TestDefinition,
   CanonicalExecutionResult,
-  GovernedObservation
+  GovernedObservation,
+  computeContractFingerprint
 } from '@pecp/pe-domain';
 import {
   RETAILCO_M3_APPROVED_CONTRACT,
@@ -95,8 +97,7 @@ describe('M3.3 — Deterministic Acceptance Engine', () => {
       expect(latencyCrit?.canonicalThresholdValue).toBe(2000);
       expect(latencyCrit?.canonicalUnit).toBe('ms');
       expect(latencyCrit?.percentile).toBe(95);
-      expect(latencyCrit?.observedValue).toBeDefined();
-      expect(latencyCrit?.observedValue).toBeLessThan(2000);
+      expect(latencyCrit?.observedValue).toBe(0.3906885);
       expect(latencyCrit?.corroboratingEngineThreshold?.agreesWithEngine).toBe(true);
       expect(latencyCrit?.corroboratingEngineThreshold?.enginePassed).toBe(true);
 
@@ -107,8 +108,7 @@ describe('M3.3 — Deterministic Acceptance Engine', () => {
       expect(errorRateCrit?.status).toBe('PASS');
       expect(errorRateCrit?.canonicalThresholdValue).toBe(0.005);
       expect(errorRateCrit?.canonicalUnit).toBe('rate');
-      expect(errorRateCrit?.observedValue).toBeDefined();
-      expect(errorRateCrit?.observedValue).toBeLessThan(0.005);
+      expect(errorRateCrit?.observedValue).toBe(0);
       expect(errorRateCrit?.corroboratingEngineThreshold?.agreesWithEngine).toBe(true);
       expect(errorRateCrit?.corroboratingEngineThreshold?.enginePassed).toBe(true);
 
@@ -743,6 +743,1138 @@ describe('M3.3 — Deterministic Acceptance Engine', () => {
 
       expect(eval1.evaluationFingerprint).toBe(eval2.evaluationFingerprint);
       expect(eval1.overallVerdict).toBe(eval2.overallVerdict);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. Contract-TestDefinition Parity and Integrity Gate (M3.3.1 §3)
+  // -------------------------------------------------------------------------
+  describe('9. Contract-TestDefinition Parity and Integrity Gate (M3.3.1 §3)', () => {
+    it('produces INCONCLUSIVE when test definition executable criterion is missing in contract', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        executableCriteria: [
+          ...baseTestDef.executableCriteria,
+          {
+            id: 'ac-unapproved-extra',
+            key: 'extra_metric',
+            metric: 'extra_latency',
+            target: 'p95 < 500ms',
+            operator: '<',
+            thresholdValue: 500,
+            unit: 'ms',
+            percentile: 95,
+            scope: 'extra',
+            status: 'DEFINED',
+            isBlockingForApproval: true
+          }
+        ]
+      };
+      // Keep fingerprint valid for self-integrity check so parity failure is isolated
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+      const resultsSynced = {
+        ...results,
+        run: {
+          ...results.run,
+          testDefinition: { ...results.run.testDefinition, fingerprint: testDef.fingerprint }
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results: resultsSynced
+      });
+
+      expect(evaluation.provenanceGate.isValid).toBe(false);
+      expect(evaluation.provenanceGate.reasons.some((r) => r.includes('ac-unapproved-extra'))).toBe(true);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+
+    it('produces INCONCLUSIVE when contract criterion status is not DEFINED', () => {
+      const contract: PerformanceContract = {
+        ...RETAILCO_M3_APPROVED_CONTRACT,
+        acceptanceCriteria: RETAILCO_M3_APPROVED_CONTRACT.acceptanceCriteria.map((c) =>
+          c.id === 'ac-checkout-latency' ? { ...c, status: 'DRAFT' as any } : c
+        )
+      };
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.provenanceGate.isValid).toBe(false);
+      expect(evaluation.provenanceGate.reasons.some((r) => r.includes('ac-checkout-latency') && r.includes('DRAFT'))).toBe(true);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+
+    it('produces INCONCLUSIVE when criterion semantics mismatch (operator, target, threshold, unit, percentile, scope)', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        executableCriteria: baseTestDef.executableCriteria.map((c) =>
+          c.id === 'ac-checkout-latency' ? { ...c, thresholdValue: 1500 } : c
+        )
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+      const resultsSynced = {
+        ...results,
+        run: {
+          ...results.run,
+          testDefinition: { ...results.run.testDefinition, fingerprint: testDef.fingerprint }
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results: resultsSynced
+      });
+
+      expect(evaluation.provenanceGate.isValid).toBe(false);
+      expect(evaluation.provenanceGate.reasons.some((r) => r.includes('semantics differ') && r.includes('thresholdValue'))).toBe(true);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+
+    it('produces INCONCLUSIVE when DEFINED contract criterion is missing in test definition', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        executableCriteria: baseTestDef.executableCriteria.filter((c) => c.id !== 'ac-global-error-rate')
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+      const resultsSynced = {
+        ...results,
+        run: {
+          ...results.run,
+          testDefinition: { ...results.run.testDefinition, fingerprint: testDef.fingerprint }
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results: resultsSynced
+      });
+
+      expect(evaluation.provenanceGate.isValid).toBe(false);
+      expect(evaluation.provenanceGate.reasons.some((r) => r.includes('ac-global-error-rate') && r.includes('missing from TestDefinition'))).toBe(true);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+
+    it('produces INCONCLUSIVE when contract contains ambiguous, unresolved, or conflicting criteria', () => {
+      const contract: PerformanceContract = {
+        ...RETAILCO_M3_APPROVED_CONTRACT,
+        acceptanceCriteria: [
+          ...RETAILCO_M3_APPROVED_CONTRACT.acceptanceCriteria,
+          {
+            id: 'ac-unresolved-candidate',
+            key: 'unresolved_journey',
+            metric: 'latency',
+            target: 'unknown target',
+            operator: '<',
+            thresholdValue: 100,
+            unit: 'ms',
+            scope: 'unresolved',
+            status: 'AMBIGUOUS',
+            isBlockingForApproval: true
+          }
+        ]
+      };
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.provenanceGate.isValid).toBe(false);
+      expect(evaluation.provenanceGate.reasons.some((r) => r.includes('unresolved criteria') && r.includes('AMBIGUOUS'))).toBe(true);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+
+    it('produces INCONCLUSIVE when test definition fingerprint mismatches recomputed self-integrity fingerprint', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      // Tamper fingerprint
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        fingerprint: 'fp-tampered-hash-12345'
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.provenanceGate.isValid).toBe(false);
+      expect(evaluation.provenanceGate.reasons.some((r) => r.includes('self-integrity failed'))).toBe(true);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 10. Workload Authority and Tolerance Matrix (M3.3.1 §3)
+  // -------------------------------------------------------------------------
+  describe('10. Workload Authority and Tolerance Matrix (M3.3.1 §3)', () => {
+    it('produces INVALID workload and INCONCLUSIVE when target value mismatches between TestDefinition and results', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED',
+          governedDemand: {
+            targetValue: 15.0, // mismatches testDef.workloadAttainment.targetValue (8.75)
+            unit: 'orders/s'
+          }
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(false);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('targetValue 15 mismatches'))).toBe(true);
+    });
+
+    it('produces INVALID workload and INCONCLUSIVE when target unit mismatches', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED',
+          governedDemand: {
+            targetValue: 8.75,
+            unit: 'req/s' // mismatches 'orders/s'
+          }
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('target unit \'req/s\' mismatches'))).toBe(true);
+    });
+
+    it('produces INVALID workload and INCONCLUSIVE when governed population mismatches', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED',
+          governedPopulation: 'mismatched_population_id'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('governed population \'mismatched_population_id\' mismatches'))).toBe(true);
+    });
+
+    it('produces INVALID workload and INCONCLUSIVE when acceptance time basis is unapproved (e.g. FULL_TEST_AVERAGE)', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED',
+          timeBasis: 'FULL_TEST_AVERAGE' as any
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('time basis \'FULL_TEST_AVERAGE\' is unapproved'))).toBe(true);
+    });
+
+    it('produces INVALID workload and INCONCLUSIVE when claimed resultValue has missing actualSourceMetric', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED',
+          actualSourceMetric: undefined
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('no grounded actualSourceMetric'))).toBe(true);
+    });
+
+    it('evaluates absent tolerance strictly against target value', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        workloadAttainment: {
+          ...baseTestDef.workloadAttainment!,
+          tolerancePercentage: undefined
+        }
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+
+      // Target is 8.75. Result 8.74 must NOT attain.
+      const resultsFail: CanonicalExecutionResult = {
+        ...baseResults,
+        run: { ...baseResults.run, testDefinition: { ...baseResults.run.testDefinition, fingerprint: testDef.fingerprint } },
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.74,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const evalFail = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results: resultsFail
+      });
+      expect(evalFail.workloadPrerequisite.status).toBe('NOT_ATTAINED');
+      expect(evalFail.workloadPrerequisite.requiredMinimum).toBe(8.75);
+      expect(evalFail.overallVerdict).toBe('INCONCLUSIVE');
+
+      // Result 8.75 must attain exactly.
+      const resultsPass: CanonicalExecutionResult = {
+        ...resultsFail,
+        acceptanceBasisAttainment: {
+          ...resultsFail.acceptanceBasisAttainment,
+          resultValue: 8.75
+        }
+      };
+
+      const evalPass = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results: resultsPass
+      });
+      expect(evalPass.workloadPrerequisite.status).toBe('ATTAINED');
+      expect(evalPass.overallVerdict).toBe('PASS');
+    });
+
+    it('evaluates valid tolerance percentage (5%): target 8.75 * 0.95 = 8.3125, so 8.4 passes', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        workloadAttainment: {
+          ...baseTestDef.workloadAttainment!,
+          tolerancePercentage: 5
+        }
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+
+      // 8.4 is below 8.75, but above 8.75 * 0.95 = 8.3125
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        run: { ...baseResults.run, testDefinition: { ...baseResults.run.testDefinition, fingerprint: testDef.fingerprint } },
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.4,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('ATTAINED');
+      expect(evaluation.workloadPrerequisite.requiredMinimum).toBeCloseTo(8.3125, 4);
+      expect(evaluation.overallVerdict).toBe('PASS');
+    });
+
+    it('produces INVALID workload and INCONCLUSIVE when tolerance percentage is negative (-5%)', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        workloadAttainment: {
+          ...baseTestDef.workloadAttainment!,
+          tolerancePercentage: -5
+        }
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        run: { ...baseResults.run, testDefinition: { ...baseResults.run.testDefinition, fingerprint: testDef.fingerprint } },
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('Invalid workload tolerancePercentage \'-5\''))).toBe(true);
+    });
+
+    it('produces INVALID workload and INCONCLUSIVE when tolerance percentage is > 100% (105%)', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        workloadAttainment: {
+          ...baseTestDef.workloadAttainment!,
+          tolerancePercentage: 105
+        }
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        run: { ...baseResults.run, testDefinition: { ...baseResults.run.testDefinition, fingerprint: testDef.fingerprint } },
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('Invalid workload tolerancePercentage \'105\''))).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 11. Exact Engine Corroboration Matrix (M3.3.1 §3)
+  // -------------------------------------------------------------------------
+  describe('11. Exact Engine Corroboration Matrix (M3.3.1 §3)', () => {
+    it('corroborates exact metric + expression match', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results: baseResults
+      });
+
+      const latencyCrit = evaluation.criterionEvaluations.find(
+        (c) => c.criterionId === 'ac-checkout-latency'
+      );
+      expect(latencyCrit?.corroboratingEngineThreshold).toBeDefined();
+      expect(latencyCrit?.corroboratingEngineThreshold?.metric).toBe('http_req_duration{journey:checkout}');
+      expect(latencyCrit?.corroboratingEngineThreshold?.expression).toBe('p(95)<2000');
+      expect(latencyCrit?.corroboratingEngineThreshold?.agreesWithEngine).toBe(true);
+      expect(latencyCrit?.corroboratingEngineThreshold?.enginePassed).toBe(true);
+    });
+
+    it('leaves corroboratingEngineThreshold undefined when metric matches but expression differs', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      // Change threshold observation expression to p(95)<1500 (mismatches criterion threshold of 2000)
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        thresholdObservations: baseResults.thresholdObservations.map((t) =>
+          t.metric === 'http_req_duration{journey:checkout}'
+            ? { ...t, expression: 'p(95)<1500' }
+            : t
+        )
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const latencyCrit = evaluation.criterionEvaluations.find(
+        (c) => c.criterionId === 'ac-checkout-latency'
+      );
+      expect(latencyCrit?.status).toBe('PASS');
+      expect(latencyCrit?.corroboratingEngineThreshold).toBeUndefined();
+    });
+
+    it('produces INCONCLUSIVE when threshold observation status contradicts engineResult boolean', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      // Contradictory: status OBSERVED_PASSED but engineResult: false
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        },
+        thresholdObservations: baseResults.thresholdObservations.map((t) =>
+          t.metric === 'http_req_duration{journey:checkout}'
+            ? { ...t, status: 'OBSERVED_PASSED', engineResult: false }
+            : t
+        )
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('internal contradiction'))).toBe(true);
+    });
+
+    it('preserves status and does not fail on UNAVAILABLE / UNSUPPORTED threshold observations', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        },
+        thresholdObservations: baseResults.thresholdObservations.map((t) =>
+          t.metric === 'http_req_duration{journey:checkout}'
+            ? { ...t, status: 'UNAVAILABLE', engineResult: null }
+            : t
+        )
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const latencyCrit = evaluation.criterionEvaluations.find(
+        (c) => c.criterionId === 'ac-checkout-latency'
+      );
+      expect(latencyCrit?.status).toBe('PASS');
+      expect(latencyCrit?.corroboratingEngineThreshold?.status).toBe('UNAVAILABLE');
+      expect(latencyCrit?.corroboratingEngineThreshold?.agreesWithEngine).toBe(true);
+      expect(latencyCrit?.corroboratingEngineThreshold?.enginePassed).toBeNull();
+      expect(evaluation.overallVerdict).toBe('PASS');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 12. Comparison Operators and Units Matrix (M3.3.1 §3)
+  // -------------------------------------------------------------------------
+  describe('12. Comparison Operators and Units Matrix (M3.3.1 §3)', () => {
+    const buildSyntheticEvaluation = (
+      operator: '<' | '<=' | '>' | '>=' | '==',
+      thresholdValue: number,
+      unit: string,
+      observedMetricVal: number
+    ) => {
+      const baseContract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const contract: PerformanceContract = {
+        ...baseContract,
+        acceptanceCriteria: [
+          {
+            id: 'ac-test-op',
+            key: 'test_op',
+            metric: 'checkout_latency',
+            target: `p95 ${operator} ${thresholdValue}${unit}`,
+            operator,
+            thresholdValue,
+            unit,
+            percentile: 95,
+            scope: 'checkout',
+            status: 'DEFINED',
+            isBlockingForApproval: true
+          }
+        ]
+      };
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        sourceContractId: contract.id,
+        sourceContractVersion: contract.version,
+        sourceContractFingerprint: computeContractFingerprint(contract),
+        executableCriteria: [
+          {
+            id: 'ac-test-op',
+            key: 'test_op',
+            metric: 'checkout_latency',
+            target: `p95 ${operator} ${thresholdValue}${unit}`,
+            operator,
+            thresholdValue,
+            unit,
+            percentile: 95,
+            scope: 'checkout',
+            status: 'DEFINED',
+            isBlockingForApproval: true
+          }
+        ]
+      };
+      testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        run: {
+          ...baseResults.run,
+          sourceContract: {
+            id: contract.id,
+            version: contract.version,
+            fingerprint: testDef.sourceContractFingerprint
+          },
+          testDefinition: {
+            id: testDef.id,
+            version: testDef.version,
+            fingerprint: testDef.fingerprint
+          }
+        },
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        },
+        metrics: {
+          ...baseResults.metrics,
+          httpReqDurationCheckout: {
+            ...baseResults.metrics.httpReqDurationCheckout,
+            p95: observedMetricVal
+          }
+        },
+        thresholdObservations: []
+      };
+
+      return evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+    };
+
+    it('evaluates comparison operators: <, <=, >, >=, == correctly', () => {
+      // '<'
+      expect(buildSyntheticEvaluation('<', 200, 'ms', 199).criterionEvaluations[0].status).toBe('PASS');
+      expect(buildSyntheticEvaluation('<', 200, 'ms', 200).criterionEvaluations[0].status).toBe('FAIL');
+
+      // '<='
+      expect(buildSyntheticEvaluation('<=', 200, 'ms', 200).criterionEvaluations[0].status).toBe('PASS');
+      expect(buildSyntheticEvaluation('<=', 200, 'ms', 201).criterionEvaluations[0].status).toBe('FAIL');
+
+      // '>'
+      expect(buildSyntheticEvaluation('>', 200, 'ms', 201).criterionEvaluations[0].status).toBe('PASS');
+      expect(buildSyntheticEvaluation('>', 200, 'ms', 200).criterionEvaluations[0].status).toBe('FAIL');
+
+      // '>='
+      expect(buildSyntheticEvaluation('>=', 200, 'ms', 200).criterionEvaluations[0].status).toBe('PASS');
+      expect(buildSyntheticEvaluation('>=', 200, 'ms', 199).criterionEvaluations[0].status).toBe('FAIL');
+
+      // '=='
+      expect(buildSyntheticEvaluation('==', 200, 'ms', 200).criterionEvaluations[0].status).toBe('PASS');
+      expect(buildSyntheticEvaluation('==', 200, 'ms', 201).criterionEvaluations[0].status).toBe('FAIL');
+    });
+
+    it('evaluates latency units: ms and s correctly', () => {
+      // 2 seconds => 2000 ms threshold
+      const evalSeconds = buildSyntheticEvaluation('<', 2, 's', 1500);
+      const critS = evalSeconds.criterionEvaluations[0];
+      expect(critS.canonicalUnit).toBe('s');
+      expect(critS.canonicalThresholdValue).toBe(2);
+      expect(critS.normalizedComparisonThreshold).toBe(2000);
+      expect(critS.status).toBe('PASS');
+
+      // 2000 ms => 2000 ms threshold
+      const evalMs = buildSyntheticEvaluation('<', 2000, 'ms', 1500);
+      const critMs = evalMs.criterionEvaluations[0];
+      expect(critMs.canonicalUnit).toBe('ms');
+      expect(critMs.canonicalThresholdValue).toBe(2000);
+      expect(critMs.normalizedComparisonThreshold).toBe(2000);
+      expect(critMs.status).toBe('PASS');
+    });
+
+    it('evaluates error rate units: %, rate, and fraction correctly', () => {
+      const baseContract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const testUnit = (unit: '%' | 'rate' | 'fraction', thresholdValue: number, observedVal: number) => {
+        const contract: PerformanceContract = {
+          ...baseContract,
+          acceptanceCriteria: [
+            {
+              id: 'ac-test-err',
+              key: 'test_err',
+              metric: 'global_error_rate',
+              target: `rate < ${thresholdValue}${unit}`,
+              operator: '<',
+              thresholdValue,
+              unit,
+              scope: 'global',
+              status: 'DEFINED',
+              isBlockingForApproval: true
+            }
+          ]
+        };
+
+        const testDef: TestDefinition = {
+          ...baseTestDef,
+          sourceContractId: contract.id,
+          sourceContractVersion: contract.version,
+          sourceContractFingerprint: computeContractFingerprint(contract),
+          executableCriteria: [
+            {
+              id: 'ac-test-err',
+              key: 'test_err',
+              metric: 'global_error_rate',
+              target: `rate < ${thresholdValue}${unit}`,
+              operator: '<',
+              thresholdValue,
+              unit,
+              scope: 'global',
+              status: 'DEFINED',
+              isBlockingForApproval: true
+            }
+          ]
+        };
+        testDef.fingerprint = computeTestDefinitionFingerprint(testDef);
+
+        const results: CanonicalExecutionResult = {
+          ...baseResults,
+          run: {
+            ...baseResults.run,
+            sourceContract: {
+              id: contract.id,
+              version: contract.version,
+              fingerprint: testDef.sourceContractFingerprint
+            },
+            testDefinition: {
+              id: testDef.id,
+              version: testDef.version,
+              fingerprint: testDef.fingerprint
+            }
+          },
+          acceptanceBasisAttainment: {
+            ...baseResults.acceptanceBasisAttainment,
+            resultValue: 8.9,
+            derivationStatus: 'DETERMINISTICALLY_DERIVED'
+          },
+          metrics: {
+            ...baseResults.metrics,
+            httpReqFailed: {
+              fails: 0,
+              passes: 100,
+              rate: observedVal
+            }
+          },
+          thresholdObservations: []
+        };
+
+        return evaluateAcceptance({ contract, testDefinition: testDef, results }).criterionEvaluations[0];
+      };
+
+      // 0.5% => normalized comparison threshold is 0.005
+      const critPct = testUnit('%', 0.5, 0.002);
+      expect(critPct.canonicalUnit).toBe('%');
+      expect(critPct.canonicalThresholdValue).toBe(0.5);
+      expect(critPct.normalizedComparisonThreshold).toBe(0.005);
+      expect(critPct.status).toBe('PASS');
+
+      // rate 0.005 => normalized comparison threshold is 0.005
+      const critRate = testUnit('rate', 0.005, 0.006);
+      expect(critRate.canonicalUnit).toBe('rate');
+      expect(critRate.canonicalThresholdValue).toBe(0.005);
+      expect(critRate.normalizedComparisonThreshold).toBe(0.005);
+      expect(critRate.status).toBe('FAIL');
+
+      // fraction 0.005 => normalized comparison threshold is 0.005
+      const critFraction = testUnit('fraction', 0.005, 0.002);
+      expect(critFraction.canonicalUnit).toBe('fraction');
+      expect(critFraction.canonicalThresholdValue).toBe(0.005);
+      expect(critFraction.normalizedComparisonThreshold).toBe(0.005);
+      expect(critFraction.status).toBe('PASS');
+    });
+
+    it('preserves original threshold and leaves normalized threshold undefined on unsupported operator without zero-invention', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const baseTestDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const testDef: TestDefinition = {
+        ...baseTestDef,
+        executableCriteria: baseTestDef.executableCriteria.map((c) =>
+          c.id === 'ac-checkout-latency' ? { ...c, operator: 'APPROX' as any } : c
+        )
+      };
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const latencyCrit = evaluation.criterionEvaluations.find(
+        (c) => c.criterionId === 'ac-checkout-latency'
+      );
+      expect(latencyCrit?.status).toBe('NOT_EVALUABLE');
+      expect(latencyCrit?.canonicalThresholdValue).toBe(2000);
+      expect(latencyCrit?.normalizedComparisonThreshold).toBeUndefined();
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 13. Governed Observations Enforcement (M3.3.1 §3)
+  // -------------------------------------------------------------------------
+  describe('13. Governed Observations Enforcement (M3.3.1 §3)', () => {
+    it('produces INCONCLUSIVE when a single blocking governed observation is present', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const governedObservations: GovernedObservation[] = [
+        {
+          id: 'obs-blocking-crash',
+          source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+          description: 'Payment gateway crashed during peak steady state.',
+          severity: 'OBSERVATION',
+          isBlocking: true
+        }
+      ];
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations
+      });
+
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('Blocking governed observation \'obs-blocking-crash\''))).toBe(true);
+    });
+
+    it('produces INCONCLUSIVE when both blocking and non-blocking observations are present', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const governedObservations: GovernedObservation[] = [
+        {
+          id: 'obs-nonblocking-cpu',
+          source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+          description: 'CPU reached 75%.',
+          severity: 'OBSERVATION',
+          isBlocking: false
+        },
+        {
+          id: 'obs-blocking-db',
+          source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+          description: 'Database deadlock observed.',
+          severity: 'OBSERVATION',
+          isBlocking: true
+        }
+      ];
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations
+      });
+
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('Blocking governed observation \'obs-blocking-db\''))).toBe(true);
+    });
+
+    it('produces INCONCLUSIVE when blocking observation is present even if criterion fails', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      // Latency fails (3500 > 2000) AND blocking observation is present
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        },
+        metrics: {
+          ...baseResults.metrics,
+          httpReqDurationCheckout: {
+            ...baseResults.metrics.httpReqDurationCheckout,
+            p95: 3500
+          }
+        },
+        thresholdObservations: [
+          {
+            metric: 'http_req_duration{journey:checkout}',
+            expression: 'p(95)<2000',
+            status: 'OBSERVED_FAILED',
+            engineResult: false,
+            observedValue: 3500,
+            rawSource: {}
+          },
+          ...baseResults.thresholdObservations.filter((t) => t.metric !== 'http_req_duration{journey:checkout}')
+        ]
+      };
+
+      const governedObservations: GovernedObservation[] = [
+        {
+          id: 'obs-blocking-service-restart',
+          source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+          description: 'Service was unexpectedly restarted by container runtime.',
+          severity: 'OBSERVATION',
+          isBlocking: true
+        }
+      ];
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations
+      });
+
+      // Mandatory Order: Blocking Observations gate (Gate 6) precedes Criterion Failures gate (Gate 7)!
+      // Therefore, the overall verdict MUST be INCONCLUSIVE, not FAIL!
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.verdictReasons.some((r) => r.includes('Blocking governed observation'))).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 14. Caller Input Purity and Deterministic Evaluation Fingerprint (M3.3.1 §3)
+  // -------------------------------------------------------------------------
+  describe('14. Caller Input Purity and Deterministic Evaluation Fingerprint (M3.3.1 §3)', () => {
+    it('ensures caller-owned observations array and observation objects remain unfrozen and mutable', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const callerObs: GovernedObservation[] = [
+        {
+          id: 'obs-caller-test',
+          source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+          description: 'Initial caller observation',
+          severity: 'OBSERVATION',
+          isBlocking: false,
+          details: { count: 1 }
+        }
+      ];
+
+      evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations: callerObs
+      });
+
+      // Assert caller-owned inputs were NOT frozen
+      expect(Object.isFrozen(callerObs)).toBe(false);
+      expect(Object.isFrozen(callerObs[0])).toBe(false);
+      expect(Object.isFrozen(callerObs[0].details)).toBe(false);
+
+      // Verify caller can still mutate their own objects safely
+      expect(() => {
+        callerObs[0].description = 'mutated description';
+        callerObs.push({
+          id: 'obs-caller-test-2',
+          source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+          description: 'Pushed second observation',
+          severity: 'OBSERVATION',
+          isBlocking: false
+        });
+      }).not.toThrow();
+    });
+
+    it('generates identical evaluation output and fingerprint for identical inputs without wall-clock dependence', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const eval1 = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const eval2 = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      expect(eval1.evaluationFingerprint).toBe(eval2.evaluationFingerprint);
+      expect(eval1.overallVerdict).toBe(eval2.overallVerdict);
+      expect(eval1.id).toBe(eval2.id);
+    });
+
+    it('changing a governed observation changes the evaluation fingerprint even when overall verdict remains PASS_WITH_OBSERVATION', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAuthoritativeResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          derivationStatus: 'DETERMINISTICALLY_DERIVED'
+        }
+      };
+
+      const evalA = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations: [
+          {
+            id: 'obs-alpha',
+            source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+            description: 'Observation Alpha',
+            severity: 'OBSERVATION',
+            isBlocking: false
+          }
+        ]
+      });
+
+      const evalB = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations: [
+          {
+            id: 'obs-beta',
+            source: 'REFERENCE_LAB_SYSTEM_TELEMETRY',
+            description: 'Observation Beta',
+            severity: 'OBSERVATION',
+            isBlocking: false
+          }
+        ]
+      });
+
+      expect(evalA.overallVerdict).toBe('PASS_WITH_OBSERVATION');
+      expect(evalB.overallVerdict).toBe('PASS_WITH_OBSERVATION');
+      expect(evalA.evaluationFingerprint).not.toBe(evalB.evaluationFingerprint);
     });
   });
 });

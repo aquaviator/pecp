@@ -74,8 +74,9 @@ export interface WorkloadAttainmentEvaluation {
 export interface CorroboratingEngineThreshold {
   metric: string;
   expression: string;
-  enginePassed?: boolean;
+  enginePassed?: boolean | null;
   agreesWithEngine: boolean;
+  status?: string;
 }
 
 /**
@@ -86,11 +87,11 @@ export interface AcceptanceCriterionEvaluation {
   key: string;
   metric: string;
   scope: string;
-  operator: '<' | '<=' | '>' | '>=' | '==';
-  canonicalThresholdValue: number;
-  canonicalUnit: string;
+  operator?: '<' | '<=' | '>' | '>=' | '==' | string;
+  canonicalThresholdValue?: number;
+  canonicalUnit?: string;
   percentile?: number;
-  normalizedComparisonThreshold: number;
+  normalizedComparisonThreshold?: number;
   observedValue?: number;
   observedUnit?: string;
   evidenceSourcePath?: string;
@@ -140,6 +141,6 @@ export interface AcceptanceEvaluation {
   governedObservations: GovernedObservation[];
   overallVerdict: AcceptanceVerdict;
   verdictReasons: string[];
-  evaluatedAt: string;
+  evaluatedAt?: string;
   evaluationFingerprint: string;
 }
