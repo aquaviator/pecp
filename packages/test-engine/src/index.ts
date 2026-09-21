@@ -4,3 +4,4 @@ export * from './k6Compiler.js';
 export * from './preflightCompiler.js';
 export * from './k6SummaryParser.js';
 export * from './resultsIngestion.js';
+export * from './acceptanceEngine.js';
