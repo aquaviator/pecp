@@ -110,7 +110,7 @@ export interface ExecutionRunRuntimeInfo {
 export interface ExecutionRunTimestamps {
   startedAt: string;
   completedAt: string;
-  durationSeconds: number;
+  durationSeconds?: number;
 }
 
 /**
@@ -219,8 +219,8 @@ export interface K6CheckMetric {
   name: string;
   path: string;
   id: string;
-  passes: number;
-  fails: number;
+  passes?: number;
+  fails?: number;
 }
 
 /**
@@ -228,7 +228,7 @@ export interface K6CheckMetric {
  * Preserves raw source values and leaves absent metrics undefined.
  */
 export interface K6SummaryMetrics {
-  testRunDurationMs: number;
+  testRunDurationMs?: number;
   iterations?: K6CounterMetric;
   droppedIterations?: K6CounterMetric;
   httpReqs?: K6CounterMetric;
@@ -312,11 +312,11 @@ export interface BusinessEventsObservation {
  */
 export interface ReferenceLabCorroboration {
   sourceLocator?: string;
-  totalRequestsDelta: number;
-  requestsByRoute: Record<string, number>;
-  statusCounts: Record<string, number>;
+  totalRequestsDelta?: number;
+  requestsByRoute?: Record<string, number>;
+  statusCounts?: Record<string, number>;
   businessEventCounts: {
-    orderCreatedEvents: number;
+    orderCreatedEvents?: number;
   };
   captureTimestamps: {
     before?: string;
@@ -325,9 +325,9 @@ export interface ReferenceLabCorroboration {
   durationSeconds?: number;
   consistency: {
     k6BusinessEventCount?: number;
-    referenceLabOrderCreatedCount: number;
-    countsMatch: boolean;
-    discrepancyCount: number;
+    referenceLabOrderCreatedCount?: number;
+    countsMatch?: boolean;
+    discrepancyCount?: number;
     notes?: string;
   };
 }
@@ -385,15 +385,15 @@ export type AttainmentDerivationStatus =
  * Invariant: Never evaluated into a PASS/FAIL verdict in M3.2.
  */
 export interface WorkloadAttainmentObservation {
-  governedDemand: {
-    metric: string;
-    targetValue: number;
-    unit: string;
+  governedDemand?: {
+    metric?: string;
+    targetValue?: number;
+    unit?: string;
   };
-  governedPopulation: string;
+  governedPopulation?: string;
   actualSourceMetric: string;
   calculationFormula: string;
-  units: string;
+  units?: string;
   timeBasis: AttainmentTimeBasis;
   resultValue?: number;
   attainmentRatio?: number;

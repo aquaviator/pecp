@@ -428,9 +428,9 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(lab?.consistency.discrepancyCount).toBe(0);
 
       // Route delta check
-      expect(lab?.requestsByRoute['/api/v1/orders/checkout']).toBe(9671);
-      expect(lab?.requestsByRoute['/api/v1/products/featured']).toBe(66713);
-      expect(lab?.requestsByRoute['/api/v1/products/search']).toBe(24003);
+      expect(lab?.requestsByRoute?.['/api/v1/orders/checkout']).toBe(9671);
+      expect(lab?.requestsByRoute?.['/api/v1/products/featured']).toBe(66713);
+      expect(lab?.requestsByRoute?.['/api/v1/products/search']).toBe(24003);
     });
 
     it('detects BUSINESS_EVENT_COUNT_MISMATCH without evaluating a performance verdict', () => {
@@ -634,6 +634,229 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
     it('proves that invalid JSON in summary payload throws PARSER_INCOMPATIBILITY', () => {
       expect(() => parseK6SummaryJson('NOT_VALID_JSON{')).toThrow('PARSER_INCOMPATIBILITY');
       expect(() => parseK6SummaryJson(null as any)).toThrow('PARSER_INCOMPATIBILITY');
+    });
+  });
+
+  describe('12. M3.2.2 Zero-Invention Semantic Hardening Gate Negative Regressions', () => {
+    it('proves missing summary duration does not become 0 and explicit 0 remains 0', () => {
+      // Missing duration in summary
+      const missingDurationSummary = {
+        metrics: {
+          iterations: { count: 10, rate: 1.0 }
+        }
+      };
+      const parsedMissing = parseK6SummaryJson(missingDurationSummary);
+      expect(parsedMissing.metrics.testRunDurationMs).toBeUndefined();
+      expect(parsedMissing.metrics.testRunDurationMs).not.toBe(0);
+
+      // Explicit duration 0 in summary
+      const explicitZeroSummary = {
+        state: { testRunDurationMs: 0 },
+        metrics: {
+          iterations: { count: 10, rate: 1.0 }
+        }
+      };
+      const parsedZero = parseK6SummaryJson(explicitZeroSummary);
+      expect(parsedZero.metrics.testRunDurationMs).toBe(0);
+
+      // Ingestion preserves missing duration as undefined
+      const input = createAuthoritativeEvidenceInput();
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.metrics.testRunDurationMs).toBeUndefined();
+      expect(result.metrics.testRunDurationMs).not.toBe(0);
+    });
+
+    it('proves missing workload target does not create target 0 in any attainment object', () => {
+      const input = createAuthoritativeEvidenceInput();
+      delete (input.manifest as any).pecpBinding.businessAttainment;
+      delete (input.manifest as any).businessAttainment;
+
+      const result = ingestGovernedExecutionEvidence(input);
+
+      // Business observation
+      expect(result.businessEventsObservation.governedTarget).toBeUndefined();
+      expect(result.businessEventsObservation.governedMetric).toBeUndefined();
+
+      // Full test average observation
+      expect(result.fullTestAverageObservation?.governedDemand?.targetValue).toBeUndefined();
+      expect(result.fullTestAverageObservation?.governedDemand?.targetValue).not.toBe(0);
+      expect(result.fullTestAverageObservation?.governedDemand?.metric).toBeUndefined();
+      expect(result.fullTestAverageObservation?.governedDemand?.metric).not.toBe('unspecified');
+
+      // Acceptance basis attainment
+      expect(result.acceptanceBasisAttainment.governedDemand?.targetValue).toBeUndefined();
+      expect(result.acceptanceBasisAttainment.governedDemand?.targetValue).not.toBe(0);
+      expect(result.acceptanceBasisAttainment.governedDemand?.metric).toBeUndefined();
+      expect(result.acceptanceBasisAttainment.governedDemand?.metric).not.toBe('unspecified');
+      expect(result.acceptanceBasisAttainment.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+    });
+
+    it('proves missing scheduler population does not create an unspecified governed population', () => {
+      const input = createAuthoritativeEvidenceInput();
+      delete (input.manifest as any).pecpBinding.schedulerArrival.population;
+
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.schedulerObservation.schedulerPopulation).toBeUndefined();
+      expect(result.schedulerObservation.schedulerPopulation).not.toBe('unspecified');
+      expect(result.fullTestAverageObservation?.governedPopulation).toBeUndefined();
+      expect(result.fullTestAverageObservation?.governedPopulation).not.toBe('unspecified');
+      expect(result.acceptanceBasisAttainment.governedPopulation).toBeUndefined();
+      expect(result.acceptanceBasisAttainment.governedPopulation).not.toBe('unspecified');
+    });
+
+    it('proves Reference Lab evidence distinguishes missing from measured zero', () => {
+      // 1. Missing Reference Lab counts remain undefined
+      const inputMissing = createAuthoritativeEvidenceInput();
+      delete (inputMissing.manifest as any).referenceLabMetrics.delta.orderCreatedEvents;
+      delete (inputMissing.manifest as any).referenceLabMetrics.delta.totalRequests;
+      delete (inputMissing.manifest as any).referenceLabMetrics.delta.durationSeconds;
+
+      const resultMissing = ingestGovernedExecutionEvidence(inputMissing);
+      const labMissing = resultMissing.referenceLabCorroboration;
+      expect(labMissing?.businessEventCounts.orderCreatedEvents).toBeUndefined();
+      expect(labMissing?.businessEventCounts.orderCreatedEvents).not.toBe(0);
+      expect(labMissing?.totalRequestsDelta).toBeUndefined();
+      expect(labMissing?.totalRequestsDelta).not.toBe(0);
+      expect(labMissing?.durationSeconds).toBeUndefined();
+      expect(labMissing?.durationSeconds).not.toBe(0);
+      expect(labMissing?.consistency.countsMatch).toBeUndefined();
+      expect(labMissing?.consistency.discrepancyCount).toBeUndefined();
+      expect(labMissing?.consistency.notes).toContain('unavailable');
+
+      // 2. Explicit measured zero remains 0
+      const inputZero = createAuthoritativeEvidenceInput();
+      (inputZero.manifest as any).referenceLabMetrics.delta.orderCreatedEvents = 0;
+      (inputZero.manifest as any).referenceLabMetrics.delta.totalRequests = 0;
+      (inputZero.manifest as any).referenceLabMetrics.delta.durationSeconds = 0;
+
+      const resultZero = ingestGovernedExecutionEvidence(inputZero);
+      const labZero = resultZero.referenceLabCorroboration;
+      expect(labZero?.businessEventCounts.orderCreatedEvents).toBe(0);
+      expect(labZero?.totalRequestsDelta).toBe(0);
+      expect(labZero?.durationSeconds).toBe(0);
+      expect(labZero?.consistency.countsMatch).toBe(false);
+      expect(labZero?.consistency.discrepancyCount).toBe(9671);
+    });
+
+    it('proves missing execution manifest fails deterministically with machine-readable issue and incomplete result', () => {
+      const input = createAuthoritativeEvidenceInput();
+      input.manifest = undefined as any;
+
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.dataQuality.isComplete).toBe(false);
+      expect(result.dataQuality.hasIntegrityErrors).toBe(true);
+
+      const fatalManifestIssue = result.dataQuality.issues.find((i) => i.code === 'MISSING_MANIFEST');
+      expect(fatalManifestIssue).toBeDefined();
+      expect(fatalManifestIssue?.severity).toBe('FATAL');
+
+      const missingArtifactIssue = result.dataQuality.issues.find((i) => i.code === 'MISSING_REQUIRED_ARTIFACT' && i.details?.filename === 'execution-manifest.json');
+      expect(missingArtifactIssue).toBeDefined();
+
+      expect(result.evidenceInventory.manifest?.presenceStatus).toBe('ABSENT');
+      expect(result.evidenceInventory.allReferences.every((r) => r.presenceStatus === 'PRESENT')).toBe(false);
+      expect(result.performanceVerdict).toBe('PECP_PERFORMANCE_VERDICT_NOT_EVALUATED');
+    });
+
+    it('proves malformed flat and legacy numeric metrics are surfaced as MALFORMED_METRIC', () => {
+      // Flat shape with NaN string or invalid number
+      const malformedFlatSummary = {
+        metrics: {
+          http_req_duration: {
+            avg: 'not-a-number'
+          }
+        }
+      };
+      expect(() => parseK6SummaryJson(malformedFlatSummary)).toThrow('MALFORMED_METRIC');
+
+      // Legacy shape with NaN
+      const malformedLegacySummary = {
+        metrics: {
+          iterations: {
+            values: {
+              count: NaN
+            }
+          }
+        }
+      };
+      expect(() => parseK6SummaryJson(malformedLegacySummary)).toThrow('MALFORMED_METRIC');
+
+      // Infinity rejected
+      const infinitySummary = {
+        metrics: {
+          vus: {
+            value: Infinity
+          }
+        }
+      };
+      expect(() => parseK6SummaryJson(infinitySummary)).toThrow('MALFORMED_METRIC');
+
+      // Ingestion surfaces MALFORMED_METRIC in dataQuality.issues
+      const input = createAuthoritativeEvidenceInput();
+      input.summaryJson = JSON.stringify(malformedFlatSummary);
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.dataQuality.hasIntegrityErrors).toBe(true);
+      const malformedIssue = result.dataQuality.issues.find((i) => i.code === 'MALFORMED_METRIC');
+      expect(malformedIssue).toBeDefined();
+    });
+
+    it('proves root-check counters preserve absence and do not manufacture zero counters', () => {
+      // Missing passes/fails
+      const missingCountersSummary = {
+        root_group: {
+          checks: {
+            checkWithoutCounters: {
+              name: 'Missing Counters Check'
+              // passes and fails absent
+            }
+          }
+        }
+      };
+      const parsedMissing = parseK6SummaryJson(missingCountersSummary);
+      expect(parsedMissing.metrics.rootChecks).toHaveLength(1);
+      const check = parsedMissing.metrics.rootChecks[0];
+      expect(check.passes).toBeUndefined();
+      expect(check.passes).not.toBe(0);
+      expect(check.fails).toBeUndefined();
+      expect(check.fails).not.toBe(0);
+
+      // Explicit zero passes/fails
+      const explicitZeroSummary = {
+        root_group: {
+          checks: {
+            zeroCheck: {
+              name: 'Zero Check',
+              passes: 0,
+              fails: 0
+            }
+          }
+        }
+      };
+      const parsedZero = parseK6SummaryJson(explicitZeroSummary);
+      expect(parsedZero.metrics.rootChecks[0].passes).toBe(0);
+      expect(parsedZero.metrics.rootChecks[0].fails).toBe(0);
+    });
+
+    it('guarantees no NaN enters canonical Results', () => {
+      const input = createAuthoritativeEvidenceInput();
+      const result = ingestGovernedExecutionEvidence(input);
+
+      const checkNoNaN = (obj: any, path = ''): void => {
+        if (obj === null || obj === undefined) return;
+        if (typeof obj === 'number') {
+          if (Number.isNaN(obj)) {
+            throw new Error(`NaN detected at path: ${path}`);
+          }
+          return;
+        }
+        if (typeof obj === 'object') {
+          for (const key of Object.keys(obj)) {
+            checkNoNaN(obj[key], path ? `${path}.${key}` : key);
+          }
+        }
+      };
+
+      expect(() => checkNoNaN(result)).not.toThrow();
     });
   });
 });

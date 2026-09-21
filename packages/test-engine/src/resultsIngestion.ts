@@ -85,24 +85,42 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   const issues: ResultDataQualityIssue[] = [];
 
   // 1. Manifest Ingestion
-  let manifest: any;
-  try {
-    manifest = parseJsonPayload(input.manifest, 'execution-manifest');
-  } catch (err: any) {
-    issues.push({
-      code: 'PARSER_INCOMPATIBILITY',
-      severity: 'FATAL',
-      message: err.message
-    });
-    manifest = {};
+  let manifest: any = {};
+  let manifestStr = '';
+  let isManifestPresent = false;
+
+  if (input.manifest !== undefined && input.manifest !== null && input.manifest !== '') {
+    try {
+      manifest = parseJsonPayload(input.manifest, 'execution-manifest');
+      manifestStr = typeof input.manifest === 'string'
+        ? input.manifest
+        : Buffer.isBuffer(input.manifest)
+          ? input.manifest.toString('utf8')
+          : JSON.stringify(input.manifest, null, 2);
+      isManifestPresent = true;
+    } catch (err: any) {
+      issues.push({
+        code: 'PARSER_INCOMPATIBILITY',
+        severity: 'FATAL',
+        message: err.message
+      });
+      manifest = {};
+    }
   }
 
-  if (!manifest || Object.keys(manifest).length === 0) {
+  if (!isManifestPresent || !manifest || Object.keys(manifest).length === 0) {
     issues.push({
       code: 'MISSING_MANIFEST',
       severity: 'FATAL',
       message: 'Execution manifest is missing or empty'
     });
+    issues.push({
+      code: 'MISSING_REQUIRED_ARTIFACT',
+      severity: 'ERROR',
+      message: "Required raw execution artifact 'execution-manifest.json' is absent from evidence inventory",
+      details: { filename: 'execution-manifest.json' }
+    });
+    manifest = {};
   }
 
   // Check credential masking in manifest
@@ -172,7 +190,20 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     timestamps: {
       startedAt: manifest.timestamps?.startedAt ?? '',
       completedAt: manifest.timestamps?.completedAt ?? '',
-      durationSeconds: Number(manifest.timestamps?.durationSeconds ?? 0)
+      durationSeconds: manifest.timestamps?.durationSeconds !== undefined && manifest.timestamps?.durationSeconds !== null
+        ? (() => {
+            const num = Number(manifest.timestamps.durationSeconds);
+            if (!Number.isFinite(num)) {
+              issues.push({
+                code: 'MALFORMED_METRIC',
+                severity: 'ERROR',
+                message: `Manifest timestamps.durationSeconds has non-finite value: ${String(manifest.timestamps.durationSeconds)}`
+              });
+              return undefined;
+            }
+            return num;
+          })()
+        : undefined
     },
     engine: {
       name: manifest.engine?.name ?? 'UNKNOWN_ENGINE',
@@ -243,19 +274,13 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   const manifestArtefacts = manifest.rawArtefacts ?? {};
 
   // Check manifest content itself as evidence
-  const manifestStr = typeof input.manifest === 'string'
-    ? input.manifest
-    : Buffer.isBuffer(input.manifest)
-      ? input.manifest.toString('utf8')
-      : JSON.stringify(input.manifest, null, 2);
-
   const manifestRef: RawEvidenceReference = {
     filename: 'execution-manifest.json',
     evidenceType: 'EXECUTION_MANIFEST',
-    checksum: computeSha256(manifestStr),
-    sizeBytes: Buffer.byteLength(manifestStr),
-    presenceStatus: 'PRESENT',
-    checksumVerified: true
+    checksum: isManifestPresent ? computeSha256(manifestStr) : '',
+    sizeBytes: isManifestPresent ? Buffer.byteLength(manifestStr) : 0,
+    presenceStatus: isManifestPresent ? 'PRESENT' : 'ABSENT',
+    checksumVerified: isManifestPresent
   };
 
   const checkEvidenceFile = (
@@ -451,7 +476,7 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   // 3. k6 Summary Parsing
   let parsedSummary: any;
   let summaryMetrics: K6SummaryMetrics = {
-    testRunDurationMs: 0,
+    testRunDurationMs: undefined,
     rootChecks: [],
     rawMetrics: {}
   };
@@ -475,8 +500,9 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
       thresholdObservations = parsed.thresholdObservations;
       parsedSummary = parsed;
     } catch (err: any) {
+      const isMalformed = err.message && err.message.startsWith('MALFORMED_METRIC');
       issues.push({
-        code: 'PARSER_INCOMPATIBILITY',
+        code: isMalformed ? 'MALFORMED_METRIC' : 'PARSER_INCOMPATIBILITY',
         severity: 'ERROR',
         message: err.message
       });
@@ -522,12 +548,24 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
 
   // 5. Business Events Observation
   const businessAttainment = pecpBinding.businessAttainment ?? manifest.businessAttainment;
-  if (!businessAttainment || businessAttainment.targetValue === undefined) {
+  let targetRate: number | undefined;
+  if (!businessAttainment || businessAttainment.targetValue === undefined || businessAttainment.targetValue === null) {
     issues.push({
       code: 'MISSING_SOURCE_WORKLOAD_TARGET',
       severity: 'WARNING',
       message: 'Source workload target is missing from contract / test definition binding'
     });
+  } else {
+    const num = Number(businessAttainment.targetValue);
+    if (!Number.isFinite(num)) {
+      issues.push({
+        code: 'MALFORMED_METRIC',
+        severity: 'ERROR',
+        message: `Business attainment targetValue has non-finite value: ${String(businessAttainment.targetValue)}`
+      });
+    } else {
+      targetRate = num;
+    }
   }
 
   const observedEventCount =
@@ -535,14 +573,16 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     manifest.businessAttainment?.orderCreatedEventsObserved;
 
   const businessEventsObservation: BusinessEventsObservation = {
-    governedMetric: businessAttainment?.metric,
-    governedTarget: businessAttainment?.targetValue !== undefined ? {
-      value: Number(businessAttainment.targetValue),
-      unit: businessAttainment.unit ?? ''
+    governedMetric: businessAttainment?.metric ?? undefined,
+    governedTarget: targetRate !== undefined ? {
+      value: targetRate,
+      unit: businessAttainment?.unit ?? ''
     } : undefined,
     observedEventCount,
     observedRawRate: summaryMetrics.pecpBusinessAttainmentEvents?.rate,
-    referenceLabCorroboratingEventCount: manifest.referenceLabMetrics?.delta?.orderCreatedEvents
+    referenceLabCorroboratingEventCount: manifest.referenceLabMetrics?.delta?.orderCreatedEvents !== undefined && manifest.referenceLabMetrics?.delta?.orderCreatedEvents !== null
+      ? (Number.isFinite(Number(manifest.referenceLabMetrics.delta.orderCreatedEvents)) ? Number(manifest.referenceLabMetrics.delta.orderCreatedEvents) : undefined)
+      : undefined
   };
 
   // 6. Reference Lab Corroboration
@@ -550,24 +590,80 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   const labMetrics = manifest.referenceLabMetrics;
   if (labMetrics && labMetrics.delta) {
     const delta = labMetrics.delta;
-    const labOrderEvents = Number(delta.orderCreatedEvents ?? 0);
-    const countsMatch = observedEventCount !== undefined && observedEventCount === labOrderEvents;
-    const discrepancyCount = observedEventCount !== undefined ? Math.abs(observedEventCount - labOrderEvents) : 0;
 
-    if (!countsMatch) {
-      issues.push({
-        code: 'BUSINESS_EVENT_COUNT_MISMATCH',
-        severity: 'ERROR',
-        message: `Business event count mismatch: k6 emitted ${observedEventCount} events, Reference Lab recorded ${labOrderEvents} order_created events (discrepancy: ${discrepancyCount})`,
-        details: { k6EventCount: observedEventCount, referenceLabOrderCreated: labOrderEvents, discrepancyCount }
-      });
+    // Parse orderCreatedEvents preserving absence vs 0
+    let labOrderEvents: number | undefined;
+    if (delta.orderCreatedEvents !== undefined && delta.orderCreatedEvents !== null) {
+      const num = Number(delta.orderCreatedEvents);
+      if (!Number.isFinite(num)) {
+        issues.push({
+          code: 'MALFORMED_METRIC',
+          severity: 'ERROR',
+          message: `Reference Lab delta.orderCreatedEvents has non-finite value: ${String(delta.orderCreatedEvents)}`
+        });
+      } else {
+        labOrderEvents = num;
+      }
+    }
+
+    // Parse totalRequests preserving absence vs 0
+    let totalRequestsDelta: number | undefined;
+    if (delta.totalRequests !== undefined && delta.totalRequests !== null) {
+      const num = Number(delta.totalRequests);
+      if (!Number.isFinite(num)) {
+        issues.push({
+          code: 'MALFORMED_METRIC',
+          severity: 'ERROR',
+          message: `Reference Lab delta.totalRequests has non-finite value: ${String(delta.totalRequests)}`
+        });
+      } else {
+        totalRequestsDelta = num;
+      }
+    }
+
+    // Parse durationSeconds preserving absence vs 0
+    let labDurationSeconds: number | undefined;
+    if (delta.durationSeconds !== undefined && delta.durationSeconds !== null) {
+      const num = Number(delta.durationSeconds);
+      if (!Number.isFinite(num)) {
+        issues.push({
+          code: 'MALFORMED_METRIC',
+          severity: 'ERROR',
+          message: `Reference Lab delta.durationSeconds has non-finite value: ${String(delta.durationSeconds)}`
+        });
+      } else {
+        labDurationSeconds = num;
+      }
+    }
+
+    // Evaluate consistency only when both compared counts are present
+    let countsMatch: boolean | undefined;
+    let discrepancyCount: number | undefined;
+    let notes: string | undefined;
+
+    if (observedEventCount !== undefined && labOrderEvents !== undefined) {
+      countsMatch = (observedEventCount === labOrderEvents);
+      discrepancyCount = Math.abs(observedEventCount - labOrderEvents);
+      if (!countsMatch) {
+        issues.push({
+          code: 'BUSINESS_EVENT_COUNT_MISMATCH',
+          severity: 'ERROR',
+          message: `Business event count mismatch: k6 emitted ${observedEventCount} events, Reference Lab recorded ${labOrderEvents} order_created events (discrepancy: ${discrepancyCount})`,
+          details: { k6EventCount: observedEventCount, referenceLabOrderCreated: labOrderEvents, discrepancyCount }
+        });
+        notes = `Discrepancy detected: difference of ${discrepancyCount} events between k6 client observation and server-side counter.`;
+      } else {
+        notes = 'Exact 1:1 business attainment corroboration: k6 checkout completion matched Reference Lab order creation.';
+      }
+    } else {
+      notes = 'Business event comparison unavailable: one or both event counts are missing.';
     }
 
     referenceLabCorroboration = {
       sourceLocator: 'execution-manifest.json#/referenceLabMetrics',
-      totalRequestsDelta: Number(delta.totalRequests ?? 0),
-      requestsByRoute: delta.requestsByRoute ?? {},
-      statusCounts: delta.statusCounts ?? {},
+      totalRequestsDelta,
+      requestsByRoute: delta.requestsByRoute,
+      statusCounts: delta.statusCounts,
       businessEventCounts: {
         orderCreatedEvents: labOrderEvents
       },
@@ -575,15 +671,13 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
         before: labMetrics.before?.capturedAt,
         after: labMetrics.after?.capturedAt
       },
-      durationSeconds: Number(delta.durationSeconds ?? 0),
+      durationSeconds: labDurationSeconds,
       consistency: {
         k6BusinessEventCount: observedEventCount,
         referenceLabOrderCreatedCount: labOrderEvents,
         countsMatch,
         discrepancyCount,
-        notes: countsMatch
-          ? 'Exact 1:1 business attainment corroboration: k6 checkout completion matched Reference Lab order creation.'
-          : `Discrepancy detected: difference of ${discrepancyCount} events between k6 client observation and server-side counter.`
+        notes
       }
     };
   } else {
@@ -597,22 +691,26 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   // 7. Workload Attainment Lineage Observation
   // Invariant: Full test average rate is not steady-state peak attainment.
   // Steady state peak attainment is marked as unresolved due to lack of per-stage window telemetry.
-  const targetRate = businessAttainment?.targetValue !== undefined ? Number(businessAttainment.targetValue) : undefined;
   const observedRate = summaryMetrics.pecpBusinessAttainmentEvents?.rate;
   const attainmentRatio = observedRate !== undefined && targetRate !== undefined && targetRate > 0
     ? Number((observedRate / targetRate).toFixed(4))
     : undefined;
 
+  const governedDemand = (businessAttainment?.metric !== undefined || targetRate !== undefined || businessAttainment?.unit !== undefined) ? {
+    metric: businessAttainment?.metric ?? undefined,
+    targetValue: targetRate,
+    unit: businessAttainment?.unit ?? undefined
+  } : undefined;
+
+  const governedPopulation = schedulerArrival?.population ?? undefined;
+  const units = businessAttainment?.unit ?? undefined;
+
   const fullTestAverageObservation: WorkloadAttainmentObservation | undefined = (observedRate !== undefined || observedEventCount !== undefined) ? {
-    governedDemand: {
-      metric: businessAttainment?.metric ?? 'unspecified',
-      targetValue: targetRate ?? 0,
-      unit: businessAttainment?.unit ?? ''
-    },
-    governedPopulation: schedulerArrival?.population ?? 'unspecified',
+    governedDemand,
+    governedPopulation,
     actualSourceMetric: 'pecp_business_attainment_events',
     calculationFormula: 'total_observed_events / total_test_duration_seconds',
-    units: businessAttainment?.unit ?? '',
+    units,
     timeBasis: 'FULL_TEST_AVERAGE',
     resultValue: observedRate,
     attainmentRatio,
@@ -621,22 +719,21 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
       'Whole-test average rate over the complete shaped test execution. This observation aggregates the entire execution duration and does not represent steady-state acceptance basis attainment.'
   } : undefined;
 
+  const hasTargetAndDemand = targetRate !== undefined && governedDemand !== undefined && governedPopulation !== undefined;
+
   const acceptanceBasisAttainment: WorkloadAttainmentObservation = {
-    governedDemand: {
-      metric: businessAttainment?.metric ?? 'unspecified',
-      targetValue: targetRate ?? 0,
-      unit: businessAttainment?.unit ?? ''
-    },
-    governedPopulation: schedulerArrival?.population ?? 'unspecified',
+    governedDemand,
+    governedPopulation,
     actualSourceMetric: 'pecp_business_attainment_events',
     calculationFormula: 'steady_state_window_events / steady_state_window_seconds',
-    units: businessAttainment?.unit ?? '',
+    units,
     timeBasis: 'STEADY_STATE_PEAK',
     resultValue: undefined,
     attainmentRatio: undefined,
     derivationStatus: 'UNRESOLVED_INSUFFICIENT_TIME_SERIES',
-    derivationNotes:
-      'Acceptance-basis attainment requires steady-state time-window analysis. The raw k6 summary export aggregates over the entire run without time-series slicing; steady-state attainment is unresolved.'
+    derivationNotes: hasTargetAndDemand
+      ? 'Acceptance-basis attainment requires steady-state time-window analysis. The raw k6 summary export aggregates over the entire run without time-series slicing; steady-state attainment is unresolved.'
+      : 'Acceptance-basis attainment is unresolved: required source workload demand/population bindings are absent and k6 summary aggregates over the entire run without time-series slicing.'
   };
 
   // 8. Result Completeness Summary
@@ -679,11 +776,10 @@ export function ingestGovernedExecutionDirectory(
   }
 
   const manifestPath = path.join(dirPath, 'execution-manifest.json');
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`Execution manifest does not exist in directory: ${manifestPath}`);
+  let manifestContent: string | undefined;
+  if (fs.existsSync(manifestPath)) {
+    manifestContent = fs.readFileSync(manifestPath, 'utf8');
   }
-
-  const manifestContent = fs.readFileSync(manifestPath, 'utf8');
 
   // Discover files on disk in dirPath
   const filesOnDisk: Record<string, RawFileEntry> = {};
@@ -701,7 +797,7 @@ export function ingestGovernedExecutionDirectory(
   }
 
   return ingestGovernedExecutionEvidence({
-    manifest: manifestContent,
+    manifest: manifestContent as any,
     filesOnDisk,
     artifactLocator: options?.artifactLocator ?? dirPath,
     executionArtifact: options?.executionArtifact
