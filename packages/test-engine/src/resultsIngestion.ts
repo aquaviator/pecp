@@ -572,11 +572,15 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     summaryMetrics.pecpBusinessAttainmentEvents?.count ??
     manifest.businessAttainment?.orderCreatedEventsObserved;
 
+  const businessTargetUnit = (businessAttainment?.unit !== undefined && businessAttainment?.unit !== null && businessAttainment.unit !== '')
+    ? businessAttainment.unit
+    : undefined;
+
   const businessEventsObservation: BusinessEventsObservation = {
     governedMetric: businessAttainment?.metric ?? undefined,
     governedTarget: targetRate !== undefined ? {
       value: targetRate,
-      unit: businessAttainment?.unit ?? ''
+      unit: businessTargetUnit
     } : undefined,
     observedEventCount,
     observedRawRate: summaryMetrics.pecpBusinessAttainmentEvents?.rate,
@@ -591,50 +595,80 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   if (labMetrics && labMetrics.delta) {
     const delta = labMetrics.delta;
 
-    // Parse orderCreatedEvents preserving absence vs 0
-    let labOrderEvents: number | undefined;
-    if (delta.orderCreatedEvents !== undefined && delta.orderCreatedEvents !== null) {
-      const num = Number(delta.orderCreatedEvents);
+    const parseFiniteLabMetric = (val: any, fieldName: string): number | undefined => {
+      if (val === undefined || val === null) return undefined;
+      if (typeof val === 'boolean' || (typeof val === 'string' && val.trim() === '')) {
+        issues.push({
+          code: 'MALFORMED_METRIC',
+          severity: 'ERROR',
+          message: `Reference Lab delta.${fieldName} has non-numeric value: ${String(val)}`
+        });
+        return undefined;
+      }
+      const num = typeof val === 'number' ? val : Number(val);
       if (!Number.isFinite(num)) {
         issues.push({
           code: 'MALFORMED_METRIC',
           severity: 'ERROR',
-          message: `Reference Lab delta.orderCreatedEvents has non-finite value: ${String(delta.orderCreatedEvents)}`
+          message: `Reference Lab delta.${fieldName} has non-finite value: ${String(val)}`
         });
-      } else {
-        labOrderEvents = num;
+        return undefined;
       }
-    }
+      return num;
+    };
 
-    // Parse totalRequests preserving absence vs 0
-    let totalRequestsDelta: number | undefined;
-    if (delta.totalRequests !== undefined && delta.totalRequests !== null) {
-      const num = Number(delta.totalRequests);
-      if (!Number.isFinite(num)) {
-        issues.push({
-          code: 'MALFORMED_METRIC',
-          severity: 'ERROR',
-          message: `Reference Lab delta.totalRequests has non-finite value: ${String(delta.totalRequests)}`
-        });
-      } else {
-        totalRequestsDelta = num;
-      }
-    }
+    const labOrderEvents = parseFiniteLabMetric(delta.orderCreatedEvents, 'orderCreatedEvents');
+    const totalRequestsDelta = parseFiniteLabMetric(delta.totalRequests, 'totalRequests');
+    const labDurationSeconds = parseFiniteLabMetric(delta.durationSeconds, 'durationSeconds');
 
-    // Parse durationSeconds preserving absence vs 0
-    let labDurationSeconds: number | undefined;
-    if (delta.durationSeconds !== undefined && delta.durationSeconds !== null) {
-      const num = Number(delta.durationSeconds);
-      if (!Number.isFinite(num)) {
+    // Deterministically normalize and validate route and status counter maps
+    const normalizeCounterMap = (
+      rawMap: any,
+      mapName: string
+    ): Record<string, number> | undefined => {
+      if (rawMap === undefined || rawMap === null) {
+        return undefined;
+      }
+      if (typeof rawMap !== 'object' || Array.isArray(rawMap)) {
         issues.push({
           code: 'MALFORMED_METRIC',
           severity: 'ERROR',
-          message: `Reference Lab delta.durationSeconds has non-finite value: ${String(delta.durationSeconds)}`
+          message: `Reference Lab delta.${mapName} must be an object map`
         });
-      } else {
-        labDurationSeconds = num;
+        return undefined;
       }
-    }
+
+      const normalized: Record<string, number> = {};
+      for (const [key, rawVal] of Object.entries(rawMap)) {
+        if (rawVal === undefined || rawVal === null) {
+          continue;
+        }
+        if (typeof rawVal === 'boolean' || (typeof rawVal === 'string' && rawVal.trim() === '')) {
+          issues.push({
+            code: 'MALFORMED_METRIC',
+            severity: 'ERROR',
+            message: `Reference Lab delta.${mapName}['${key}'] has non-numeric value: ${String(rawVal)}`,
+            details: { mapName, key, value: String(rawVal) }
+          });
+          continue;
+        }
+        const num = typeof rawVal === 'number' ? rawVal : Number(rawVal);
+        if (!Number.isFinite(num)) {
+          issues.push({
+            code: 'MALFORMED_METRIC',
+            severity: 'ERROR',
+            message: `Reference Lab delta.${mapName}['${key}'] has non-finite value: ${String(rawVal)}`,
+            details: { mapName, key, value: String(rawVal) }
+          });
+          continue;
+        }
+        normalized[key] = num;
+      }
+      return normalized;
+    };
+
+    const requestsByRoute = normalizeCounterMap(delta.requestsByRoute, 'requestsByRoute');
+    const statusCounts = normalizeCounterMap(delta.statusCounts, 'statusCounts');
 
     // Evaluate consistency only when both compared counts are present
     let countsMatch: boolean | undefined;
@@ -662,8 +696,8 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     referenceLabCorroboration = {
       sourceLocator: 'execution-manifest.json#/referenceLabMetrics',
       totalRequestsDelta,
-      requestsByRoute: delta.requestsByRoute,
-      statusCounts: delta.statusCounts,
+      requestsByRoute,
+      statusCounts,
       businessEventCounts: {
         orderCreatedEvents: labOrderEvents
       },
@@ -696,19 +730,23 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     ? Number((observedRate / targetRate).toFixed(4))
     : undefined;
 
-  const governedDemand = (businessAttainment?.metric !== undefined || targetRate !== undefined || businessAttainment?.unit !== undefined) ? {
+  const actualSourceMetric = summaryMetrics.pecpBusinessAttainmentEvents !== undefined
+    ? 'pecp_business_attainment_events'
+    : undefined;
+
+  const governedDemand = (businessAttainment?.metric !== undefined || targetRate !== undefined || businessTargetUnit !== undefined) ? {
     metric: businessAttainment?.metric ?? undefined,
     targetValue: targetRate,
-    unit: businessAttainment?.unit ?? undefined
+    unit: businessTargetUnit
   } : undefined;
 
   const governedPopulation = schedulerArrival?.population ?? undefined;
-  const units = businessAttainment?.unit ?? undefined;
+  const units = businessTargetUnit;
 
   const fullTestAverageObservation: WorkloadAttainmentObservation | undefined = (observedRate !== undefined || observedEventCount !== undefined) ? {
     governedDemand,
     governedPopulation,
-    actualSourceMetric: 'pecp_business_attainment_events',
+    actualSourceMetric,
     calculationFormula: 'total_observed_events / total_test_duration_seconds',
     units,
     timeBasis: 'FULL_TEST_AVERAGE',
@@ -724,7 +762,7 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   const acceptanceBasisAttainment: WorkloadAttainmentObservation = {
     governedDemand,
     governedPopulation,
-    actualSourceMetric: 'pecp_business_attainment_events',
+    actualSourceMetric,
     calculationFormula: 'steady_state_window_events / steady_state_window_seconds',
     units,
     timeBasis: 'STEADY_STATE_PEAK',

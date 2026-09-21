@@ -28,6 +28,9 @@ function getMetricSource(entry: any): any {
  */
 export function parseFiniteNumber(val: any, metricName: string, fieldName: string): number | undefined {
   if (val === undefined || val === null) return undefined;
+  if (typeof val === 'boolean' || (typeof val === 'string' && val.trim() === '')) {
+    throw new Error(`MALFORMED_METRIC: Metric '${metricName}' field '${fieldName}' has invalid numeric value: ${String(val)}`);
+  }
   const num = Number(val);
   if (!Number.isFinite(num)) {
     throw new Error(`MALFORMED_METRIC: Metric '${metricName}' field '${fieldName}' has invalid numeric value: ${String(val)}`);

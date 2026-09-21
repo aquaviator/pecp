@@ -859,4 +859,195 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(() => checkNoNaN(result)).not.toThrow();
     });
   });
+
+  describe('13. M3.2.3 Canonical Missingness & Map Integrity Gate (§1, §2, §3, §4)', () => {
+    it('preserves missing business target unit as undefined and does not use empty string as placeholder', () => {
+      // 1. Missing target unit
+      const inputMissingUnit = createAuthoritativeEvidenceInput();
+      delete (inputMissingUnit.manifest as any).pecpBinding.businessAttainment.unit;
+      delete (inputMissingUnit.manifest as any).businessAttainment.unit;
+
+      const resultMissing = ingestGovernedExecutionEvidence(inputMissingUnit);
+      expect(resultMissing.businessEventsObservation.governedTarget?.value).toBe(8.75);
+      expect(resultMissing.businessEventsObservation.governedTarget?.unit).toBeUndefined();
+      expect(resultMissing.businessEventsObservation.governedTarget?.unit).not.toBe('');
+      expect(resultMissing.acceptanceBasisAttainment.governedDemand?.unit).toBeUndefined();
+      expect(resultMissing.acceptanceBasisAttainment.governedDemand?.unit).not.toBe('');
+      expect(resultMissing.acceptanceBasisAttainment.units).toBeUndefined();
+      expect(resultMissing.acceptanceBasisAttainment.units).not.toBe('');
+
+      // 2. Explicit empty string unit in manifest is treated as absent unit (not stored as empty string)
+      const inputEmptyUnit = createAuthoritativeEvidenceInput();
+      (inputEmptyUnit.manifest as any).pecpBinding.businessAttainment.unit = '';
+      (inputEmptyUnit.manifest as any).businessAttainment.unit = '';
+
+      const resultEmpty = ingestGovernedExecutionEvidence(inputEmptyUnit);
+      expect(resultEmpty.businessEventsObservation.governedTarget?.unit).toBeUndefined();
+      expect(resultEmpty.businessEventsObservation.governedTarget?.unit).not.toBe('');
+
+      // 3. Present target unit is preserved exactly
+      const inputPresent = createAuthoritativeEvidenceInput();
+      const resultPresent = ingestGovernedExecutionEvidence(inputPresent);
+      expect(resultPresent.businessEventsObservation.governedTarget?.unit).toBe('orders/second');
+      expect(resultPresent.acceptanceBasisAttainment.governedDemand?.unit).toBe('orders/second');
+      expect(resultPresent.acceptanceBasisAttainment.units).toBe('orders/second');
+    });
+
+    it('populates actualSourceMetric only when raw metric is present and leaves it undefined when absent', () => {
+      // 1. Authoritative input has pecp_business_attainment_events present -> preserved exactly
+      const inputAuthoritative = createAuthoritativeEvidenceInput();
+      const resultAuthoritative = ingestGovernedExecutionEvidence(inputAuthoritative);
+      expect(resultAuthoritative.acceptanceBasisAttainment.actualSourceMetric).toBe('pecp_business_attainment_events');
+      expect(resultAuthoritative.fullTestAverageObservation?.actualSourceMetric).toBe('pecp_business_attainment_events');
+      expect(resultAuthoritative.workloadAttainmentObservation.actualSourceMetric).toBe('pecp_business_attainment_events');
+
+      // 2. Missing pecp_business_attainment_events from summaryJson -> actualSourceMetric is undefined
+      const inputMissingMetric = createAuthoritativeEvidenceInput();
+      const parsedSummary = JSON.parse(inputMissingMetric.summaryJson);
+      delete parsedSummary.metrics.pecp_business_attainment_events;
+      inputMissingMetric.summaryJson = JSON.stringify(parsedSummary);
+
+      const resultMissing = ingestGovernedExecutionEvidence(inputMissingMetric);
+      expect(resultMissing.acceptanceBasisAttainment.actualSourceMetric).toBeUndefined();
+      expect(resultMissing.acceptanceBasisAttainment.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+      expect(resultMissing.fullTestAverageObservation?.actualSourceMetric).toBeUndefined();
+      expect(resultMissing.workloadAttainmentObservation.actualSourceMetric).toBeUndefined();
+
+      // Ensure no placeholder string like 'unspecified' or 'pecp_business_attainment_events' was injected
+      expect(resultMissing.acceptanceBasisAttainment.actualSourceMetric).not.toBe('unspecified');
+      expect(resultMissing.acceptanceBasisAttainment.actualSourceMetric).not.toBe('pecp_business_attainment_events');
+    });
+
+    it('validates Reference Lab route and status counter maps with deterministic normalization', () => {
+      // 1. Missing route map and missing status map remain undefined
+      const inputMissingMaps = createAuthoritativeEvidenceInput();
+      delete (inputMissingMaps.manifest as any).referenceLabMetrics.delta.requestsByRoute;
+      delete (inputMissingMaps.manifest as any).referenceLabMetrics.delta.statusCounts;
+
+      const resultMissing = ingestGovernedExecutionEvidence(inputMissingMaps);
+      expect(resultMissing.referenceLabCorroboration?.requestsByRoute).toBeUndefined();
+      expect(resultMissing.referenceLabCorroboration?.statusCounts).toBeUndefined();
+
+      // 2. Explicit zero route and status counters are preserved as 0
+      const inputZeroMaps = createAuthoritativeEvidenceInput();
+      (inputZeroMaps.manifest as any).referenceLabMetrics.delta.requestsByRoute = {
+        '/api/v1/basket/items': 0,
+        '/api/v1/orders/checkout': 0
+      };
+      (inputZeroMaps.manifest as any).referenceLabMetrics.delta.statusCounts = {
+        '200': 0,
+        '500': 0
+      };
+
+      const resultZero = ingestGovernedExecutionEvidence(inputZeroMaps);
+      expect(resultZero.referenceLabCorroboration?.requestsByRoute?.['/api/v1/basket/items']).toBe(0);
+      expect(resultZero.referenceLabCorroboration?.requestsByRoute?.['/api/v1/orders/checkout']).toBe(0);
+      expect(resultZero.referenceLabCorroboration?.statusCounts?.['200']).toBe(0);
+      expect(resultZero.referenceLabCorroboration?.statusCounts?.['500']).toBe(0);
+
+      // 3. Malformed route counter (non-numeric string, NaN, Infinity) surfaces MALFORMED_METRIC
+      const inputMalformedRoute = createAuthoritativeEvidenceInput();
+      (inputMalformedRoute.manifest as any).referenceLabMetrics.delta.requestsByRoute = {
+        '/api/v1/valid': 100,
+        '/api/v1/invalid-string': 'not-a-number',
+        '/api/v1/nan': NaN,
+        '/api/v1/infinity': Infinity
+      };
+
+      const resultMalformedRoute = ingestGovernedExecutionEvidence(inputMalformedRoute);
+      expect(resultMalformedRoute.dataQuality.hasIntegrityErrors).toBe(true);
+      const routeErrors = resultMalformedRoute.dataQuality.issues.filter(
+        (i) => i.code === 'MALFORMED_METRIC' && i.message.includes('requestsByRoute')
+      );
+      expect(routeErrors.length).toBeGreaterThanOrEqual(3);
+      // Valid counter is preserved
+      expect(resultMalformedRoute.referenceLabCorroboration?.requestsByRoute?.['/api/v1/valid']).toBe(100);
+      // Malformed counters are NOT coerced to 0 and do NOT enter canonical record as NaN or Infinity
+      expect(resultMalformedRoute.referenceLabCorroboration?.requestsByRoute?.['/api/v1/invalid-string']).toBeUndefined();
+      expect(resultMalformedRoute.referenceLabCorroboration?.requestsByRoute?.['/api/v1/nan']).toBeUndefined();
+      expect(resultMalformedRoute.referenceLabCorroboration?.requestsByRoute?.['/api/v1/infinity']).toBeUndefined();
+
+      // 4. Malformed status counter surfaces MALFORMED_METRIC
+      const inputMalformedStatus = createAuthoritativeEvidenceInput();
+      (inputMalformedStatus.manifest as any).referenceLabMetrics.delta.statusCounts = {
+        '200': 120982,
+        '500': 'bad-counter',
+        '503': Infinity
+      };
+
+      const resultMalformedStatus = ingestGovernedExecutionEvidence(inputMalformedStatus);
+      expect(resultMalformedStatus.dataQuality.hasIntegrityErrors).toBe(true);
+      const statusErrors = resultMalformedStatus.dataQuality.issues.filter(
+        (i) => i.code === 'MALFORMED_METRIC' && i.message.includes('statusCounts')
+      );
+      expect(statusErrors.length).toBeGreaterThanOrEqual(2);
+      expect(resultMalformedStatus.referenceLabCorroboration?.statusCounts?.['200']).toBe(120982);
+      expect(resultMalformedStatus.referenceLabCorroboration?.statusCounts?.['500']).toBeUndefined();
+      expect(resultMalformedStatus.referenceLabCorroboration?.statusCounts?.['503']).toBeUndefined();
+
+      // 5. Deep scan ensures no NaN / Infinity exists anywhere in result
+      const checkNoNonFinite = (obj: any, path = ''): void => {
+        if (obj === null || obj === undefined) return;
+        if (typeof obj === 'number') {
+          if (!Number.isFinite(obj)) {
+            throw new Error(`Non-finite number (${obj}) detected at path: ${path}`);
+          }
+          return;
+        }
+        if (typeof obj === 'object') {
+          for (const key of Object.keys(obj)) {
+            checkNoNonFinite(obj[key], path ? `${path}.${key}` : key);
+          }
+        }
+      };
+
+      expect(() => checkNoNonFinite(resultMalformedRoute)).not.toThrow();
+      expect(() => checkNoNonFinite(resultMalformedStatus)).not.toThrow();
+    });
+
+    it('preserves the authoritative M3.1B regression exactly with all canonical requirements', () => {
+      const input = createAuthoritativeEvidenceInput();
+      const result = ingestGovernedExecutionEvidence(input);
+
+      // Run identity & provenance
+      expect(result.run.executionRunId).toBe('pecp-ref-canonical-1789978991064');
+      expect(result.run.workflowRunId).toBe('35577599469');
+
+      // Iterations
+      expect(result.metrics.iterations?.count).toBe(120981);
+      expect(result.metrics.droppedIterations?.count).toBe(8);
+
+      // Business & Reference Lab events
+      expect(result.metrics.pecpBusinessAttainmentEvents?.count).toBe(9671);
+      expect(result.businessEventsObservation.observedEventCount).toBe(9671);
+      expect(result.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents).toBe(9671);
+      expect(result.referenceLabCorroboration?.totalRequestsDelta).toBe(120982);
+
+      // Exact route and status maps
+      expect(result.referenceLabCorroboration?.requestsByRoute?.['/api/v1/orders/checkout']).toBe(9671);
+      expect(result.referenceLabCorroboration?.requestsByRoute?.['/api/v1/products/featured']).toBe(66713);
+      expect(result.referenceLabCorroboration?.requestsByRoute?.['/api/v1/products/search']).toBe(24003);
+      expect(result.referenceLabCorroboration?.statusCounts?.['200']).toBe(111311);
+      expect(result.referenceLabCorroboration?.statusCounts?.['201']).toBe(9671);
+
+      // Governed scheduler peak and business target
+      expect(result.schedulerObservation.governedPeakRate).toBe(109.375);
+      expect(result.businessEventsObservation.governedTarget?.value).toBe(8.75);
+      expect(result.businessEventsObservation.governedTarget?.unit).toBe('orders/second');
+
+      // Unresolved acceptance-basis attainment
+      expect(result.acceptanceBasisAttainment.timeBasis).toBe('STEADY_STATE_PEAK');
+      expect(result.acceptanceBasisAttainment.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+      expect(result.acceptanceBasisAttainment.resultValue).toBeUndefined();
+      expect(result.acceptanceBasisAttainment.actualSourceMetric).toBe('pecp_business_attainment_events');
+
+      // Absence of unmeasured rate
+      expect(result.metrics.pecpWorkloadAttainmentRate).toBeUndefined();
+
+      // Strict verdict invariant
+      expect(result.performanceVerdict).toBe('PECP_PERFORMANCE_VERDICT_NOT_EVALUATED');
+      expect((result.performanceVerdict as string)).not.toBe('PASS');
+      expect((result.performanceVerdict as string)).not.toBe('FAIL');
+    });
+  });
 });

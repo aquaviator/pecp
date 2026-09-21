@@ -391,7 +391,7 @@ export interface WorkloadAttainmentObservation {
     unit?: string;
   };
   governedPopulation?: string;
-  actualSourceMetric: string;
+  actualSourceMetric?: string;
   calculationFormula: string;
   units?: string;
   timeBasis: AttainmentTimeBasis;
