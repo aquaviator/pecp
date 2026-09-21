@@ -1,0 +1,106 @@
+{
+  "scenarios": {
+    "black_friday_2026_readiness___forecast_test": {
+      "executor": "ramping-arrival-rate",
+      "startRate": 0,
+      "timeUnit": "1s",
+      "preAllocatedVUs": 274,
+      "maxVUs": 1094,
+      "stages": [
+        {
+          "target": 109.375,
+          "duration": "300s"
+        },
+        {
+          "target": 109.375,
+          "duration": "900s"
+        },
+        {
+          "target": 0,
+          "duration": "120s"
+        }
+      ],
+      "exec": "default"
+    }
+  },
+  "thresholds": {
+    "http_req_duration{journey:checkout}": [
+      "p(95)<2000"
+    ],
+    "http_req_failed": [
+      "rate<0.005"
+    ]
+  },
+  "summaryTrendStats": [
+    "avg",
+    "min",
+    "med",
+    "max",
+    "p(90)",
+    "p(95)",
+    "p(99)"
+  ],
+  "ext": {
+    "pecp": {
+      "testDefinitionId": "test-def-proj-retailco-bf2026-v1.0",
+      "testDefinitionVersion": "v1.0",
+      "testDefinitionFingerprint": "fp-6911db94",
+      "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
+      "sourceContractVersion": "v1.0",
+      "sourceContractFingerprint": "fp-0dad9ae4",
+      "generatedAt": "2026-09-21T08:23:11.025Z",
+      "runtimeVersion": "1.0.0",
+      "runtimeSourceId": "pecp-stable-k6-runtime-v1.0.0",
+      "schedulerArrival": {
+        "population": "JOURNEY_ITERATION",
+        "peakRate": 109.375,
+        "unit": "journey_iterations/second"
+      },
+      "populationRelationship": {
+        "id": "rel-retailco-bf26-orders-to-iterations",
+        "formulaIdentifier": "TARGET_DIVIDED_BY_JOURNEY_SHARE",
+        "inputBusinessTarget": {
+          "value": 8.75,
+          "unit": "orders/second",
+          "sourceCalculationId": "calc-throughput-second"
+        },
+        "relevantJourneyKey": "checkout",
+        "journeyShare": 0.08,
+        "contributionPerSuccessfulEvent": 1,
+        "outputSchedulerRate": {
+          "value": 109.375,
+          "population": "JOURNEY_ITERATION",
+          "unit": "journey_iterations/second"
+        },
+        "description": "Lineage derivation: 8.75 orders/second business workload demand / 0.08 checkout journey share = 109.375 mixed journey iterations/second (each successful checkout submission yields 1 order)",
+        "sourceIntelligenceIds": [
+          "intel-peak-orders"
+        ]
+      },
+      "workloadAttainment": {
+        "metric": "Target Workload Arrival Demand",
+        "targetValue": 8.75,
+        "unit": "orders/second"
+      },
+      "providerCapacity": {
+        "policyId": "k6-standard-arrival-rate-sizing",
+        "policyVersion": "v1.0",
+        "ruleIdentifier": "RULE_PEAK_CONCURRENCY_ESTIMATION_V1",
+        "sourcePeakArrivalRate": 109.375,
+        "preAllocatedVUs": 274,
+        "maxVUs": 1094,
+        "rateTimeUnit": "1s",
+        "formulaDescription": "Provider-derived capacity: preAllocatedVUs = max(10, ceil(peakArrivalRate * 2.5)), maxVUs = max(50, ceil(peakArrivalRate * 10)), rateTimeUnit = 1s",
+        "isProviderDerived": true
+      },
+      "targetEnvironmentBaseUrlRef": "http://localhost:42291",
+      "credentialReferences": [
+        {
+          "provider": "ENV_VAR",
+          "referenceId": "RETAILCO_CHECKOUT_AUTH_TOKEN",
+          "purpose": "Checkout API Authorization"
+        }
+      ]
+    }
+  }
+}

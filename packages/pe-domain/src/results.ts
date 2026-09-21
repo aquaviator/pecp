@@ -189,30 +189,30 @@ export interface RawEvidenceInventory {
  * k6 Metric Value Distributions and Counters
  */
 export interface K6TrendDistribution {
-  min: number;
-  max: number;
-  avg: number;
-  med: number;
-  p90: number;
-  p95: number;
-  p99: number;
+  min?: number;
+  max?: number;
+  avg?: number;
+  med?: number;
+  p90?: number;
+  p95?: number;
+  p99?: number;
 }
 
 export interface K6CounterMetric {
-  count: number;
-  rate: number;
+  count?: number;
+  rate?: number;
 }
 
 export interface K6GaugeMetric {
-  value: number;
-  min: number;
-  max: number;
+  value?: number;
+  min?: number;
+  max?: number;
 }
 
 export interface K6RateMetric {
-  passes: number;
-  fails: number;
-  rate: number;
+  passes?: number;
+  fails?: number;
+  rate?: number;
 }
 
 export interface K6CheckMetric {
@@ -250,7 +250,7 @@ export interface K6SummaryMetrics {
   pecpJourneyDurationMs?: K6TrendDistribution;
   pecpBusinessAttainmentEvents?: K6CounterMetric;
   pecpWorkloadArrivalDemand?: K6CounterMetric;
-  pecpWorkloadAttainmentRate?: K6CounterMetric;
+  pecpWorkloadAttainmentRate?: K6RateMetric;
   rootChecks: K6CheckMetric[];
   rawMetrics: Record<string, unknown>;
 }
@@ -272,6 +272,8 @@ export interface ThresholdObservation {
   engineResult: boolean | null;
   observedValue?: number | string;
   rawSource: unknown;
+  rawThresholdValue?: unknown;
+  parserSchemaVersion?: string;
 }
 
 /**
@@ -279,12 +281,12 @@ export interface ThresholdObservation {
  * Population: JOURNEY_ITERATION. Strictly distinct from business events.
  */
 export interface SchedulerExecutionObservation {
-  schedulerPopulation: 'JOURNEY_ITERATION' | string;
-  governedPeakRate: number;
+  schedulerPopulation?: 'JOURNEY_ITERATION' | string;
+  governedPeakRate?: number;
   scheduleIdentity?: string;
-  actualIterations: number;
+  actualIterations?: number;
   observedIterationRate?: number;
-  droppedIterations: number;
+  droppedIterations?: number;
   droppedIterationRate?: number;
   arrivalDemandCounter?: number;
   arrivalDemandRate?: number;
@@ -295,12 +297,12 @@ export interface SchedulerExecutionObservation {
  * Metric: e.g. orders. Strictly distinct from scheduler iterations.
  */
 export interface BusinessEventsObservation {
-  governedMetric: string;
-  governedTarget: {
-    value: number;
-    unit: string;
+  governedMetric?: string;
+  governedTarget?: {
+    value?: number;
+    unit?: string;
   };
-  observedEventCount: number;
+  observedEventCount?: number;
   observedRawRate?: number;
   referenceLabCorroboratingEventCount?: number;
 }
@@ -309,6 +311,7 @@ export interface BusinessEventsObservation {
  * Reference Lab corroborating metrics and delta.
  */
 export interface ReferenceLabCorroboration {
+  sourceLocator?: string;
   totalRequestsDelta: number;
   requestsByRoute: Record<string, number>;
   statusCounts: Record<string, number>;
@@ -321,7 +324,7 @@ export interface ReferenceLabCorroboration {
   };
   durationSeconds?: number;
   consistency: {
-    k6BusinessEventCount: number;
+    k6BusinessEventCount?: number;
     referenceLabOrderCreatedCount: number;
     countsMatch: boolean;
     discrepancyCount: number;
@@ -335,8 +338,12 @@ export interface ReferenceLabCorroboration {
 export type ResultDataQualityIssueCode =
   | 'MISSING_MANIFEST'
   | 'MISSING_SUMMARY'
+  | 'MISSING_REQUIRED_ARTIFACT'
   | 'CHECKSUM_MISMATCH'
   | 'MISSING_REQUIRED_BINDING'
+  | 'MISSING_SOURCE_WORKLOAD_TARGET'
+  | 'UNRESOLVED_SCHEDULE_POPULATION'
+  | 'MALFORMED_METRIC'
   | 'PARSER_INCOMPATIBILITY'
   | 'MISSING_REQUIRED_CUSTOM_METRIC'
   | 'REFERENCE_LAB_METRICS_UNAVAILABLE'
@@ -408,6 +415,8 @@ export interface CanonicalExecutionResult {
   businessEventsObservation: BusinessEventsObservation;
   referenceLabCorroboration?: ReferenceLabCorroboration;
   thresholdObservations: ThresholdObservation[];
+  fullTestAverageObservation?: WorkloadAttainmentObservation;
+  acceptanceBasisAttainment: WorkloadAttainmentObservation;
   workloadAttainmentObservation: WorkloadAttainmentObservation;
   dataQuality: ResultCompleteness;
   performanceVerdict: InvariantPerformanceVerdict;

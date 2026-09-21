@@ -15,13 +15,14 @@ import {
   AUTHORITATIVE_M3_1B_MANIFEST,
   AUTHORITATIVE_M3_1B_SUMMARY_JSON,
   AUTHORITATIVE_M3_1B_ARTIFACT_REFERENCE,
-  MOCK_CONFIG_CONTENT,
-  MOCK_JOURNEYS_CONTENT,
-  MOCK_ENTRYPOINT_CONTENT,
-  MOCK_RUNTIME_CONTENT,
-  MOCK_STDOUT_CONTENT,
-  MOCK_STDERR_CONTENT,
-  MOCK_SUMMARY_CONTENT,
+  AUTHORITATIVE_CONFIG_RAW,
+  AUTHORITATIVE_JOURNEYS_RAW,
+  AUTHORITATIVE_ENTRYPOINT_RAW,
+  AUTHORITATIVE_RUNTIME_RAW,
+  AUTHORITATIVE_STDOUT_RAW,
+  AUTHORITATIVE_STDERR_RAW,
+  AUTHORITATIVE_SUMMARY_RAW,
+  AUTHORITATIVE_MANIFEST_RAW,
   computeSha256
 } from '../fixtures/retailco/m31bAuthoritativeRunFixture';
 
@@ -29,51 +30,51 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
   // Base input representing the complete authoritative M3.1B reference execution
   const createAuthoritativeEvidenceInput = () => ({
     manifest: JSON.parse(JSON.stringify(AUTHORITATIVE_M3_1B_MANIFEST)),
-    summaryJson: JSON.parse(JSON.stringify(AUTHORITATIVE_M3_1B_SUMMARY_JSON)),
-    stdoutLog: MOCK_STDOUT_CONTENT,
-    stderrLog: MOCK_STDERR_CONTENT,
-    configJson: MOCK_CONFIG_CONTENT,
-    journeysJs: MOCK_JOURNEYS_CONTENT,
-    entrypointJs: MOCK_ENTRYPOINT_CONTENT,
-    runtimeJs: MOCK_RUNTIME_CONTENT,
+    summaryJson: AUTHORITATIVE_SUMMARY_RAW,
+    stdoutLog: AUTHORITATIVE_STDOUT_RAW,
+    stderrLog: AUTHORITATIVE_STDERR_RAW,
+    configJson: AUTHORITATIVE_CONFIG_RAW,
+    journeysJs: AUTHORITATIVE_JOURNEYS_RAW,
+    entrypointJs: AUTHORITATIVE_ENTRYPOINT_RAW,
+    runtimeJs: AUTHORITATIVE_RUNTIME_RAW,
     executionArtifact: AUTHORITATIVE_M3_1B_ARTIFACT_REFERENCE
   });
 
-  describe('1. Authoritative M3.1B Canonical Reference Run Ingestion (§9)', () => {
+  describe('1. Authoritative M3.1B Canonical Reference Run Ingestion (§9, §10)', () => {
     it('ingests the authoritative M3.1B reference execution with 100% fidelity to invariant facts', () => {
       const input = createAuthoritativeEvidenceInput();
       const result = ingestGovernedExecutionEvidence(input);
 
       // Verify ExecutionRun identity
-      expect(result.run.executionRunId).toBe(AUTHORITATIVE_M3_1B_FACTS.runId);
-      expect(result.run.workflowRunId).toBe(AUTHORITATIVE_M3_1B_FACTS.workflowRunId);
-      expect(result.run.repositoryCommitSha).toBe(AUTHORITATIVE_M3_1B_FACTS.repositoryCommitSha);
-      expect(result.run.commitSha).toBe(AUTHORITATIVE_M3_1B_FACTS.repositoryCommitSha);
+      expect(result.run.executionRunId).toBe('pecp-ref-canonical-1789978991064');
+      expect(result.run.workflowRunId).toBe('35577599469');
+      expect(result.run.repositoryCommitSha).toBe('76c2dfd7d829d3152aa2c4f6a98d9cd08e7efd82');
+      expect(result.run.commitSha).toBe('76c2dfd7d829d3152aa2c4f6a98d9cd08e7efd82');
       expect(result.run.engine.name).toBe('k6');
-      expect(result.run.engine.version).toBe(AUTHORITATIVE_M3_1B_FACTS.k6Version);
+      expect(result.run.engine.version).toBe('0.54.0');
       expect(result.run.engineExitCode).toBe(0);
       expect(result.run.operationalStatus).toBe('EXECUTION_COMPLETED');
-      expect(result.run.timestamps.durationSeconds).toBe(AUTHORITATIVE_M3_1B_FACTS.durationSeconds);
+      expect(result.run.timestamps.durationSeconds).toBe(1321.161);
 
       // Verify artifact identity
       expect(result.run.executionArtifact).toBeDefined();
-      expect(result.run.executionArtifact?.id).toBe(AUTHORITATIVE_M3_1B_FACTS.artifactId);
-      expect(result.run.executionArtifact?.digest).toBe(AUTHORITATIVE_M3_1B_FACTS.artifactDigest);
+      expect(result.run.executionArtifact?.id).toBe('10629771462');
+      expect(result.run.executionArtifact?.digest).toBe('0165c41c27ccdd852400f1499870bdc3e0e164544efe86591928fdfce6cbae91');
 
-      // Verify metrics
-      expect(result.metrics.iterations?.count).toBe(AUTHORITATIVE_M3_1B_FACTS.iterations);
-      expect(result.metrics.droppedIterations?.count).toBe(AUTHORITATIVE_M3_1B_FACTS.droppedIterations);
-      expect(result.metrics.pecpBusinessAttainmentEvents?.count).toBe(AUTHORITATIVE_M3_1B_FACTS.businessEvents);
+      // Verify metrics from authoritative summary.json
+      expect(result.metrics.iterations?.count).toBe(120981);
+      expect(result.metrics.droppedIterations?.count).toBe(8);
+      expect(result.metrics.pecpBusinessAttainmentEvents?.count).toBe(9671);
 
       // Verify Reference Lab corroboration
       expect(result.referenceLabCorroboration).toBeDefined();
-      expect(result.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents).toBe(
-        AUTHORITATIVE_M3_1B_FACTS.referenceLabOrderCreated
-      );
+      expect(result.referenceLabCorroboration?.sourceLocator).toBe('execution-manifest.json#/referenceLabMetrics');
+      expect(result.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents).toBe(9671);
+      expect(result.referenceLabCorroboration?.totalRequestsDelta).toBe(120982);
       expect(result.referenceLabCorroboration?.consistency.countsMatch).toBe(true);
       expect(result.referenceLabCorroboration?.consistency.discrepancyCount).toBe(0);
 
-      // Verify strict verdict boundary
+      // Verify strict verdict boundary: NO PECP PASS/FAIL assigned!
       expect(result.performanceVerdict).toBe(INVARIANT_PERFORMANCE_VERDICT);
       expect(result.verdictDisclaimer).toBe(INVARIANT_VERDICT_DISCLAIMER);
       expect((result as any).verdict).toBeUndefined();
@@ -126,15 +127,29 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(bindingIssue).toBeDefined();
       expect(result.dataQuality.hasIntegrityErrors).toBe(true);
     });
+
+    it('flags MISSING_REQUIRED_BINDING when engine identity is omitted rather than assuming k6', () => {
+      const input = createAuthoritativeEvidenceInput();
+      delete (input.manifest as any).engine;
+
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.run.engine.name).toBe('UNKNOWN_ENGINE');
+      const engineIssue = result.dataQuality.issues.find(
+        (i) => i.code === 'MISSING_REQUIRED_BINDING' && i.message.includes('Engine identity')
+      );
+      expect(engineIssue).toBeDefined();
+      expect(result.dataQuality.hasIntegrityErrors).toBe(true);
+    });
   });
 
-  describe('3. Raw Evidence Inventory and Integrity (§2, §7)', () => {
-    it('verifies checksums across all 8 evidence files and marks them PRESENT and verified', () => {
+  describe('3. Raw Evidence Inventory and Integrity (§2, §7, §8)', () => {
+    it('verifies checksums across all 8 evidence files plus Reference Lab locator and marks them PRESENT', () => {
       const input = createAuthoritativeEvidenceInput();
       const result = ingestGovernedExecutionEvidence(input);
 
       const inventory = result.evidenceInventory;
-      expect(inventory.allReferences).toHaveLength(8);
+      // 8 raw files + 1 Reference Lab locator reference = 9 references in allReferences
+      expect(inventory.allReferences).toHaveLength(9);
 
       const fileKeys = [
         'manifest',
@@ -155,6 +170,11 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
         expect(ref?.checksum).toBeTruthy();
         expect(ref?.sizeBytes).toBeGreaterThanOrEqual(0);
       }
+
+      // Check Reference Lab locator
+      expect(inventory.referenceLabMetrics).toBeDefined();
+      expect(inventory.referenceLabMetrics?.sourceLocator).toBe('execution-manifest.json#/referenceLabMetrics');
+      expect(inventory.referenceLabMetrics?.presenceStatus).toBe('PRESENT');
     });
 
     it('detects CHECKSUM_MISMATCH when raw file content differs from expected manifest checksum', () => {
@@ -171,17 +191,29 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(result.dataQuality.hasIntegrityErrors).toBe(true);
     });
 
-    it('marks missing artifacts as ABSENT without crashing and records data quality issues', () => {
-      const input = createAuthoritativeEvidenceInput();
-      delete (input as any).summaryJson;
-      delete (input as any).configJson;
+    it('enforces required raw-artifact completeness: missing each required artifact causes MISSING_REQUIRED_ARTIFACT', () => {
+      const requiredArtifactKeys: (keyof ReturnType<typeof createAuthoritativeEvidenceInput>)[] = [
+        'summaryJson',
+        'stdoutLog',
+        'stderrLog',
+        'configJson',
+        'journeysJs',
+        'entrypointJs',
+        'runtimeJs'
+      ];
 
-      const result = ingestGovernedExecutionEvidence(input);
-      expect(result.evidenceInventory.summaryJson?.presenceStatus).toBe('ABSENT');
-      expect(result.evidenceInventory.configJson?.presenceStatus).toBe('ABSENT');
+      for (const key of requiredArtifactKeys) {
+        const input = createAuthoritativeEvidenceInput();
+        delete (input as any)[key];
 
-      const missingSummaryIssue = result.dataQuality.issues.find((i) => i.code === 'MISSING_SUMMARY');
-      expect(missingSummaryIssue).toBeDefined();
+        const result = ingestGovernedExecutionEvidence(input);
+        expect(result.dataQuality.isComplete).toBe(false);
+        const issue = result.dataQuality.issues.find(
+          (i) => i.code === 'MISSING_REQUIRED_ARTIFACT'
+        );
+        expect(issue).toBeDefined();
+        expect(issue?.severity).toBe('ERROR');
+      }
     });
   });
 
@@ -215,27 +247,61 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
     });
   });
 
-  describe('5. k6 Summary Parsing and Threshold Observations (§3, §6)', () => {
-    it('parses k6 duration distributions, counters, rates, and checks deterministically', () => {
+  describe('5. Authoritative k6 v0.54.0 Summary Parsing and Thresholds (§2, §3, §4, §6, §10)', () => {
+    it('parses exact authoritative values from summary.json without invention', () => {
       const parsed = parseK6SummaryJson(AUTHORITATIVE_M3_1B_SUMMARY_JSON);
 
-      // Duration trends
-      expect(parsed.metrics.httpReqDuration?.avg).toBe(0.75);
-      expect(parsed.metrics.httpReqDuration?.p95).toBe(1.11);
-      expect(parsed.metrics.httpReqDuration?.p99).toBe(1.61);
+      // Duration trends (flat schema in k6 v0.54.0)
+      expect(parsed.metrics.httpReqDuration?.avg).toBeCloseTo(0.234, 3);
+      expect(parsed.metrics.httpReqDuration?.p95).toBe(0.330927);
+      expect(parsed.metrics.httpReqDuration?.p99).toBe(0.4346683999999997);
 
-      expect(parsed.metrics.httpReqDurationCheckout?.p95).toBe(1.55);
-      expect(parsed.metrics.pecpJourneyDurationMs?.p95).toBe(4002);
+      // Checkout duration
+      expect(parsed.metrics.httpReqDurationCheckout?.p95).toBe(0.3906885);
+      expect(parsed.metrics.pecpJourneyDurationMs?.p95).toBe(4001);
+      expect(parsed.metrics.pecpJourneyDurationMs?.p99).toBe(4002);
+
+      // Max VUs
+      expect(parsed.metrics.vusMax?.max).toBe(282);
+      expect(parsed.metrics.vusMax?.value).toBe(282);
 
       // Rates and counters
       expect(parsed.metrics.httpReqFailed?.passes).toBe(0);
+      expect(parsed.metrics.httpReqFailed?.fails).toBe(120981);
       expect(parsed.metrics.httpReqFailed?.rate).toBe(0);
       expect(parsed.metrics.checks?.rate).toBe(1.0);
-      expect(parsed.metrics.rootChecks[0].name).toBe('status 200 or 201');
-      expect(parsed.metrics.rootChecks[0].passes).toBe(120981);
+      expect(parsed.metrics.checks?.passes).toBe(120981);
+      expect(parsed.metrics.checks?.fails).toBe(0);
+
+      // Root checks: preserves all 5 individual journey checks from root_group.checks
+      expect(parsed.metrics.rootChecks).toHaveLength(5);
+      const featuredCheck = parsed.metrics.rootChecks.find((c) => c.name === 'View Featured Products status is 200');
+      expect(featuredCheck).toBeDefined();
+      expect(featuredCheck?.passes).toBe(66713);
+      expect(featuredCheck?.fails).toBe(0);
+
+      const checkoutCheck = parsed.metrics.rootChecks.find((c) => c.name === 'Submit Order Checkout status is 201');
+      expect(checkoutCheck).toBeDefined();
+      expect(checkoutCheck?.passes).toBe(9671);
+      expect(checkoutCheck?.fails).toBe(0);
+
+      const basketCheck = parsed.metrics.rootChecks.find((c) => c.name === 'Add SKU to Basket status is 200');
+      expect(basketCheck).toBeDefined();
+      expect(basketCheck?.passes).toBe(18195);
+      expect(basketCheck?.fails).toBe(0);
+
+      const catalogCheck = parsed.metrics.rootChecks.find((c) => c.name === 'Query Product Catalog status is 200');
+      expect(catalogCheck).toBeDefined();
+      expect(catalogCheck?.passes).toBe(24003);
+      expect(catalogCheck?.fails).toBe(0);
+
+      const orderHistoryCheck = parsed.metrics.rootChecks.find((c) => c.name === 'View Customer Order History status is 200');
+      expect(orderHistoryCheck).toBeDefined();
+      expect(orderHistoryCheck?.passes).toBe(2399);
+      expect(orderHistoryCheck?.fails).toBe(0);
     });
 
-    it('treats k6 thresholds strictly as engine observations without converting to PECP PASS/FAIL', () => {
+    it('correctly maps k6 v0.54.0 boolean thresholds: false = not breached (OBSERVED_PASSED)', () => {
       const parsed = parseK6SummaryJson(AUTHORITATIVE_M3_1B_SUMMARY_JSON);
 
       expect(parsed.thresholdObservations).toHaveLength(2);
@@ -245,18 +311,21 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(rateThresh?.status).toBe('OBSERVED_PASSED');
       expect(rateThresh?.engineResult).toBe(true);
       expect(rateThresh?.metric).toBe('http_req_failed');
+      expect(rateThresh?.parserSchemaVersion).toBe('k6-v0.54.0-summary-export');
 
       const checkoutThresh = parsed.thresholdObservations.find((t) => t.expression === 'p(95)<2000');
       expect(checkoutThresh).toBeDefined();
       expect(checkoutThresh?.status).toBe('OBSERVED_PASSED');
       expect(checkoutThresh?.engineResult).toBe(true);
       expect(checkoutThresh?.metric).toBe('http_req_duration{journey:checkout}');
-      expect(checkoutThresh?.observedValue).toBe(1.55);
+      expect(checkoutThresh?.observedValue).toBe(0.3906885);
+      expect(checkoutThresh?.parserSchemaVersion).toBe('k6-v0.54.0-summary-export');
     });
 
-    it('records OBSERVED_FAILED for failing engine thresholds without triggering a PECP verdict', () => {
+    it('maps boolean true in k6 v0.54.0 summary to OBSERVED_FAILED without evaluating a PECP verdict', () => {
       const customSummary = JSON.parse(JSON.stringify(AUTHORITATIVE_M3_1B_SUMMARY_JSON));
-      customSummary.metrics.http_req_failed.thresholds['rate<0.005'].ok = false;
+      // In k6 v0.54.0, true indicates threshold failure/breach
+      customSummary.metrics.http_req_failed.thresholds['rate<0.005'] = true;
 
       const parsed = parseK6SummaryJson(customSummary);
       const thresh = parsed.thresholdObservations.find((t) => t.expression === 'rate<0.005');
@@ -268,53 +337,89 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       input.summaryJson = customSummary;
       const result = ingestGovernedExecutionEvidence(input);
 
-      // Crucial: Threshold failure is preserved as engine observation, NOT translated to PECP FAIL!
+      // Threshold failure is preserved as engine observation, NOT translated to PECP FAIL!
       expect(result.performanceVerdict).toBe(INVARIANT_PERFORMANCE_VERDICT);
       expect(result.thresholdObservations.find((t) => t.expression === 'rate<0.005')?.status).toBe('OBSERVED_FAILED');
     });
 
-    it('leaves pecpWorkloadAttainmentRate explicitly undefined when absent from summary rather than inventing 0', () => {
+    it('preserves Rate semantics for pecpWorkloadAttainmentRate and leaves it undefined when absent', () => {
       const parsed = parseK6SummaryJson(AUTHORITATIVE_M3_1B_SUMMARY_JSON);
       expect(parsed.metrics.pecpWorkloadAttainmentRate).toBeUndefined();
+
+      // Test with an explicit Rate metric payload
+      const rateSummary = JSON.parse(JSON.stringify(AUTHORITATIVE_M3_1B_SUMMARY_JSON));
+      rateSummary.metrics.pecp_workload_attainment_rate = {
+        passes: 9671,
+        fails: 0,
+        rate: 0.8367
+      };
+      const parsedWithRate = parseK6SummaryJson(rateSummary);
+      expect(parsedWithRate.metrics.pecpWorkloadAttainmentRate).toBeDefined();
+      expect(parsedWithRate.metrics.pecpWorkloadAttainmentRate?.rate).toBe(0.8367);
+      expect(parsedWithRate.metrics.pecpWorkloadAttainmentRate?.passes).toBe(9671);
+      expect(parsedWithRate.metrics.pecpWorkloadAttainmentRate?.fails).toBe(0);
     });
   });
 
-  describe('6. Semantic Separation of Scheduler vs Business Events (§4)', () => {
-    it('preserves distinct structures for scheduler iterations and business events', () => {
+  describe('6. Semantic Separation of Scheduler vs Business Events (§4, §5)', () => {
+    it('preserves distinct structures for scheduler iterations and business events without default injection', () => {
       const input = createAuthoritativeEvidenceInput();
       const result = ingestGovernedExecutionEvidence(input);
 
-      // Scheduler observation (JOURNEY_ITERATION population)
+      // Scheduler observation (from binding, no default fallback)
       const scheduler = result.schedulerObservation;
       expect(scheduler.schedulerPopulation).toBe('JOURNEY_ITERATION');
       expect(scheduler.governedPeakRate).toBe(109.375);
       expect(scheduler.actualIterations).toBe(120981);
-      expect(scheduler.observedIterationRate).toBe(91.5892);
+      expect(scheduler.observedIterationRate).toBeCloseTo(91.589, 3);
       expect(scheduler.droppedIterations).toBe(8);
       expect(scheduler.arrivalDemandCounter).toBe(120981);
 
-      // Business events observation (orders metric)
+      // Business events observation (from binding, no default fallback)
       const business = result.businessEventsObservation;
       expect(business.governedMetric).toBe('orders');
-      expect(business.governedTarget.value).toBe(8.75);
-      expect(business.governedTarget.unit).toBe('orders/second');
+      expect(business.governedTarget?.value).toBe(8.75);
+      expect(business.governedTarget?.unit).toBe('orders/second');
       expect(business.observedEventCount).toBe(9671);
-      expect(business.observedRawRate).toBe(7.3215);
+      expect(business.observedRawRate).toBeCloseTo(7.321, 3);
       expect(business.referenceLabCorroboratingEventCount).toBe(9671);
 
-      // Conflation check
+      // Conflation prevention
       expect(scheduler.actualIterations).not.toBe(business.observedEventCount);
-      expect(scheduler.governedPeakRate).not.toBe(business.governedTarget.value);
+      expect(scheduler.governedPeakRate).not.toBe(business.governedTarget?.value);
+    });
+
+    it('flags UNRESOLVED_SCHEDULE_POPULATION when scheduler population is missing and does not invent JOURNEY_ITERATION', () => {
+      const input = createAuthoritativeEvidenceInput();
+      delete (input.manifest as any).pecpBinding.schedulerArrival.population;
+
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.schedulerObservation.schedulerPopulation).toBeUndefined();
+      const issue = result.dataQuality.issues.find((i) => i.code === 'UNRESOLVED_SCHEDULE_POPULATION');
+      expect(issue).toBeDefined();
+    });
+
+    it('flags MISSING_SOURCE_WORKLOAD_TARGET when business target is missing and does not invent 8.75', () => {
+      const input = createAuthoritativeEvidenceInput();
+      delete (input.manifest as any).pecpBinding.businessAttainment;
+      delete (input.manifest as any).businessAttainment;
+
+      const result = ingestGovernedExecutionEvidence(input);
+      expect(result.businessEventsObservation.governedTarget).toBeUndefined();
+      expect(result.businessEventsObservation.governedMetric).toBeUndefined();
+      const issue = result.dataQuality.issues.find((i) => i.code === 'MISSING_SOURCE_WORKLOAD_TARGET');
+      expect(issue).toBeDefined();
     });
   });
 
-  describe('7. Reference Lab Corroboration & Consistency Checking (§5)', () => {
+  describe('7. Reference Lab Corroboration & Consistency Checking (§5, §8)', () => {
     it('corroborates k6 business attainment against Reference Lab order_created counter', () => {
       const input = createAuthoritativeEvidenceInput();
       const result = ingestGovernedExecutionEvidence(input);
 
       const lab = result.referenceLabCorroboration;
       expect(lab).toBeDefined();
+      expect(lab?.sourceLocator).toBe('execution-manifest.json#/referenceLabMetrics');
       expect(lab?.totalRequestsDelta).toBe(120982);
       expect(lab?.businessEventCounts.orderCreatedEvents).toBe(9671);
       expect(lab?.consistency.k6BusinessEventCount).toBe(9671);
@@ -343,29 +448,35 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(mismatchIssue?.severity).toBe('ERROR');
       expect(result.dataQuality.hasIntegrityErrors).toBe(true);
 
-      // Invariant: Discrepancy is a data quality issue, NOT a PECP FAIL!
+      // Discrepancy is a data quality issue, NOT a PECP FAIL!
       expect(result.performanceVerdict).toBe(INVARIANT_PERFORMANCE_VERDICT);
     });
   });
 
-  describe('8. Workload Attainment Lineage and Mathematical Basis (§8)', () => {
-    it('records complete lineage for whole-test average rate and documents steady-state distinction', () => {
+  describe('8. Separation of Full-Test Average from Contract-Basis Attainment (§9)', () => {
+    it('separates full-test-average observation from unresolved acceptance-basis attainment', () => {
       const input = createAuthoritativeEvidenceInput();
       const result = ingestGovernedExecutionEvidence(input);
 
-      const attainment = result.workloadAttainmentObservation;
-      expect(attainment.governedDemand.metric).toBe('orders');
-      expect(attainment.governedDemand.targetValue).toBe(8.75);
-      expect(attainment.actualSourceMetric).toBe('pecp_business_attainment_events');
-      expect(attainment.calculationFormula).toBe('total_observed_events / total_test_duration_seconds');
-      expect(attainment.timeBasis).toBe('FULL_TEST_AVERAGE');
-      expect(attainment.resultValue).toBe(7.3215);
-      expect(attainment.attainmentRatio).toBe(Number((7.3215 / 8.75).toFixed(4))); // ~0.8367
-      expect(attainment.derivationStatus).toBe('DETERMINISTICALLY_DERIVED');
-      expect(attainment.derivationNotes).toContain('Whole-test average rate');
-      expect(attainment.derivationNotes).toContain('mathematically distinct from steady-state peak attainment');
+      // Full-test average observation: descriptive whole-execution metric
+      expect(result.fullTestAverageObservation).toBeDefined();
+      expect(result.fullTestAverageObservation?.timeBasis).toBe('FULL_TEST_AVERAGE');
+      expect(result.fullTestAverageObservation?.resultValue).toBeCloseTo(7.321, 3);
+      expect(result.fullTestAverageObservation?.attainmentRatio).toBeCloseTo(0.8367, 3);
+      expect(result.fullTestAverageObservation?.derivationStatus).toBe('DETERMINISTICALLY_DERIVED');
 
-      // Invariant: Verdict remains NOT_EVALUATED
+      // Acceptance-basis attainment: steady-state is UNRESOLVED due to lack of time-sliced telemetry
+      expect(result.acceptanceBasisAttainment).toBeDefined();
+      expect(result.acceptanceBasisAttainment.timeBasis).toBe('STEADY_STATE_PEAK');
+      expect(result.acceptanceBasisAttainment.resultValue).toBeUndefined();
+      expect(result.acceptanceBasisAttainment.attainmentRatio).toBeUndefined();
+      expect(result.acceptanceBasisAttainment.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+
+      // Governed attainment observation returned to downstream engines forces acceptance basis
+      expect(result.workloadAttainmentObservation.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+      expect(result.workloadAttainmentObservation.resultValue).toBeUndefined();
+
+      // Verdict remains NOT_EVALUATED
       expect(result.performanceVerdict).toBe(INVARIANT_PERFORMANCE_VERDICT);
     });
   });
@@ -396,11 +507,9 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(result.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents).toBe(9761);
       expect(result.referenceLabCorroboration?.consistency.countsMatch).toBe(true);
 
-      // Notice: In the repo, uncommitted materialized source files are marked ABSENT
       expect(result.evidenceInventory.manifest?.presenceStatus).toBe('PRESENT');
       expect(result.evidenceInventory.summaryJson?.presenceStatus).toBe('PRESENT');
       expect(result.evidenceInventory.stdoutLog?.presenceStatus).toBe('PRESENT');
-      expect(result.evidenceInventory.configJson?.presenceStatus).toBe('ABSENT');
 
       expect(result.performanceVerdict).toBe(INVARIANT_PERFORMANCE_VERDICT);
     });
@@ -448,6 +557,83 @@ describe('M3.2 — Canonical Results Model & Raw Evidence Ingestion', () => {
       expect(result.performanceVerdict).not.toBe('FAIL');
       expect(result.performanceVerdict).not.toBe('PASS_WITH_OBSERVATION');
       expect(result.performanceVerdict).not.toBe('INCONCLUSIVE');
+    });
+  });
+
+  describe('11. Negative and Edge Case Fidelity Tests (§11)', () => {
+    it('proves that a missing metric does not become 0 but remains undefined', () => {
+      // Create minimal summary missing duration, counter, and custom metrics
+      const sparseSummary = {
+        metrics: {
+          iterations: { count: 50, rate: 5.0 }
+          // all other metrics absent
+        }
+      };
+      const parsed = parseK6SummaryJson(sparseSummary);
+      expect(parsed.metrics.iterations?.count).toBe(50);
+      expect(parsed.metrics.httpReqDuration).toBeUndefined();
+      expect(parsed.metrics.httpReqDurationCheckout).toBeUndefined();
+      expect(parsed.metrics.droppedIterations).toBeUndefined();
+      expect(parsed.metrics.pecpWorkloadAttainmentRate).toBeUndefined();
+      expect(parsed.metrics.vus).toBeUndefined();
+      expect(parsed.metrics.vusMax).toBeUndefined();
+    });
+
+    it('proves that malformed nested/legacy metric is parsed where supported and handles empty values gracefully', () => {
+      const legacySummary = {
+        metrics: {
+          http_req_duration: {
+            values: {
+              avg: 1.25,
+              'p(95)': 2.5
+            }
+          },
+          dropped_iterations: {
+            values: {
+              count: 0
+            }
+          }
+        }
+      };
+      const parsed = parseK6SummaryJson(legacySummary);
+      expect(parsed.metrics.httpReqDuration?.avg).toBe(1.25);
+      expect(parsed.metrics.httpReqDuration?.p95).toBe(2.5);
+      expect(parsed.metrics.httpReqDuration?.p99).toBeUndefined();
+      expect(parsed.metrics.droppedIterations?.count).toBe(0);
+    });
+
+    it('proves root-check map parsing is deterministic for both object map and array formats', () => {
+      const objectChecksSummary = {
+        root_group: {
+          checks: {
+            checkA: { name: 'Check Alpha', passes: 10, fails: 0 },
+            checkB: { name: 'Check Beta', passes: 20, fails: 1 }
+          }
+        }
+      };
+      const parsedObj = parseK6SummaryJson(objectChecksSummary);
+      expect(parsedObj.metrics.rootChecks).toHaveLength(2);
+      expect(parsedObj.metrics.rootChecks[0].name).toBe('Check Alpha');
+      expect(parsedObj.metrics.rootChecks[0].passes).toBe(10);
+      expect(parsedObj.metrics.rootChecks[1].name).toBe('Check Beta');
+      expect(parsedObj.metrics.rootChecks[1].fails).toBe(1);
+
+      const arrayChecksSummary = {
+        root_group: {
+          checks: [
+            { name: 'Check Gamma', passes: 30, fails: 0 }
+          ]
+        }
+      };
+      const parsedArr = parseK6SummaryJson(arrayChecksSummary);
+      expect(parsedArr.metrics.rootChecks).toHaveLength(1);
+      expect(parsedArr.metrics.rootChecks[0].name).toBe('Check Gamma');
+      expect(parsedArr.metrics.rootChecks[0].passes).toBe(30);
+    });
+
+    it('proves that invalid JSON in summary payload throws PARSER_INCOMPATIBILITY', () => {
+      expect(() => parseK6SummaryJson('NOT_VALID_JSON{')).toThrow('PARSER_INCOMPATIBILITY');
+      expect(() => parseK6SummaryJson(null as any)).toThrow('PARSER_INCOMPATIBILITY');
     });
   });
 });

@@ -152,6 +152,14 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     });
   }
 
+  if (!manifest.engine?.name) {
+    issues.push({
+      code: 'MISSING_REQUIRED_BINDING',
+      severity: 'ERROR',
+      message: 'Engine identity is missing or absent in manifest'
+    });
+  }
+
   // Build ExecutionRun model
   const run: ExecutionRun = {
     executionRunId: manifest.runId ?? 'UNKNOWN_RUN_ID',
@@ -167,7 +175,7 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
       durationSeconds: Number(manifest.timestamps?.durationSeconds ?? 0)
     },
     engine: {
-      name: manifest.engine?.name ?? 'k6',
+      name: manifest.engine?.name ?? 'UNKNOWN_ENGINE',
       version: manifest.engine?.version ?? '',
       fullVersionString: manifest.engine?.fullVersionString,
       binaryPath: manifest.engine?.binaryPath,
@@ -258,6 +266,12 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   ): RawEvidenceReference => {
     const fileEntry = filesMap[filename];
     if (!fileEntry) {
+      issues.push({
+        code: 'MISSING_REQUIRED_ARTIFACT',
+        severity: 'ERROR',
+        message: `Required raw execution artifact '${filename}' is absent from evidence inventory`,
+        details: { filename, expectedChecksum, expectedSizeBytes }
+      });
       return {
         filename,
         evidenceType,
@@ -276,6 +290,12 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     }
 
     if (buf === undefined) {
+      issues.push({
+        code: 'MISSING_REQUIRED_ARTIFACT',
+        severity: 'ERROR',
+        message: `Required raw execution artifact '${filename}' could not be read or is unavailable`,
+        details: { filename, expectedChecksum, expectedSizeBytes }
+      });
       return {
         filename,
         evidenceType,
@@ -297,6 +317,15 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
         severity: 'ERROR',
         message: `Checksum mismatch for ${filename}: expected ${expectedChecksum}, got ${actualChecksum}`,
         details: { filename, expectedChecksum, actualChecksum }
+      });
+    }
+
+    if (expectedSizeBytes !== undefined && expectedSizeBytes !== null && expectedSizeBytes > 0 && actualSize !== expectedSizeBytes) {
+      issues.push({
+        code: 'CHECKSUM_MISMATCH',
+        severity: 'ERROR',
+        message: `Size mismatch for ${filename}: expected ${expectedSizeBytes} bytes, got ${actualSize} bytes`,
+        details: { filename, expectedSizeBytes, actualSizeBytes: actualSize }
       });
     }
 
@@ -381,6 +410,21 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     findMat('runtime.js')?.sizeBytes || manifestArtefacts.runtimeJs?.sizeBytes
   );
 
+  // Reference Lab evidence provenance
+  let referenceLabEvidenceRef: RawEvidenceReference | undefined;
+  if (manifest.referenceLabMetrics) {
+    const labMetricsStr = JSON.stringify(manifest.referenceLabMetrics);
+    referenceLabEvidenceRef = {
+      filename: 'execution-manifest.json#/referenceLabMetrics',
+      evidenceType: 'REFERENCE_LAB_METRICS',
+      checksum: computeSha256(labMetricsStr),
+      sizeBytes: Buffer.byteLength(labMetricsStr),
+      sourceLocator: 'execution-manifest.json#/referenceLabMetrics',
+      presenceStatus: 'PRESENT',
+      checksumVerified: true
+    };
+  }
+
   const rawInventory: RawEvidenceInventory = {
     manifest: manifestRef,
     summaryJson: summaryFileRef,
@@ -390,6 +434,7 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     journeysJs: journeysRef,
     entrypointJs: entrypointRef,
     runtimeJs: runtimeRef,
+    referenceLabMetrics: referenceLabEvidenceRef,
     allReferences: [
       manifestRef,
       summaryFileRef,
@@ -398,7 +443,8 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
       configRef,
       journeysRef,
       entrypointRef,
-      runtimeRef
+      runtimeRef,
+      ...(referenceLabEvidenceRef ? [referenceLabEvidenceRef] : [])
     ]
   };
 
@@ -452,33 +498,48 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     });
   }
 
-  // 4. Scheduler Execution Observation (Population: JOURNEY_ITERATION)
-  const schedulerArrival = pecpBinding.schedulerArrival ?? {};
+  // 4. Scheduler Execution Observation
+  const schedulerArrival = pecpBinding.schedulerArrival;
+  if (!schedulerArrival || !schedulerArrival.population) {
+    issues.push({
+      code: 'UNRESOLVED_SCHEDULE_POPULATION',
+      severity: 'WARNING',
+      message: 'Scheduler population is missing from source manifest binding'
+    });
+  }
+
   const schedulerObservation: SchedulerExecutionObservation = {
-    schedulerPopulation: schedulerArrival.population ?? 'JOURNEY_ITERATION',
-    governedPeakRate: Number(schedulerArrival.peakRate ?? 0),
-    scheduleIdentity: 'black_friday_2026_readiness___forecast_test',
-    actualIterations: summaryMetrics.iterations?.count ?? 0,
+    schedulerPopulation: schedulerArrival?.population,
+    governedPeakRate: schedulerArrival?.peakRate !== undefined ? Number(schedulerArrival.peakRate) : undefined,
+    scheduleIdentity: pecpBinding.scenarioName ?? manifest.testDefinition?.scenario ?? undefined,
+    actualIterations: summaryMetrics.iterations?.count,
     observedIterationRate: summaryMetrics.iterations?.rate,
-    droppedIterations: summaryMetrics.droppedIterations?.count ?? 0,
+    droppedIterations: summaryMetrics.droppedIterations?.count,
     droppedIterationRate: summaryMetrics.droppedIterations?.rate,
     arrivalDemandCounter: summaryMetrics.pecpWorkloadArrivalDemand?.count,
     arrivalDemandRate: summaryMetrics.pecpWorkloadArrivalDemand?.rate
   };
 
-  // 5. Business Events Observation (Metric: orders)
-  const businessAttainment = pecpBinding.businessAttainment ?? manifest.businessAttainment ?? {};
+  // 5. Business Events Observation
+  const businessAttainment = pecpBinding.businessAttainment ?? manifest.businessAttainment;
+  if (!businessAttainment || businessAttainment.targetValue === undefined) {
+    issues.push({
+      code: 'MISSING_SOURCE_WORKLOAD_TARGET',
+      severity: 'WARNING',
+      message: 'Source workload target is missing from contract / test definition binding'
+    });
+  }
+
   const observedEventCount =
     summaryMetrics.pecpBusinessAttainmentEvents?.count ??
-    manifest.businessAttainment?.orderCreatedEventsObserved ??
-    0;
+    manifest.businessAttainment?.orderCreatedEventsObserved;
 
   const businessEventsObservation: BusinessEventsObservation = {
-    governedMetric: businessAttainment.metric ?? 'orders',
-    governedTarget: {
-      value: Number(businessAttainment.targetValue ?? 8.75),
-      unit: businessAttainment.unit ?? 'orders/second'
-    },
+    governedMetric: businessAttainment?.metric,
+    governedTarget: businessAttainment?.targetValue !== undefined ? {
+      value: Number(businessAttainment.targetValue),
+      unit: businessAttainment.unit ?? ''
+    } : undefined,
     observedEventCount,
     observedRawRate: summaryMetrics.pecpBusinessAttainmentEvents?.rate,
     referenceLabCorroboratingEventCount: manifest.referenceLabMetrics?.delta?.orderCreatedEvents
@@ -490,8 +551,8 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   if (labMetrics && labMetrics.delta) {
     const delta = labMetrics.delta;
     const labOrderEvents = Number(delta.orderCreatedEvents ?? 0);
-    const countsMatch = observedEventCount === labOrderEvents;
-    const discrepancyCount = Math.abs(observedEventCount - labOrderEvents);
+    const countsMatch = observedEventCount !== undefined && observedEventCount === labOrderEvents;
+    const discrepancyCount = observedEventCount !== undefined ? Math.abs(observedEventCount - labOrderEvents) : 0;
 
     if (!countsMatch) {
       issues.push({
@@ -503,6 +564,7 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     }
 
     referenceLabCorroboration = {
+      sourceLocator: 'execution-manifest.json#/referenceLabMetrics',
       totalRequestsDelta: Number(delta.totalRequests ?? 0),
       requestsByRoute: delta.requestsByRoute ?? {},
       statusCounts: delta.statusCounts ?? {},
@@ -535,28 +597,46 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
   // 7. Workload Attainment Lineage Observation
   // Invariant: Full test average rate is not steady-state peak attainment.
   // Steady state peak attainment is marked as unresolved due to lack of per-stage window telemetry.
-  const targetRate = Number(businessAttainment.targetValue ?? 8.75);
+  const targetRate = businessAttainment?.targetValue !== undefined ? Number(businessAttainment.targetValue) : undefined;
   const observedRate = summaryMetrics.pecpBusinessAttainmentEvents?.rate;
-  const attainmentRatio = observedRate !== undefined && targetRate > 0
+  const attainmentRatio = observedRate !== undefined && targetRate !== undefined && targetRate > 0
     ? Number((observedRate / targetRate).toFixed(4))
     : undefined;
 
-  const workloadAttainmentObservation: WorkloadAttainmentObservation = {
+  const fullTestAverageObservation: WorkloadAttainmentObservation | undefined = (observedRate !== undefined || observedEventCount !== undefined) ? {
     governedDemand: {
-      metric: businessAttainment.metric ?? 'orders',
-      targetValue: targetRate,
-      unit: businessAttainment.unit ?? 'orders/second'
+      metric: businessAttainment?.metric ?? 'unspecified',
+      targetValue: targetRate ?? 0,
+      unit: businessAttainment?.unit ?? ''
     },
-    governedPopulation: schedulerArrival.population ?? 'JOURNEY_ITERATION',
+    governedPopulation: schedulerArrival?.population ?? 'unspecified',
     actualSourceMetric: 'pecp_business_attainment_events',
     calculationFormula: 'total_observed_events / total_test_duration_seconds',
-    units: 'orders/second',
+    units: businessAttainment?.unit ?? '',
     timeBasis: 'FULL_TEST_AVERAGE',
     resultValue: observedRate,
     attainmentRatio,
     derivationStatus: 'DETERMINISTICALLY_DERIVED',
     derivationNotes:
-      'Whole-test average rate over the complete shaped test execution (including 300s ramp-up, 900s plateau, and 120s ramp-down). Whole-test average rate is mathematically distinct from steady-state peak attainment. In the absence of time-sliced or windowed telemetry in standard summary.json, steady-state peak attainment is marked as unresolved rather than guessed.'
+      'Whole-test average rate over the complete shaped test execution. This observation aggregates the entire execution duration and does not represent steady-state acceptance basis attainment.'
+  } : undefined;
+
+  const acceptanceBasisAttainment: WorkloadAttainmentObservation = {
+    governedDemand: {
+      metric: businessAttainment?.metric ?? 'unspecified',
+      targetValue: targetRate ?? 0,
+      unit: businessAttainment?.unit ?? ''
+    },
+    governedPopulation: schedulerArrival?.population ?? 'unspecified',
+    actualSourceMetric: 'pecp_business_attainment_events',
+    calculationFormula: 'steady_state_window_events / steady_state_window_seconds',
+    units: businessAttainment?.unit ?? '',
+    timeBasis: 'STEADY_STATE_PEAK',
+    resultValue: undefined,
+    attainmentRatio: undefined,
+    derivationStatus: 'UNRESOLVED_INSUFFICIENT_TIME_SERIES',
+    derivationNotes:
+      'Acceptance-basis attainment requires steady-state time-window analysis. The raw k6 summary export aggregates over the entire run without time-series slicing; steady-state attainment is unresolved.'
   };
 
   // 8. Result Completeness Summary
@@ -575,7 +655,9 @@ export function ingestGovernedExecutionEvidence(input: IngestEvidenceInput): Can
     businessEventsObservation,
     referenceLabCorroboration,
     thresholdObservations,
-    workloadAttainmentObservation,
+    fullTestAverageObservation,
+    acceptanceBasisAttainment,
+    workloadAttainmentObservation: acceptanceBasisAttainment,
     dataQuality,
     performanceVerdict: INVARIANT_PERFORMANCE_VERDICT,
     verdictDisclaimer: INVARIANT_VERDICT_DISCLAIMER

@@ -1,0 +1,205 @@
+{
+  "runId": "pecp-ref-canonical-1789978991064",
+  "executionMode": "CANONICAL",
+  "operationalStatus": "EXECUTION_COMPLETED",
+  "commitSha": "76c2dfd7d829d3152aa2c4f6a98d9cd08e7efd82",
+  "repositoryCommitSha": "76c2dfd7d829d3152aa2c4f6a98d9cd08e7efd82",
+  "workflowRunId": "35577599469",
+  "timestamps": {
+    "startedAt": "2026-09-21T08:23:11.065Z",
+    "completedAt": "2026-09-21T08:45:12.226Z",
+    "durationSeconds": 1321.161
+  },
+  "engine": {
+    "name": "k6",
+    "version": "0.54.0",
+    "fullVersionString": "k6 v0.54.0 (commit/baba871c8a, go1.23.1, linux/amd64)",
+    "isPinnedExpected": true,
+    "binaryPath": "k6"
+  },
+  "target": {
+    "baseUrl": "http://localhost:42291",
+    "probeResult": {
+      "baseUrl": "http://localhost:42291",
+      "verifiedAt": "2026-09-21T08:23:11.065Z",
+      "healthStatus": "healthy",
+      "readyStatus": "ready",
+      "isResolvable": true,
+      "httpStatusHealth": 200,
+      "httpStatusReady": 200
+    }
+  },
+  "pecpBinding": {
+    "sourceContractId": "contract-proj-retailco-bf26-v1.0-approved",
+    "sourceContractVersion": "v1.0",
+    "sourceContractFingerprint": "fp-0dad9ae4",
+    "sourceContractStatus": "APPROVED",
+    "testDefinitionId": "test-def-proj-retailco-bf2026-v1.0",
+    "testDefinitionVersion": "v1.0",
+    "testDefinitionFingerprint": "fp-6911db94",
+    "bundleFingerprint": "fp-256b6329",
+    "runtimeVersion": "1.0.0",
+    "runtimeSourceId": "pecp-stable-k6-runtime-v1.0.0",
+    "schedulerArrival": {
+      "population": "JOURNEY_ITERATION",
+      "peakRate": 109.375,
+      "unit": "journey_iterations/second"
+    },
+    "businessAttainment": {
+      "metric": "orders",
+      "targetValue": 8.75,
+      "unit": "orders/second"
+    }
+  },
+  "preflight": {
+    "manifestTimestamp": "2026-09-21T08:23:11.029Z",
+    "status": "READY_FOR_LIVE_EXECUTION",
+    "isValid": true,
+    "blockingReasons": []
+  },
+  "credentials": [
+    {
+      "referenceId": "RETAILCO_CHECKOUT_AUTH_TOKEN",
+      "purpose": "Checkout API Authorization",
+      "provider": "ENV_VAR",
+      "injectedAs": "TARGET_BASE_URL & k6 -e RETAILCO_CHECKOUT_AUTH_TOKEN",
+      "maskedValue": "***REDACTED_EPHEMERAL***"
+    }
+  ],
+  "materializedFiles": [
+    {
+      "filename": "config.json",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/config.json",
+      "sizeBytes": 3244,
+      "checksum": "e6057b669c91181e60b41c261fc6fd3c82a652c8367cce1b150a2bcd46587e83"
+    },
+    {
+      "filename": "journeys.js",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/journeys.js",
+      "sizeBytes": 3623,
+      "checksum": "d416c031acf84ba5973d2097e93cd94a97b3f87efacac58c979dbcc607e9634f"
+    },
+    {
+      "filename": "entrypoint.js",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/entrypoint.js",
+      "sizeBytes": 1796,
+      "checksum": "71a92600c21712fb7b61f394a3d3a8af185fc0c9c2eb186ad9e58b5218d89898"
+    },
+    {
+      "filename": "runtime.js",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/runtime.js",
+      "sizeBytes": 4305,
+      "checksum": "77392806b817c69db9b494ffb7c7cbb76d06244e185544e3b7218c8b7257ee91"
+    }
+  ],
+  "k6ExitCode": 0,
+  "rawArtefacts": {
+    "summaryJson": {
+      "filename": "summary.json",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/summary.json",
+      "sizeBytes": 6178,
+      "checksum": "8fae3b02826c272e66534c9f2ee5d54887ef94db514673267fd81744ff96d81f"
+    },
+    "stdoutLog": {
+      "filename": "k6-stdout.log",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/k6-stdout.log",
+      "sizeBytes": 222662,
+      "checksum": "c4d0ce27b6339b4fe415a25739adfe06a4ab40ccbc0ba1eaac98fe58d07f5013"
+    },
+    "stderrLog": {
+      "filename": "k6-stderr.log",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/k6-stderr.log",
+      "sizeBytes": 0,
+      "checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "configJson": {
+      "filename": "config.json",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/config.json",
+      "sizeBytes": 3244,
+      "checksum": "e6057b669c91181e60b41c261fc6fd3c82a652c8367cce1b150a2bcd46587e83"
+    },
+    "journeysJs": {
+      "filename": "journeys.js",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/journeys.js",
+      "sizeBytes": 3623,
+      "checksum": "d416c031acf84ba5973d2097e93cd94a97b3f87efacac58c979dbcc607e9634f"
+    },
+    "entrypointJs": {
+      "filename": "entrypoint.js",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/entrypoint.js",
+      "sizeBytes": 1796,
+      "checksum": "71a92600c21712fb7b61f394a3d3a8af185fc0c9c2eb186ad9e58b5218d89898"
+    },
+    "runtimeJs": {
+      "filename": "runtime.js",
+      "path": "/home/runner/work/pecp/pecp/evidence/m3-1b/canonical/runtime.js",
+      "sizeBytes": 4305,
+      "checksum": "77392806b817c69db9b494ffb7c7cbb76d06244e185544e3b7218c8b7257ee91"
+    }
+  },
+  "referenceLabMetrics": {
+    "before": {
+      "requestCountsByRoute": {
+        "/health": 2,
+        "/ready": 2,
+        "/api/v1/metrics": 1
+      },
+      "statusCounts": {
+        "200": 5
+      },
+      "businessAttainmentEvents": {
+        "order_created": 0
+      },
+      "totalRequests": 5,
+      "capturedAt": "2026-09-21T08:23:11.088Z"
+    },
+    "after": {
+      "requestCountsByRoute": {
+        "/health": 2,
+        "/ready": 2,
+        "/api/v1/metrics": 2,
+        "/api/v1/products/featured": 66713,
+        "/api/v1/customers/me/orders": 2399,
+        "/api/v1/orders/checkout": 9671,
+        "/api/v1/products/search": 24003,
+        "/api/v1/basket/items": 18195
+      },
+      "statusCounts": {
+        "200": 111316,
+        "201": 9671
+      },
+      "businessAttainmentEvents": {
+        "order_created": 9671
+      },
+      "totalRequests": 120987,
+      "capturedAt": "2026-09-21T08:45:12.221Z"
+    },
+    "delta": {
+      "totalRequests": 120982,
+      "requestsByRoute": {
+        "/health": 0,
+        "/ready": 0,
+        "/api/v1/metrics": 1,
+        "/api/v1/products/featured": 66713,
+        "/api/v1/customers/me/orders": 2399,
+        "/api/v1/orders/checkout": 9671,
+        "/api/v1/products/search": 24003,
+        "/api/v1/basket/items": 18195
+      },
+      "statusCounts": {
+        "200": 111311,
+        "201": 9671
+      },
+      "orderCreatedEvents": 9671,
+      "durationSeconds": 1321.133
+    }
+  },
+  "businessAttainment": {
+    "metric": "orders",
+    "orderCreatedEventsObserved": 9671,
+    "targetArrivalRate": 8.75
+  },
+  "performanceVerdict": "PECP_PERFORMANCE_VERDICT_NOT_EVALUATED",
+  "verdictDisclaimer": "PECP_PERFORMANCE_VERDICT_NOT_EVALUATED: M3.1B is strictly an execution proof. No PECP PASS/FAIL/INCONCLUSIVE performance verdict is evaluated or assigned.",
+  "issues": []
+}
