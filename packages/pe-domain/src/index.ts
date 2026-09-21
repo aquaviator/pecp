@@ -862,3 +862,5 @@ export function computeContractFingerprint(contract: PerformanceContract): strin
   return `fp-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+export * from './results.js';
+

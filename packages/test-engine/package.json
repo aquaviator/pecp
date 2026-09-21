@@ -15,6 +15,11 @@
       "types": "./src/referenceExecutionHarness.ts",
       "import": "./src/referenceExecutionHarness.ts",
       "default": "./src/referenceExecutionHarness.ts"
+    },
+    "./results": {
+      "types": "./src/resultsIngestion.ts",
+      "import": "./src/resultsIngestion.ts",
+      "default": "./src/resultsIngestion.ts"
     }
   },
   "dependencies": {
