@@ -4,7 +4,7 @@ import { TestDefinition, K6ExecutionBundle, AcceptanceEvaluationDigest } from '@
  * Standard FIPS 180-4 SHA-256 implementation in pure TypeScript.
  * Browser, Node.js, and edge runtime compatible without external dependencies.
  */
-function sha256Hex(ascii: string): string {
+export function sha256Hex(ascii: string): string {
   function rightRotate(value: number, amount: number): number {
     return (value >>> amount) | (value << (32 - amount));
   }

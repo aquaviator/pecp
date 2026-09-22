@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import crypto from 'node:crypto';
 import {
   evaluateAcceptance,
   compileTestDefinition,
   ingestGovernedExecutionEvidence,
-  computeTestDefinitionFingerprint
+  computeTestDefinitionFingerprint,
+  computeAcceptanceEvaluationDigest,
+  sha256Hex,
+  GOVERNED_WORKLOAD_SOURCES
 } from '@pecp/test-engine';
 import {
   PerformanceContract,
@@ -53,6 +57,33 @@ describe('M3.3 — Deterministic Acceptance Engine', () => {
       version: 'v1.0',
       executionIntelligence: RETAILCO_M3_EXECUTION_INTELLIGENCE
     });
+  };
+
+  const createAttainedResults = (): CanonicalExecutionResult => {
+    const base = createAuthoritativeResults();
+    return {
+      ...base,
+      metrics: {
+        ...base.metrics,
+        pecpBusinessAttainmentEvents: {
+          count: 11571,
+          rate: 8.758
+        }
+      },
+      acceptanceBasisAttainment: {
+        governedDemand: {
+          targetValue: 8.75,
+          unit: 'orders/second'
+        },
+        governedPopulation: 'JOURNEY_ITERATION',
+        timeBasis: 'STEADY_STATE_PEAK',
+        resultValue: 8.9,
+        derivationStatus: 'DETERMINISTICALLY_DERIVED',
+        actualSourceMetric: 'pecp_business_attainment_events',
+        calculationFormula: 'pecp_business_attainment_events.rate during steady state',
+        derivationNotes: 'Authoritative derived attainment rate'
+      }
+    };
   };
 
   // -------------------------------------------------------------------------
@@ -1885,34 +1916,6 @@ describe('M3.3 — Deterministic Acceptance Engine', () => {
   // 15. M3.3.2 — Acceptance Evidence Binding & Cryptographic Finalization Gate
   // -------------------------------------------------------------------------
   describe('15. M3.3.2 — Acceptance Evidence Binding & Cryptographic Finalization Gate', () => {
-    // Base helper: fully attained results for RetailCo
-    const createAttainedResults = (): CanonicalExecutionResult => {
-      const base = createAuthoritativeResults();
-      return {
-        ...base,
-        metrics: {
-          ...base.metrics,
-          pecpBusinessAttainmentEvents: {
-            count: 11571,
-            rate: 8.758
-          }
-        },
-        acceptanceBasisAttainment: {
-          governedDemand: {
-            targetValue: 8.75,
-            unit: 'orders/second'
-          },
-          governedPopulation: 'JOURNEY_ITERATION',
-          timeBasis: 'STEADY_STATE_PEAK',
-          resultValue: 8.9,
-          derivationStatus: 'DETERMINISTICALLY_DERIVED',
-          actualSourceMetric: 'pecp_business_attainment_events',
-          calculationFormula: 'pecp_business_attainment_events.rate during steady state',
-          derivationNotes: 'Authoritative derived attainment rate'
-        }
-      };
-    };
-
     it('exposes dedicated SHA-256 Acceptance Evaluation decision digest and derives deterministic id', () => {
       const contract = RETAILCO_M3_APPROVED_CONTRACT;
       const testDef = createAuthoritativeTestDef();
@@ -2317,6 +2320,210 @@ describe('M3.3 — Deterministic Acceptance Engine', () => {
       // 4. Verification that evaluatedAt does NOT alter the SHA-256 evaluation digest
       expect(evalCaller.evaluationDigest.value).toBe(evalDefault.evaluationDigest.value);
       expect(evalCaller.evaluationFingerprint).toBe(evalDefault.evaluationFingerprint);
+    });
+  });
+
+  describe('16. M3.3.3 — Workload Source Authority & SHA-256 Known-Answer Gate', () => {
+    it('independently verifies SHA-256 known-answer test vectors (KAT)', () => {
+      // Vector 1: JSON "{}"
+      const digestEmpty = computeAcceptanceEvaluationDigest({});
+      expect(digestEmpty.algorithm).toBe('SHA-256');
+      expect(digestEmpty.schemaVersion).toBe('acceptance-evaluation-v1');
+      expect(digestEmpty.value).toBe('44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a');
+
+      // Vector 2: JSON "{"a":1}"
+      const digestA1 = computeAcceptanceEvaluationDigest({ a: 1 });
+      expect(digestA1.value).toBe('015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862');
+
+      // Direct sha256Hex function verification
+      expect(sha256Hex('{}')).toBe('44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a');
+      expect(sha256Hex('{"a":1}')).toBe('015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862');
+
+      // Vector 3: Standard NIST SHA-256 vector for empty string ""
+      // e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+      expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+
+      // Vector 4: Standard NIST SHA-256 vector for "abc"
+      // ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+      expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+
+      // Vector 5: Compare against Node.js crypto across various structured payloads
+      const testCases = [
+        { payload: { contractId: 'c-1', version: 1, criteria: [{ id: 'crit-1', value: 100 }] } },
+        { payload: { provenance: { isValid: true }, reasons: ['all gates clear'] } },
+        { payload: { nested: { array: [1, 2, 3], flag: false, str: 'pecp-test-hash' } } },
+        { payload: 'simple string payload' },
+        { payload: 'a'.repeat(1000) } // > 512-bit block boundary
+      ];
+
+      for (const tc of testCases) {
+        const json = JSON.stringify(tc.payload);
+        const nodeHash = crypto.createHash('sha256').update(json, 'utf8').digest('hex');
+        const tsHash = sha256Hex(json);
+        expect(tsHash).toBe(nodeHash);
+        expect(computeAcceptanceEvaluationDigest(tc.payload).value).toBe(nodeHash);
+      }
+    });
+
+    it('exposes GOVERNED_WORKLOAD_SOURCES with pecp_business_attainment_events', () => {
+      expect(GOVERNED_WORKLOAD_SOURCES['pecp_business_attainment_events']).toBeDefined();
+      expect(GOVERNED_WORKLOAD_SOURCES['pecp_business_attainment_events'].requiresMetric).toBe('pecp_business_attainment_events');
+      expect(GOVERNED_WORKLOAD_SOURCES['http_reqs']).toBeUndefined();
+      expect(GOVERNED_WORKLOAD_SOURCES['iterations']).toBeUndefined();
+      expect(GOVERNED_WORKLOAD_SOURCES['http_req_duration']).toBeUndefined();
+    });
+
+    it('accepts valid pecp_business_attainment_events when grounded in evidence', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAttainedResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          actualSourceMetric: 'pecp_business_attainment_events'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('ATTAINED');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(true);
+      expect(evaluation.overallVerdict).toBe('PASS');
+    });
+
+    it('rejects existing raw http_reqs metric as workload-attainment source and produces INVALID / INCONCLUSIVE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAttainedResults();
+
+      // Ensure http_reqs exists in rawMetrics
+      expect(baseResults.metrics.rawMetrics['http_reqs']).toBeDefined();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          actualSourceMetric: 'http_reqs'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(false);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.workloadPrerequisite.rationale).toContain('not an authorized canonical evidence source');
+      expect(evaluation.verdictReasons.some((r) => r.includes('not an authorized canonical evidence source'))).toBe(true);
+    });
+
+    it('rejects existing raw iterations metric as workload-attainment source and produces INVALID / INCONCLUSIVE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAttainedResults();
+
+      // Ensure iterations exists in rawMetrics
+      expect(baseResults.metrics.rawMetrics['iterations']).toBeDefined();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          actualSourceMetric: 'iterations'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(false);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.workloadPrerequisite.rationale).toContain('not an authorized canonical evidence source');
+      expect(evaluation.verdictReasons.some((r) => r.includes('not an authorized canonical evidence source'))).toBe(true);
+    });
+
+    it('rejects existing raw http_req_duration metric as workload-attainment source and produces INVALID / INCONCLUSIVE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAttainedResults();
+
+      // Ensure http_req_duration exists in rawMetrics
+      expect(baseResults.metrics.rawMetrics['http_req_duration']).toBeDefined();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          actualSourceMetric: 'http_req_duration'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(false);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.workloadPrerequisite.rationale).toContain('not an authorized canonical evidence source');
+    });
+
+    it('rejects arbitrary fabricated metric name as workload-attainment source', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const baseResults = createAttainedResults();
+
+      const results: CanonicalExecutionResult = {
+        ...baseResults,
+        acceptanceBasisAttainment: {
+          ...baseResults.acceptanceBasisAttainment,
+          resultValue: 8.9,
+          actualSourceMetric: 'custom_synthetic_counter'
+        }
+      };
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      expect(evaluation.workloadPrerequisite.status).toBe('INVALID');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(false);
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.workloadPrerequisite.rationale).toContain('not an authorized canonical evidence source');
+    });
+
+    it('preserves authoritative RetailCo unresolved result as UNRESOLVED (not INVALID) without claimed resultValue', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      expect(results.acceptanceBasisAttainment.resultValue).toBeUndefined();
+      expect(results.acceptanceBasisAttainment.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Workload prerequisite must be UNRESOLVED, not INVALID
+      expect(evaluation.workloadPrerequisite.status).toBe('UNRESOLVED');
+      expect(evaluation.workloadPrerequisite.isPrerequisiteMet).toBe(false);
+      expect(evaluation.workloadPrerequisite.derivationStatus).toBe('UNRESOLVED_INSUFFICIENT_TIME_SERIES');
+
+      // Canonical criteria evaluated independently: Checkout p95 and HTTP Error Rate are PASS
+      expect(evaluation.criterionEvaluations).toHaveLength(2);
+      const checkoutCrit = evaluation.criterionEvaluations.find((c) => c.criterionId === 'ac-checkout-latency');
+      const errorCrit = evaluation.criterionEvaluations.find((c) => c.criterionId === 'ac-global-error-rate');
+      expect(checkoutCrit?.status).toBe('PASS');
+      expect(checkoutCrit?.observedValue).toBeCloseTo(0.3906885, 4);
+      expect(errorCrit?.status).toBe('PASS');
+      expect(errorCrit?.observedValue).toBe(0);
+
+      // Overall verdict must be INCONCLUSIVE due to unresolved workload
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+
+      // SHA-256 digest is stable
+      expect(evaluation.evaluationDigest.algorithm).toBe('SHA-256');
+      expect(evaluation.evaluationDigest.schemaVersion).toBe('acceptance-evaluation-v1');
+      expect(evaluation.evaluationDigest.value).toHaveLength(64);
     });
   });
 });

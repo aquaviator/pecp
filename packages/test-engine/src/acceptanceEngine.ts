@@ -17,6 +17,18 @@ import {
 } from '@pecp/pe-domain';
 import { computeTestDefinitionFingerprint, computeAcceptanceEvaluationDigest } from './fingerprint.js';
 
+/**
+ * Canonical governed workload-attainment evidence source registry for M3.3.
+ * Only explicitly authorized canonical sources can prove business demand attainment.
+ * Unrelated raw metrics (such as http_reqs, iterations, or http_req_duration) cannot prove business attainment.
+ */
+export const GOVERNED_WORKLOAD_SOURCES: Readonly<Record<string, { description: string; requiresMetric: string }>> = Object.freeze({
+  pecp_business_attainment_events: {
+    description: 'Governed business events counter for steady-state business demand attainment',
+    requiresMetric: 'pecp_business_attainment_events'
+  }
+});
+
 export interface EvaluateAcceptanceInput {
   contract: PerformanceContract;
   testDefinition: TestDefinition;
@@ -334,28 +346,30 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
         );
       } else {
         const sourceMetric = attainmentObservation.actualSourceMetric.trim();
-        let isGrounded = false;
-        if (sourceMetric === 'pecp_business_attainment_events') {
-          const rawMetrics = (results.metrics?.rawMetrics ?? {}) as unknown as Record<string, unknown>;
-          if (
-            results.metrics?.pecpBusinessAttainmentEvents !== undefined ||
-            rawMetrics['pecp_business_attainment_events'] !== undefined ||
-            results.businessEventsObservation?.governedMetric === 'pecp_business_attainment_events'
-          ) {
-            isGrounded = true;
-          }
-        } else {
-          const rawMetrics = (results.metrics?.rawMetrics ?? {}) as unknown as Record<string, unknown>;
-          const metricsRecord = (results.metrics ?? {}) as unknown as Record<string, unknown>;
-          if (rawMetrics[sourceMetric] !== undefined || metricsRecord[sourceMetric] !== undefined) {
-            isGrounded = true;
-          }
-        }
+        const governedSource = GOVERNED_WORKLOAD_SOURCES[sourceMetric];
 
-        if (!isGrounded) {
+        if (!governedSource) {
           workloadInvalidReasons.push(
-            `Claimed observed acceptance value actualSourceMetric '${sourceMetric}' is not grounded in governed execution evidence.`
+            `Claimed workload-attainment source metric '${sourceMetric}' is not an authorized canonical evidence source and not grounded in governed execution evidence (unrelated raw metrics cannot prove business attainment).`
           );
+        } else {
+          let isGrounded = false;
+          if (sourceMetric === 'pecp_business_attainment_events') {
+            const rawMetrics = (results.metrics?.rawMetrics ?? {}) as unknown as Record<string, unknown>;
+            if (
+              results.metrics?.pecpBusinessAttainmentEvents !== undefined ||
+              rawMetrics['pecp_business_attainment_events'] !== undefined ||
+              results.businessEventsObservation?.governedMetric === 'pecp_business_attainment_events'
+            ) {
+              isGrounded = true;
+            }
+          }
+
+          if (!isGrounded) {
+            workloadInvalidReasons.push(
+              `Claimed observed acceptance value actualSourceMetric '${sourceMetric}' is not grounded in governed execution evidence.`
+            );
+          }
         }
       }
     } else {
