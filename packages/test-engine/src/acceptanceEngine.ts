@@ -56,6 +56,193 @@ function deepFreeze<T>(obj: T): T {
 }
 
 /**
+ * Input for building an acceptance evaluation digest payload.
+ */
+export type AcceptanceEvaluationDigestInput = Pick<
+  AcceptanceEvaluation,
+  | 'sourceContract'
+  | 'testDefinition'
+  | 'canonicalResults'
+  | 'provenanceGate'
+  | 'operationalIntegrityGate'
+  | 'workloadPrerequisite'
+  | 'criterionEvaluations'
+  | 'governedObservations'
+  | 'overallVerdict'
+  | 'verdictReasons'
+>;
+
+/**
+ * Builds the canonical normalized acceptance evaluation digest payload according to acceptance-evaluation-v1.
+ */
+export function buildAcceptanceEvaluationDigestPayload(
+  evaluation: AcceptanceEvaluationDigestInput
+): Record<string, unknown> {
+  return {
+    schemaVersion: 'acceptance-evaluation-v1',
+    sourceContract: {
+      id: evaluation.sourceContract.id,
+      version: evaluation.sourceContract.version,
+      fingerprint: evaluation.sourceContract.fingerprint,
+      status: evaluation.sourceContract.status
+    },
+    testDefinition: {
+      id: evaluation.testDefinition.id,
+      version: evaluation.testDefinition.version,
+      fingerprint: evaluation.testDefinition.fingerprint
+    },
+    canonicalResults: {
+      executionRunId: evaluation.canonicalResults.executionRunId,
+      artifactDigest: evaluation.canonicalResults.artifactDigest
+    },
+    provenanceGate: {
+      isValid: evaluation.provenanceGate.isValid,
+      reasons: [...evaluation.provenanceGate.reasons]
+    },
+    operationalIntegrityGate: {
+      isValid: evaluation.operationalIntegrityGate.isValid,
+      reasons: [...evaluation.operationalIntegrityGate.reasons]
+    },
+    workloadPrerequisite: {
+      status: evaluation.workloadPrerequisite.status,
+      isPrerequisiteMet: evaluation.workloadPrerequisite.isPrerequisiteMet,
+      targetValue: evaluation.workloadPrerequisite.targetValue,
+      observedValue: evaluation.workloadPrerequisite.observedValue,
+      unit: evaluation.workloadPrerequisite.unit,
+      timeBasis: evaluation.workloadPrerequisite.timeBasis,
+      tolerancePercentage: evaluation.workloadPrerequisite.tolerancePercentage,
+      requiredMinimum: evaluation.workloadPrerequisite.requiredMinimum,
+      derivationStatus: evaluation.workloadPrerequisite.derivationStatus,
+      rationale: evaluation.workloadPrerequisite.rationale
+    },
+    criteria: evaluation.criterionEvaluations
+      .slice()
+      .sort((a, b) => a.criterionId.localeCompare(b.criterionId))
+      .map((c) => ({
+        criterionId: c.criterionId,
+        key: c.key,
+        metric: c.metric,
+        scope: c.scope,
+        comparisonOperator: c.operator,
+        canonicalThresholdValue: c.canonicalThresholdValue,
+        canonicalUnit: c.canonicalUnit,
+        percentile: c.percentile,
+        normalizedComparisonThreshold: c.normalizedComparisonThreshold,
+        observedValue: c.observedValue,
+        observedUnit: c.observedUnit,
+        evidenceSourcePath: c.evidenceSourcePath,
+        status: c.status,
+        corroboratingMetric: c.corroboratingEngineThreshold?.metric,
+        corroboratingExpression: c.corroboratingEngineThreshold?.expression,
+        corroboratingStatus: c.corroboratingEngineThreshold?.status,
+        engineResult: c.corroboratingEngineThreshold?.enginePassed,
+        agreesWithEngine: c.corroboratingEngineThreshold?.agreesWithEngine,
+        deterministicRationale: c.deterministicRationale
+      })),
+    governedObservations: evaluation.governedObservations
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((o) => ({
+        id: o.id,
+        source: o.source,
+        severity: o.severity,
+        isBlocking: o.isBlocking,
+        description: o.description,
+        provenanceReference: o.provenanceReference
+      })),
+    overallVerdict: evaluation.overallVerdict,
+    verdictReasons: [...evaluation.verdictReasons]
+  };
+}
+
+export interface VerifyAcceptanceEvaluationDigestResult {
+  isValid: boolean;
+  recomputedDigest: string;
+  expectedDigest?: string;
+  error?: string;
+}
+
+/**
+ * Recomputes and verifies the SHA-256 cryptographic digest of an AcceptanceEvaluation.
+ */
+export function verifyAcceptanceEvaluationDigest(
+  evaluation: AcceptanceEvaluation
+): VerifyAcceptanceEvaluationDigestResult {
+  if (!evaluation) {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      error: 'Acceptance evaluation is null or undefined.'
+    };
+  }
+
+  if (!evaluation.evaluationDigest) {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      error: 'Acceptance evaluation missing evaluationDigest object.'
+    };
+  }
+
+  if (evaluation.evaluationDigest.algorithm !== 'SHA-256') {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      expectedDigest: evaluation.evaluationDigest.value,
+      error: `Unsupported digest algorithm: '${evaluation.evaluationDigest.algorithm}'. Expected 'SHA-256'.`
+    };
+  }
+
+  if (evaluation.evaluationDigest.schemaVersion !== 'acceptance-evaluation-v1') {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      expectedDigest: evaluation.evaluationDigest.value,
+      error: `Unsupported digest schemaVersion: '${evaluation.evaluationDigest.schemaVersion}'. Expected 'acceptance-evaluation-v1'.`
+    };
+  }
+
+  try {
+    const payload = buildAcceptanceEvaluationDigestPayload(evaluation);
+    const recomputed = computeAcceptanceEvaluationDigest(payload).value;
+
+    if (recomputed !== evaluation.evaluationDigest.value) {
+      return {
+        isValid: false,
+        recomputedDigest: recomputed,
+        expectedDigest: evaluation.evaluationDigest.value,
+        error: `Acceptance evaluation digest mismatch: recomputed '${recomputed}' does not match stored '${evaluation.evaluationDigest.value}'.`
+      };
+    }
+
+    if (
+      evaluation.evaluationFingerprint &&
+      evaluation.evaluationFingerprint !== evaluation.evaluationDigest.value
+    ) {
+      return {
+        isValid: false,
+        recomputedDigest: recomputed,
+        expectedDigest: evaluation.evaluationDigest.value,
+        error: `Acceptance evaluation retained evaluationFingerprint '${evaluation.evaluationFingerprint}' does not match evaluationDigest '${evaluation.evaluationDigest.value}'.`
+      };
+    }
+
+    return {
+      isValid: true,
+      recomputedDigest: recomputed,
+      expectedDigest: evaluation.evaluationDigest.value
+    };
+  } catch (err) {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      expectedDigest: evaluation.evaluationDigest.value,
+      error: `Failed to recompute acceptance evaluation digest: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+}
+
+/**
  * Deterministic Acceptance Engine.
  * Evaluates in strict mandatory order:
  * 1. provenance / drift validity (including Contract-TestDefinition parity and self-integrity);
@@ -1035,8 +1222,7 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
   // Binds full normalized criterion semantics, gates, workload evaluation,
   // governed observations, and verdict reasons into the acceptance digest.
   // Neither system clock nor evaluatedAt participates in the digest.
-  const digestPayload = {
-    schemaVersion: 'acceptance-evaluation-v1',
+  const digestPayload = buildAcceptanceEvaluationDigestPayload({
     sourceContract: {
       id: contract.id,
       version: contract.version,
@@ -1052,64 +1238,14 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
       executionRunId: results.run.executionRunId,
       artifactDigest: results.run.executionArtifact?.digest
     },
-    provenanceGate: {
-      isValid: provenanceGate.isValid,
-      reasons: [...provenanceGate.reasons]
-    },
-    operationalIntegrityGate: {
-      isValid: operationalIntegrityGate.isValid,
-      reasons: [...operationalIntegrityGate.reasons]
-    },
-    workloadPrerequisite: {
-      status: workloadPrerequisite.status,
-      isPrerequisiteMet: workloadPrerequisite.isPrerequisiteMet,
-      targetValue: workloadPrerequisite.targetValue,
-      observedValue: workloadPrerequisite.observedValue,
-      unit: workloadPrerequisite.unit,
-      timeBasis: workloadPrerequisite.timeBasis,
-      tolerancePercentage: workloadPrerequisite.tolerancePercentage,
-      requiredMinimum: workloadPrerequisite.requiredMinimum,
-      derivationStatus: workloadPrerequisite.derivationStatus,
-      rationale: workloadPrerequisite.rationale
-    },
-    criteria: criterionEvaluations
-      .slice()
-      .sort((a, b) => a.criterionId.localeCompare(b.criterionId))
-      .map((c) => ({
-        criterionId: c.criterionId,
-        key: c.key,
-        metric: c.metric,
-        scope: c.scope,
-        comparisonOperator: c.operator,
-        canonicalThresholdValue: c.canonicalThresholdValue,
-        canonicalUnit: c.canonicalUnit,
-        percentile: c.percentile,
-        normalizedComparisonThreshold: c.normalizedComparisonThreshold,
-        observedValue: c.observedValue,
-        observedUnit: c.observedUnit,
-        evidenceSourcePath: c.evidenceSourcePath,
-        status: c.status,
-        corroboratingMetric: c.corroboratingEngineThreshold?.metric,
-        corroboratingExpression: c.corroboratingEngineThreshold?.expression,
-        corroboratingStatus: c.corroboratingEngineThreshold?.status,
-        engineResult: c.corroboratingEngineThreshold?.enginePassed,
-        agreesWithEngine: c.corroboratingEngineThreshold?.agreesWithEngine,
-        deterministicRationale: c.deterministicRationale
-      })),
-    governedObservations: normalizedGovernedObservations
-      .slice()
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .map((o) => ({
-        id: o.id,
-        source: o.source,
-        severity: o.severity,
-        isBlocking: o.isBlocking,
-        description: o.description,
-        provenanceReference: o.provenanceReference
-      })),
+    provenanceGate,
+    operationalIntegrityGate,
+    workloadPrerequisite,
+    criterionEvaluations,
+    governedObservations: normalizedGovernedObservations,
     overallVerdict,
-    verdictReasons: [...verdictReasons]
-  };
+    verdictReasons
+  });
 
   const evaluationDigest = computeAcceptanceEvaluationDigest(digestPayload);
   const evaluationFingerprint = evaluationDigest.value;

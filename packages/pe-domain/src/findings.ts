@@ -115,6 +115,14 @@ export interface DefectCandidate {
 }
 
 /**
+ * Governed findings generation validity status according to M4.0.1.
+ */
+export type FindingsGenerationStatus =
+  | 'VALID'
+  | 'INVALID_ACCEPTANCE_INTEGRITY'
+  | 'INVALID_PROVENANCE';
+
+/**
  * Cryptographic digest descriptor for a Findings Register.
  */
 export interface FindingsRegisterDigest {
@@ -133,6 +141,8 @@ export interface FindingsRegister {
   sourceAcceptanceEvaluationDigest: string;
   sourceExecutionRunId: string;
   overallVerdict: AcceptanceVerdict;
+  generationStatus: FindingsGenerationStatus;
+  generationIssues: string[];
   findings: CanonicalFinding[];
   defectCandidates: DefectCandidate[];
   registerDigest: FindingsRegisterDigest;

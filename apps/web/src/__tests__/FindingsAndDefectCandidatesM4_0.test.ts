@@ -3,14 +3,17 @@ import {
   evaluateAcceptance,
   compileTestDefinition,
   ingestGovernedExecutionEvidence,
-  generateFindings
+  generateFindings,
+  buildAcceptanceEvaluationDigestPayload,
+  computeAcceptanceEvaluationDigest
 } from '@pecp/test-engine';
 import {
   PerformanceContract,
   TestDefinition,
   CanonicalExecutionResult,
   GovernedObservation,
-  AcceptanceEvaluation
+  AcceptanceEvaluation,
+  AcceptanceCriterionEvaluation
 } from '@pecp/pe-domain';
 import {
   RETAILCO_M3_APPROVED_CONTRACT,
@@ -108,8 +111,28 @@ describe('M4.0 — Canonical Findings & Defect Candidate Model', () => {
       });
 
       expect(register.overallVerdict).toBe('INCONCLUSIVE');
+      expect(register.generationStatus).toBe('VALID');
+      expect(register.generationIssues).toEqual([]);
       expect(register.findings).toHaveLength(1);
       expect(register.defectCandidates).toHaveLength(0);
+
+      // Verify immutability without caller side-effects (M4.0.1 §8)
+      expect(Object.isFrozen(register)).toBe(true);
+      expect(Object.isFrozen(register.findings)).toBe(true);
+      expect(Object.isFrozen(register.findings[0])).toBe(true);
+      expect(Object.isFrozen(results)).toBe(false);
+      expect(Object.isFrozen(contract)).toBe(false);
+      expect(Object.isFrozen(testDef)).toBe(false);
+
+      // Verify caller-owned acceptance evaluation is not frozen if originally mutable
+      const mutableEval = { ...evaluation };
+      generateFindings({
+        acceptanceEvaluation: mutableEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+      expect(Object.isFrozen(mutableEval)).toBe(false);
 
       const finding = register.findings[0];
       expect(finding.findingType).toBe('WORKLOAD_ATTAINMENT_UNRESOLVED');
@@ -730,19 +753,18 @@ describe('M4.0 — Canonical Findings & Defect Candidate Model', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 15. Source Acceptance Digest Change -> Finding Digest Change (§14)
+  // 15. Acceptance Digest Verification & Tamper Detection (M4.0.1 §9)
   // -------------------------------------------------------------------------
-  describe('15. Source Acceptance Digest Change -> Finding Digest Change (§14)', () => {
-    it('produces different finding digests when acceptance evaluation digest changes', () => {
+  describe('15. Acceptance Digest Verification & Tamper Detection (M4.0.1 §9)', () => {
+    it('detects tampered Acceptance digest, sets INVALID_ACCEPTANCE_INTEGRITY, and produces zero defects', () => {
       const contract = RETAILCO_M3_APPROVED_CONTRACT;
       const testDef = createAuthoritativeTestDef();
       const results1 = createAuthoritativeResults();
 
       const eval1 = evaluateAcceptance({ contract, testDefinition: testDef, results: results1 });
-      const reg1 = generateFindings({ acceptanceEvaluation: eval1, results: results1 });
 
-      // Modify the evaluation digest value manually
-      const eval2: AcceptanceEvaluation = {
+      // Mutate the evaluation digest value manually (tampering)
+      const tamperedEval: AcceptanceEvaluation = {
         ...eval1,
         evaluationDigest: {
           algorithm: 'SHA-256',
@@ -751,9 +773,46 @@ describe('M4.0 — Canonical Findings & Defect Candidate Model', () => {
         }
       };
 
-      const reg2 = generateFindings({ acceptanceEvaluation: eval2, results: results1 });
+      const register = generateFindings({ acceptanceEvaluation: tamperedEval, results: results1 });
 
-      expect(reg1.findings[0].findingDigest).not.toBe(reg2.findings[0].findingDigest);
+      expect(register.generationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+      expect(register.generationIssues.length).toBeGreaterThan(0);
+      expect(register.generationIssues[0]).toContain('digest mismatch');
+      expect(register.defectCandidates).toHaveLength(0);
+      expect(register.findings).toHaveLength(1);
+
+      const integrityFinding = register.findings[0];
+      expect(integrityFinding.findingType).toBe('PROVENANCE_CONFLICT');
+      expect(integrityFinding.title).toBe('Acceptance Evaluation Integrity Conflict');
+      expect(integrityFinding.factualDescription).toContain('digest mismatch');
+      expect(integrityFinding.defectEligibility).toBe(false);
+
+      // Normal RetailCo workload finding is NOT generated from tampered evaluation
+      expect(
+        register.findings.some((f) => f.findingType === 'WORKLOAD_ATTAINMENT_UNRESOLVED')
+      ).toBe(false);
+    });
+
+    it('produces different finding and register digests when genuine Acceptance Evaluation differs', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results1 = createAuthoritativeResults();
+      const results2 = createAttainedResults();
+
+      // eval1 is INCONCLUSIVE (workload UNRESOLVED)
+      const eval1 = evaluateAcceptance({ contract, testDefinition: testDef, results: results1 });
+      // eval2 is PASS (workload ATTAINED)
+      const eval2 = evaluateAcceptance({ contract, testDefinition: testDef, results: results2 });
+
+      expect(eval1.evaluationDigest.value).not.toBe(eval2.evaluationDigest.value);
+
+      const reg1 = generateFindings({ acceptanceEvaluation: eval1, results: results1 });
+      const reg2 = generateFindings({ acceptanceEvaluation: eval2, results: results2 });
+
+      expect(reg1.generationStatus).toBe('VALID');
+      expect(reg2.generationStatus).toBe('VALID');
+      expect(reg1.findings).toHaveLength(1);
+      expect(reg2.findings).toHaveLength(0);
       expect(reg1.registerDigest.value).not.toBe(reg2.registerDigest.value);
     });
   });
@@ -762,7 +821,7 @@ describe('M4.0 — Canonical Findings & Defect Candidate Model', () => {
   // 16. Mismatch Between Acceptance and Results -> Provenance Conflict (§5, §14)
   // -------------------------------------------------------------------------
   describe('16. Mismatch Between Acceptance and Results (§5, §14)', () => {
-    it('produces PROVENANCE_CONFLICT finding and zero defect candidates when run ids mismatch', () => {
+    it('produces PROVENANCE_CONFLICT finding, INVALID_PROVENANCE status, and zero defect candidates when run ids mismatch', () => {
       const contract = RETAILCO_M3_APPROVED_CONTRACT;
       const testDef = createAuthoritativeTestDef();
       const results = createAuthoritativeResults();
@@ -787,11 +846,495 @@ describe('M4.0 — Canonical Findings & Defect Candidate Model', () => {
         results: mismatchedResults
       });
 
+      expect(register.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(register.generationIssues).toContain(
+        `Execution run ID mismatch: AcceptanceEvaluation references '${evaluation.sourceExecutionRunId}', but Results contains 'different-run-id-999'.`
+      );
       expect(register.defectCandidates).toHaveLength(0);
       expect(register.findings).toHaveLength(1);
       expect(register.findings[0].findingType).toBe('PROVENANCE_CONFLICT');
       expect(register.findings[0].defectEligibility).toBe(false);
       expect(register.findings[0].factualDescription).toContain('Execution run ID mismatch');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 17. M4.0.1 Negative Regression Matrix (§10)
+  // -------------------------------------------------------------------------
+  describe('17. M4.0.1 Negative Regression Matrix (§10)', () => {
+    it('rejects mismatched Acceptance evaluationFingerprint', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      const tamperedEvaluation: AcceptanceEvaluation = {
+        ...evaluation,
+        evaluationFingerprint: 'different-fingerprint-999'
+      };
+
+      const register = generateFindings({ acceptanceEvaluation: tamperedEvaluation, results });
+      expect(register.generationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+      expect(register.generationIssues[0]).toContain('does not match evaluationDigest');
+      expect(register.defectCandidates).toHaveLength(0);
+    });
+
+    it('rejects unsupported digest algorithm or schemaVersion', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      const wrongAlgoEval: AcceptanceEvaluation = {
+        ...evaluation,
+        evaluationDigest: {
+          ...evaluation.evaluationDigest,
+          algorithm: 'SHA-512' as any
+        }
+      };
+      const regAlgo = generateFindings({ acceptanceEvaluation: wrongAlgoEval, results });
+      expect(regAlgo.generationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+      expect(regAlgo.generationIssues[0]).toContain('Unsupported digest algorithm');
+
+      const wrongSchemaEval: AcceptanceEvaluation = {
+        ...evaluation,
+        evaluationDigest: {
+          ...evaluation.evaluationDigest,
+          schemaVersion: 'acceptance-evaluation-v9' as any
+        }
+      };
+      const regSchema = generateFindings({ acceptanceEvaluation: wrongSchemaEval, results });
+      expect(regSchema.generationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+      expect(regSchema.generationIssues[0]).toContain('Unsupported digest schemaVersion');
+    });
+
+    it('rejects Contract ID and version mismatches between Results and Acceptance', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Mismatched Contract ID in Results
+      const badIdResults: CanonicalExecutionResult = {
+        ...results,
+        run: {
+          ...results.run,
+          sourceContract: {
+            ...results.run.sourceContract!,
+            id: 'contract-mismatched-id'
+          }
+        }
+      };
+      const regId = generateFindings({ acceptanceEvaluation: evaluation, results: badIdResults });
+      expect(regId.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(regId.generationIssues.some((i) => i.includes('Contract ID mismatch'))).toBe(true);
+
+      // Mismatched Contract version in Results
+      const badVerResults: CanonicalExecutionResult = {
+        ...results,
+        run: {
+          ...results.run,
+          sourceContract: {
+            ...results.run.sourceContract!,
+            version: 'v99.0'
+          }
+        }
+      };
+      const regVer = generateFindings({ acceptanceEvaluation: evaluation, results: badVerResults });
+      expect(regVer.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(regVer.generationIssues.some((i) => i.includes('Contract version mismatch'))).toBe(true);
+    });
+
+    it('rejects Test Definition ID and version mismatches between Results and Acceptance', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Mismatched Test Definition ID in Results
+      const badTdIdResults: CanonicalExecutionResult = {
+        ...results,
+        run: {
+          ...results.run,
+          testDefinition: {
+            ...results.run.testDefinition!,
+            id: 'td-mismatched-id'
+          }
+        }
+      };
+      const regId = generateFindings({ acceptanceEvaluation: evaluation, results: badTdIdResults });
+      expect(regId.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(regId.generationIssues.some((i) => i.includes('Test Definition ID mismatch'))).toBe(true);
+
+      // Mismatched Test Definition version in Results
+      const badTdVerResults: CanonicalExecutionResult = {
+        ...results,
+        run: {
+          ...results.run,
+          testDefinition: {
+            ...results.run.testDefinition!,
+            version: 'v99.0'
+          }
+        }
+      };
+      const regVer = generateFindings({ acceptanceEvaluation: evaluation, results: badTdVerResults });
+      expect(regVer.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(regVer.generationIssues.some((i) => i.includes('Test Definition version mismatch'))).toBe(true);
+    });
+
+    it('rejects supplied Contract fingerprint drift', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Supply a modified contract (target changed from 'p95 < 2000ms' to 'p95 < 1500ms')
+      const modifiedContract: PerformanceContract = {
+        ...contract,
+        acceptanceCriteria: [
+          ...contract.acceptanceCriteria.map((c) =>
+            c.id === 'ac-checkout-latency' ? { ...c, target: 'p95 < 1500ms', thresholdValue: 1500 } : c
+          )
+        ]
+      };
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract: modifiedContract,
+        testDefinition: testDef
+      });
+
+      expect(register.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(register.generationIssues.some((i) => i.includes('Supplied Contract fingerprint drift'))).toBe(true);
+      expect(register.defectCandidates).toHaveLength(0);
+    });
+
+    it('rejects supplied Test Definition self-fingerprint drift', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Supply a modified test definition (target changed from 'p95 < 2000ms' to 'p95 < 1500ms')
+      const modifiedTestDef: TestDefinition = {
+        ...testDef,
+        executableCriteria: [
+          ...testDef.executableCriteria.map((c) =>
+            c.id === 'ac-checkout-latency' ? { ...c, target: 'p95 < 1500ms' } : c
+          )
+        ]
+      };
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: modifiedTestDef
+      });
+
+      expect(register.generationStatus).toBe('INVALID_PROVENANCE');
+      expect(register.generationIssues.some((i) => i.includes('Supplied Test Definition fingerprint drift'))).toBe(true);
+      expect(register.defectCandidates).toHaveLength(0);
+    });
+
+    const createModifiedValidEvaluation = (
+      baseEvaluation: AcceptanceEvaluation,
+      modifyCriteria: (criteria: AcceptanceCriterionEvaluation[]) => AcceptanceCriterionEvaluation[]
+    ): AcceptanceEvaluation => {
+      const newCriteria = modifyCriteria(baseEvaluation.criterionEvaluations);
+      const payload = buildAcceptanceEvaluationDigestPayload({
+        ...baseEvaluation,
+        criterionEvaluations: newCriteria
+      });
+      const newDigest = computeAcceptanceEvaluationDigest(payload);
+      return {
+        ...baseEvaluation,
+        criterionEvaluations: newCriteria,
+        evaluationDigest: newDigest,
+        evaluationFingerprint: newDigest.value
+      };
+    };
+
+    it('enforces zero fallback invention: missing observed value => no defect candidate', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Strip observedValue from the criterion evaluation while preserving valid evaluation digest
+      const modifiedEval = createModifiedValidEvaluation(evaluation, (criteria) =>
+        criteria.map((c) =>
+          c.criterionId === 'ac-checkout-latency' ? { ...c, observedValue: undefined } : c
+        )
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: modifiedEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      // Defect candidate must NOT be generated with an invented 0
+      expect(register.defectCandidates).toHaveLength(0);
+      const finding = register.findings.find((f) => f.sourceCriterionId === 'ac-checkout-latency');
+      expect(finding).toBeDefined();
+      expect(finding?.defectEligibility).toBe(false);
+    });
+
+    it('enforces zero fallback invention: missing observed unit => no defect candidate', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Strip observedUnit from the criterion evaluation while preserving valid evaluation digest
+      const modifiedEval = createModifiedValidEvaluation(evaluation, (criteria) =>
+        criteria.map((c) =>
+          c.criterionId === 'ac-checkout-latency' ? { ...c, observedUnit: '' } : c
+        )
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: modifiedEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      expect(register.defectCandidates).toHaveLength(0);
+      const finding = register.findings.find((f) => f.sourceCriterionId === 'ac-checkout-latency');
+      expect(finding).toBeDefined();
+      expect(finding?.defectEligibility).toBe(false);
+    });
+
+    it('enforces zero fallback invention: missing operator => no defect candidate', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Strip operator from the criterion evaluation while preserving valid evaluation digest
+      const modifiedEval = createModifiedValidEvaluation(evaluation, (criteria) =>
+        criteria.map((c) =>
+          c.criterionId === 'ac-checkout-latency' ? { ...c, operator: '' as any } : c
+        )
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: modifiedEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      // Defect candidate must NOT be generated with an invented '<'
+      expect(register.defectCandidates).toHaveLength(0);
+      const finding = register.findings.find((f) => f.sourceCriterionId === 'ac-checkout-latency');
+      expect(finding?.defectEligibility).toBe(false);
+    });
+
+    it('enforces zero fallback invention: missing canonical threshold => no defect candidate', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      const modifiedEval = createModifiedValidEvaluation(evaluation, (criteria) =>
+        criteria.map((c) =>
+          c.criterionId === 'ac-checkout-latency' ? { ...c, canonicalThresholdValue: undefined as any } : c
+        )
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: modifiedEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      expect(register.defectCandidates).toHaveLength(0);
+      const finding = register.findings.find((f) => f.sourceCriterionId === 'ac-checkout-latency');
+      expect(finding?.defectEligibility).toBe(false);
+    });
+
+    it('enforces zero fallback invention: missing canonical unit => no defect candidate', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      const modifiedEval = createModifiedValidEvaluation(evaluation, (criteria) =>
+        criteria.map((c) =>
+          c.criterionId === 'ac-checkout-latency' ? { ...c, canonicalUnit: '' } : c
+        )
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: modifiedEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      expect(register.defectCandidates).toHaveLength(0);
+      const finding = register.findings.find((f) => f.sourceCriterionId === 'ac-checkout-latency');
+      expect(finding?.defectEligibility).toBe(false);
+    });
+
+    it('enforces zero fallback invention: missing evidence source path => no defect candidate', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      const modifiedEval = createModifiedValidEvaluation(evaluation, (criteria) =>
+        criteria.map((c) =>
+          c.criterionId === 'ac-checkout-latency' ? { ...c, evidenceSourcePath: '' } : c
+        )
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: modifiedEval,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      expect(register.defectCandidates).toHaveLength(0);
+      const finding = register.findings.find((f) => f.sourceCriterionId === 'ac-checkout-latency');
+      expect(finding?.defectEligibility).toBe(false);
+    });
+
+    it('corrects canonical target semantics: uses verified canonical target string, never criterion key', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      results.metrics.httpReqDurationCheckout = {
+        ...results.metrics.httpReqDurationCheckout,
+        p95: 2450
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+
+      // Run 1: Verified Contract supplied -> target is 'p95 < 2000ms' (not key 'checkout_response_time')
+      const regWithContract = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      expect(regWithContract.defectCandidates).toHaveLength(1);
+      const candidate1 = regWithContract.defectCandidates[0];
+      expect(candidate1.acceptanceCriterionReference.target).toBe('p95 < 2000ms');
+      expect(candidate1.expectedGovernedCriterion.target).toBe('p95 < 2000ms');
+      expect(candidate1.acceptanceCriterionReference.target).not.toBe('checkout_response_time');
+
+      // Run 2: No Contract or Test Definition supplied -> target remains undefined (not key)
+      const regWithoutContract = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results
+      });
+
+      expect(regWithoutContract.defectCandidates).toHaveLength(1);
+      const candidate2 = regWithoutContract.defectCandidates[0];
+      expect(candidate2.acceptanceCriterionReference.target).toBeUndefined();
+      expect(candidate2.expectedGovernedCriterion.target).toBeUndefined();
+    });
+
+    it('preserves authoritative RetailCo outcome: VALID generation, one workload finding, zero defects', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({ acceptanceEvaluation: evaluation, results, contract, testDefinition: testDef });
+
+      expect(evaluation.overallVerdict).toBe('INCONCLUSIVE');
+      expect(evaluation.workloadPrerequisite.status).toBe('UNRESOLVED');
+      expect(evaluation.criterionEvaluations[0].status).toBe('PASS');
+      expect(evaluation.criterionEvaluations[1].status).toBe('PASS');
+
+      expect(register.generationStatus).toBe('VALID');
+      expect(register.generationIssues).toEqual([]);
+      expect(register.findings).toHaveLength(1);
+      expect(register.findings[0].findingType).toBe('WORKLOAD_ATTAINMENT_UNRESOLVED');
+      expect(register.defectCandidates).toHaveLength(0);
+      expect(register.registerDigest.value).toHaveLength(64);
     });
   });
 });
