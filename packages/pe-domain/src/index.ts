@@ -864,4 +864,5 @@ export function computeContractFingerprint(contract: PerformanceContract): strin
 
 export * from './results.js';
 export * from './acceptance.js';
+export * from './findings.js';
 
