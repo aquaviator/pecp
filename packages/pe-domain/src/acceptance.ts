@@ -69,13 +69,23 @@ export interface WorkloadAttainmentEvaluation {
 }
 
 /**
+ * Cryptographic digest descriptor for an Acceptance Evaluation.
+ * Exposes algorithm, schemaVersion, and deterministic SHA-256 digest value.
+ */
+export interface AcceptanceEvaluationDigest {
+  algorithm: 'SHA-256';
+  schemaVersion: 'acceptance-evaluation-v1';
+  value: string;
+}
+
+/**
  * Corroborating engine threshold comparison.
  */
 export interface CorroboratingEngineThreshold {
   metric: string;
   expression: string;
   enginePassed?: boolean | null;
-  agreesWithEngine: boolean;
+  agreesWithEngine?: boolean | null;
   status?: string;
 }
 
@@ -142,5 +152,6 @@ export interface AcceptanceEvaluation {
   overallVerdict: AcceptanceVerdict;
   verdictReasons: string[];
   evaluatedAt?: string;
+  evaluationDigest: AcceptanceEvaluationDigest;
   evaluationFingerprint: string;
 }

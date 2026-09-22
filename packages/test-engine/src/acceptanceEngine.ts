@@ -15,7 +15,7 @@ import {
   GovernedObservation,
   computeContractFingerprint
 } from '@pecp/pe-domain';
-import { computeStringChecksum, computeTestDefinitionFingerprint } from './fingerprint.js';
+import { computeTestDefinitionFingerprint, computeAcceptanceEvaluationDigest } from './fingerprint.js';
 
 export interface EvaluateAcceptanceInput {
   contract: PerformanceContract;
@@ -285,32 +285,108 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
     }
 
     // Cross-check with results.acceptanceBasisAttainment
-    if (
-      attainmentObservation?.governedDemand?.targetValue !== undefined &&
-      attainmentObservation.governedDemand.targetValue !== testDefWorkload.targetValue
-    ) {
-      workloadInvalidReasons.push(
-        `Acceptance-basis targetValue ${attainmentObservation.governedDemand.targetValue} mismatches TestDefinition workload targetValue ${testDefWorkload.targetValue}.`
-      );
-    }
+    // When an acceptance-basis resultValue is claimed, require Results-side governed target, unit, population, and grounded actualSourceMetric
+    if (attainmentObservation?.resultValue !== undefined) {
+      if (attainmentObservation?.governedDemand?.targetValue === undefined) {
+        workloadInvalidReasons.push(
+          'Claimed observed acceptance value is missing Results governedDemand.targetValue binding.'
+        );
+      } else if (attainmentObservation.governedDemand.targetValue !== testDefWorkload.targetValue) {
+        workloadInvalidReasons.push(
+          `Acceptance-basis targetValue ${attainmentObservation.governedDemand.targetValue} mismatches TestDefinition workload targetValue ${testDefWorkload.targetValue}.`
+        );
+      }
 
-    if (
-      attainmentObservation?.governedDemand?.unit !== undefined &&
-      attainmentObservation.governedDemand.unit !== testDefWorkload.unit
-    ) {
-      workloadInvalidReasons.push(
-        `Acceptance-basis target unit '${attainmentObservation.governedDemand.unit}' mismatches TestDefinition workload unit '${testDefWorkload.unit}'.`
-      );
-    }
+      if (!attainmentObservation?.governedDemand?.unit || attainmentObservation.governedDemand.unit.trim() === '') {
+        workloadInvalidReasons.push(
+          'Claimed observed acceptance value is missing Results governedDemand.unit binding.'
+        );
+      } else if (attainmentObservation.governedDemand.unit !== testDefWorkload.unit) {
+        workloadInvalidReasons.push(
+          `Acceptance-basis target unit '${attainmentObservation.governedDemand.unit}' mismatches TestDefinition workload unit '${testDefWorkload.unit}'.`
+        );
+      }
 
-    if (
-      testDefinition.populationRelationship?.outputSchedulerRate?.population !== undefined &&
-      attainmentObservation?.governedPopulation !== undefined &&
-      attainmentObservation.governedPopulation !== testDefinition.populationRelationship.outputSchedulerRate.population
-    ) {
-      workloadInvalidReasons.push(
-        `Acceptance-basis governed population '${attainmentObservation.governedPopulation}' mismatches TestDefinition population relationship '${testDefinition.populationRelationship.outputSchedulerRate.population}'.`
-      );
+      if (!attainmentObservation?.governedPopulation || attainmentObservation.governedPopulation.trim() === '') {
+        workloadInvalidReasons.push(
+          'Claimed observed acceptance value is missing Results governedPopulation binding.'
+        );
+      } else if (
+        testDefinition.populationRelationship?.outputSchedulerRate?.population !== undefined &&
+        attainmentObservation.governedPopulation !== testDefinition.populationRelationship.outputSchedulerRate.population
+      ) {
+        workloadInvalidReasons.push(
+          `Acceptance-basis governed population '${attainmentObservation.governedPopulation}' mismatches TestDefinition population relationship '${testDefinition.populationRelationship.outputSchedulerRate.population}'.`
+        );
+      }
+
+      // Derivation status compatibility: cannot be UNRESOLVED_INSUFFICIENT_TIME_SERIES if resultValue is claimed
+      if (attainmentObservation?.derivationStatus === 'UNRESOLVED_INSUFFICIENT_TIME_SERIES') {
+        workloadInvalidReasons.push(
+          'Claimed observed acceptance value has incompatible derivation status UNRESOLVED_INSUFFICIENT_TIME_SERIES.'
+        );
+      }
+
+      // Grounded actualSourceMetric check when resultValue is claimed
+      if (!attainmentObservation?.actualSourceMetric || attainmentObservation.actualSourceMetric.trim() === '') {
+        workloadInvalidReasons.push(
+          'Claimed observed acceptance value has no grounded actualSourceMetric in raw evidence.'
+        );
+      } else {
+        const sourceMetric = attainmentObservation.actualSourceMetric.trim();
+        let isGrounded = false;
+        if (sourceMetric === 'pecp_business_attainment_events') {
+          const rawMetrics = (results.metrics?.rawMetrics ?? {}) as unknown as Record<string, unknown>;
+          if (
+            results.metrics?.pecpBusinessAttainmentEvents !== undefined ||
+            rawMetrics['pecp_business_attainment_events'] !== undefined ||
+            results.businessEventsObservation?.governedMetric === 'pecp_business_attainment_events'
+          ) {
+            isGrounded = true;
+          }
+        } else {
+          const rawMetrics = (results.metrics?.rawMetrics ?? {}) as unknown as Record<string, unknown>;
+          const metricsRecord = (results.metrics ?? {}) as unknown as Record<string, unknown>;
+          if (rawMetrics[sourceMetric] !== undefined || metricsRecord[sourceMetric] !== undefined) {
+            isGrounded = true;
+          }
+        }
+
+        if (!isGrounded) {
+          workloadInvalidReasons.push(
+            `Claimed observed acceptance value actualSourceMetric '${sourceMetric}' is not grounded in governed execution evidence.`
+          );
+        }
+      }
+    } else {
+      // Unresolved / no resultValue claimed: validate any explicit fields if present
+      if (
+        attainmentObservation?.governedDemand?.targetValue !== undefined &&
+        attainmentObservation.governedDemand.targetValue !== testDefWorkload.targetValue
+      ) {
+        workloadInvalidReasons.push(
+          `Acceptance-basis targetValue ${attainmentObservation.governedDemand.targetValue} mismatches TestDefinition workload targetValue ${testDefWorkload.targetValue}.`
+        );
+      }
+
+      if (
+        attainmentObservation?.governedDemand?.unit !== undefined &&
+        attainmentObservation.governedDemand.unit !== testDefWorkload.unit
+      ) {
+        workloadInvalidReasons.push(
+          `Acceptance-basis target unit '${attainmentObservation.governedDemand.unit}' mismatches TestDefinition workload unit '${testDefWorkload.unit}'.`
+        );
+      }
+
+      if (
+        testDefinition.populationRelationship?.outputSchedulerRate?.population !== undefined &&
+        attainmentObservation?.governedPopulation !== undefined &&
+        attainmentObservation.governedPopulation !== testDefinition.populationRelationship.outputSchedulerRate.population
+      ) {
+        workloadInvalidReasons.push(
+          `Acceptance-basis governed population '${attainmentObservation.governedPopulation}' mismatches TestDefinition population relationship '${testDefinition.populationRelationship.outputSchedulerRate.population}'.`
+        );
+      }
     }
 
     // Governed acceptance time basis check: For M3.3 RetailCo, timeBasis must be STEADY_STATE_PEAK
@@ -318,15 +394,6 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
       workloadInvalidReasons.push(
         `Acceptance-basis time basis '${attainmentObservation?.timeBasis}' is unapproved (governed prerequisite requires STEADY_STATE_PEAK).`
       );
-    }
-
-    // Grounded actualSourceMetric check when resultValue is claimed
-    if (attainmentObservation?.resultValue !== undefined) {
-      if (!attainmentObservation.actualSourceMetric || attainmentObservation.actualSourceMetric.trim() === '') {
-        workloadInvalidReasons.push(
-          'Claimed observed acceptance value has no grounded actualSourceMetric in raw evidence.'
-        );
-      }
     }
 
     // Tolerance validation: absent = target exactly; invalid = INVALID; no defaults
@@ -577,7 +644,7 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
             metric: matchingThresholdObs.metric,
             expression: matchingThresholdObs.expression,
             enginePassed: null,
-            agreesWithEngine: true,
+            agreesWithEngine: undefined,
             status: matchingThresholdObs.status
           };
         } else {
@@ -596,6 +663,16 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
               `Corroboration conflict for criterion '${crit.id}': independent evaluation is '${status}', but k6 engine threshold '${matchingThresholdObs.metric}' (${matchingThresholdObs.expression}) reported enginePassed='${enginePassed}'.`
             );
           }
+        }
+      } else {
+        // Check for same-metric threshold observations with differing expressions (threshold semantics drift)
+        const sameMetricObs = results.thresholdObservations.filter(
+          (t) => t.metric === expectedThresholdMetric
+        );
+        if (sameMetricObs.length > 0) {
+          engineConflictReasons.push(
+            `Threshold expression semantics drift for criterion '${crit.id}': expected engine threshold '${expectedThresholdMetric}' with expression '${expectedThresholdExpression}', but executed engine threshold(s) had different expression(s): ${sameMetricObs.map((t) => `'${t.expression}'`).join(', ')}.`
+          );
         }
       }
 
@@ -803,7 +880,7 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
             metric: matchingThresholdObs.metric,
             expression: matchingThresholdObs.expression,
             enginePassed: null,
-            agreesWithEngine: true,
+            agreesWithEngine: undefined,
             status: matchingThresholdObs.status
           };
         } else {
@@ -822,6 +899,16 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
               `Corroboration conflict for criterion '${crit.id}': independent evaluation is '${status}', but k6 engine threshold '${matchingThresholdObs.metric}' (${matchingThresholdObs.expression}) reported enginePassed='${enginePassed}'.`
             );
           }
+        }
+      } else {
+        // Check for same-metric threshold observations with differing expressions (threshold semantics drift)
+        const sameMetricObs = results.thresholdObservations.filter(
+          (t) => t.metric === expectedThresholdMetric
+        );
+        if (sameMetricObs.length > 0) {
+          engineConflictReasons.push(
+            `Threshold expression semantics drift for criterion '${crit.id}': expected engine threshold '${expectedThresholdMetric}' with expression '${expectedThresholdExpression}', but executed engine threshold(s) had different expression(s): ${sameMetricObs.map((t) => `'${t.expression}'`).join(', ')}.`
+          );
         }
       }
 
@@ -929,31 +1016,72 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
   }
 
   // -------------------------------------------------------------------------
-  // 6. Deterministic Fingerprint Calculation (No Wall-Clock Timestamp)
+  // 6. Deterministic Cryptographic Acceptance Digest Calculation (SHA-256)
   // -------------------------------------------------------------------------
-  const fingerprintPayload = {
-    contractFingerprint: computedContractFp,
-    testDefinitionFingerprint: testDefinition.fingerprint,
-    sourceExecutionRunId: results.run.executionRunId,
-    resultsIdentity: {
+  // Binds full normalized criterion semantics, gates, workload evaluation,
+  // governed observations, and verdict reasons into the acceptance digest.
+  // Neither system clock nor evaluatedAt participates in the digest.
+  const digestPayload = {
+    schemaVersion: 'acceptance-evaluation-v1',
+    sourceContract: {
+      id: contract.id,
+      version: contract.version,
+      fingerprint: computedContractFp,
+      status: contract.status
+    },
+    testDefinition: {
+      id: testDefinition.id,
+      version: testDefinition.version,
+      fingerprint: testDefinition.fingerprint
+    },
+    canonicalResults: {
       executionRunId: results.run.executionRunId,
       artifactDigest: results.run.executionArtifact?.digest
     },
-    provenanceValid: provenanceGate.isValid,
-    integrityValid: operationalIntegrityGate.isValid,
+    provenanceGate: {
+      isValid: provenanceGate.isValid,
+      reasons: [...provenanceGate.reasons]
+    },
+    operationalIntegrityGate: {
+      isValid: operationalIntegrityGate.isValid,
+      reasons: [...operationalIntegrityGate.reasons]
+    },
     workloadPrerequisite: {
       status: workloadPrerequisite.status,
       isPrerequisiteMet: workloadPrerequisite.isPrerequisiteMet,
       targetValue: workloadPrerequisite.targetValue,
       observedValue: workloadPrerequisite.observedValue,
-      requiredMinimum: workloadPrerequisite.requiredMinimum
+      unit: workloadPrerequisite.unit,
+      timeBasis: workloadPrerequisite.timeBasis,
+      tolerancePercentage: workloadPrerequisite.tolerancePercentage,
+      requiredMinimum: workloadPrerequisite.requiredMinimum,
+      derivationStatus: workloadPrerequisite.derivationStatus,
+      rationale: workloadPrerequisite.rationale
     },
-    criteria: criterionEvaluations.map((c) => ({
-      id: c.criterionId,
-      status: c.status,
-      observed: c.observedValue,
-      threshold: c.normalizedComparisonThreshold
-    })),
+    criteria: criterionEvaluations
+      .slice()
+      .sort((a, b) => a.criterionId.localeCompare(b.criterionId))
+      .map((c) => ({
+        criterionId: c.criterionId,
+        key: c.key,
+        metric: c.metric,
+        scope: c.scope,
+        comparisonOperator: c.operator,
+        canonicalThresholdValue: c.canonicalThresholdValue,
+        canonicalUnit: c.canonicalUnit,
+        percentile: c.percentile,
+        normalizedComparisonThreshold: c.normalizedComparisonThreshold,
+        observedValue: c.observedValue,
+        observedUnit: c.observedUnit,
+        evidenceSourcePath: c.evidenceSourcePath,
+        status: c.status,
+        corroboratingMetric: c.corroboratingEngineThreshold?.metric,
+        corroboratingExpression: c.corroboratingEngineThreshold?.expression,
+        corroboratingStatus: c.corroboratingEngineThreshold?.status,
+        engineResult: c.corroboratingEngineThreshold?.enginePassed,
+        agreesWithEngine: c.corroboratingEngineThreshold?.agreesWithEngine,
+        deterministicRationale: c.deterministicRationale
+      })),
     governedObservations: normalizedGovernedObservations
       .slice()
       .sort((a, b) => a.id.localeCompare(b.id))
@@ -965,11 +1093,14 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
         description: o.description,
         provenanceReference: o.provenanceReference
       })),
-    overallVerdict
+    overallVerdict,
+    verdictReasons: [...verdictReasons]
   };
 
-  const evaluationFingerprint = computeStringChecksum(JSON.stringify(fingerprintPayload));
+  const evaluationDigest = computeAcceptanceEvaluationDigest(digestPayload);
+  const evaluationFingerprint = evaluationDigest.value;
   const resolvedEvaluationId = input.evaluationId ?? `acceptance-${evaluationFingerprint}`;
+  const evaluatedAt = input.evaluationTimestamp ?? results.run?.timestamps?.completedAt ?? undefined;
 
   const evaluation: AcceptanceEvaluation = {
     id: resolvedEvaluationId,
@@ -999,7 +1130,8 @@ export function evaluateAcceptance(input: EvaluateAcceptanceInput): AcceptanceEv
     governedObservations: normalizedGovernedObservations,
     overallVerdict,
     verdictReasons,
-    evaluatedAt: input.evaluationTimestamp,
+    evaluatedAt,
+    evaluationDigest,
     evaluationFingerprint
   };
 
