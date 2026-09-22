@@ -19,6 +19,7 @@ import {
   EvidencePackageComponentReference,
   RawEvidencePackageItem,
   EvidencePackageSummary,
+  EvidencePackageWorkloadDemand,
   EvidencePackageLineage,
   EvidencePackageLineageEdge,
   ComponentPresenceStatus,
@@ -75,28 +76,28 @@ export function buildEvidencePackageDigestPayload(pkg: {
   generationIssues: string[];
   projectId?: string;
   projectName?: string;
-  engineeringIntent: string;
-  sourceExecutionRunId: string;
+  engineeringIntent?: string;
+  sourceExecutionRunId?: string;
   sourceContract: {
-    id: string;
-    version: string | number;
-    fingerprint: string;
+    id?: string;
+    version?: string | number;
+    fingerprint?: string;
     status?: string;
   };
   sourceTestDefinition: {
-    id: string;
-    version: string;
-    fingerprint: string;
+    id?: string;
+    version?: string;
+    fingerprint?: string;
   };
   acceptanceEvaluation: {
-    id: string;
-    digest: string;
-    overallVerdict: string;
+    id?: string;
+    digest?: string;
+    overallVerdict?: string;
   };
   findingsRegister: {
-    id: string;
-    digest: string;
-    generationStatus: string;
+    id?: string;
+    digest?: string;
+    generationStatus?: string;
     totalFindings: number;
     totalDefectCandidates: number;
   };
@@ -110,28 +111,28 @@ export function buildEvidencePackageDigestPayload(pkg: {
     generationIssues: [...pkg.generationIssues].sort(),
     projectId: pkg.projectId ?? null,
     projectName: pkg.projectName ?? null,
-    engineeringIntent: pkg.engineeringIntent,
-    sourceExecutionRunId: pkg.sourceExecutionRunId,
+    engineeringIntent: pkg.engineeringIntent ?? null,
+    sourceExecutionRunId: pkg.sourceExecutionRunId ?? null,
     sourceContract: {
-      id: pkg.sourceContract.id,
-      version: String(pkg.sourceContract.version),
-      fingerprint: pkg.sourceContract.fingerprint,
+      id: pkg.sourceContract.id ?? null,
+      version: pkg.sourceContract.version != null ? String(pkg.sourceContract.version) : null,
+      fingerprint: pkg.sourceContract.fingerprint ?? null,
       status: pkg.sourceContract.status ?? null
     },
     sourceTestDefinition: {
-      id: pkg.sourceTestDefinition.id,
-      version: String(pkg.sourceTestDefinition.version),
-      fingerprint: pkg.sourceTestDefinition.fingerprint
+      id: pkg.sourceTestDefinition.id ?? null,
+      version: pkg.sourceTestDefinition.version != null ? String(pkg.sourceTestDefinition.version) : null,
+      fingerprint: pkg.sourceTestDefinition.fingerprint ?? null
     },
     acceptanceEvaluation: {
-      id: pkg.acceptanceEvaluation.id,
-      digest: pkg.acceptanceEvaluation.digest,
-      overallVerdict: pkg.acceptanceEvaluation.overallVerdict
+      id: pkg.acceptanceEvaluation.id ?? null,
+      digest: pkg.acceptanceEvaluation.digest ?? null,
+      overallVerdict: pkg.acceptanceEvaluation.overallVerdict ?? null
     },
     findingsRegister: {
-      id: pkg.findingsRegister.id,
-      digest: pkg.findingsRegister.digest,
-      generationStatus: pkg.findingsRegister.generationStatus,
+      id: pkg.findingsRegister.id ?? null,
+      digest: pkg.findingsRegister.digest ?? null,
+      generationStatus: pkg.findingsRegister.generationStatus ?? null,
       totalFindings: pkg.findingsRegister.totalFindings,
       totalDefectCandidates: pkg.findingsRegister.totalDefectCandidates
     },
@@ -151,6 +152,9 @@ export function buildEvidencePackageDigestPayload(pkg: {
         algorithm: c.algorithm ?? null,
         schemaVersion: c.schemaVersion ?? null,
         status: c.status ?? null,
+        sourceContractFingerprint: c.sourceContractFingerprint ?? null,
+        executionBundleFingerprint: c.executionBundleFingerprint ?? null,
+        executionArtifactDigest: c.executionArtifactDigest ?? null,
         sourceLocator: c.sourceLocator ?? null,
         isRequired: c.isRequired,
         presenceStatus: c.presenceStatus
@@ -182,7 +186,30 @@ export function buildEvidencePackageDigestPayload(pkg: {
       })),
     evidenceSummary: {
       execution: pkg.evidenceSummary.execution,
-      workloadDemand: pkg.evidenceSummary.workloadDemand,
+      workloadDemand: {
+        businessDemand: pkg.evidenceSummary.workloadDemand.businessDemand
+          ? {
+              targetValue: pkg.evidenceSummary.workloadDemand.businessDemand.targetValue ?? null,
+              unit: pkg.evidenceSummary.workloadDemand.businessDemand.unit ?? null,
+              metric: pkg.evidenceSummary.workloadDemand.businessDemand.metric ?? null,
+              timeBasis: pkg.evidenceSummary.workloadDemand.businessDemand.timeBasis ?? null
+            }
+          : null,
+        schedulerDemand: pkg.evidenceSummary.workloadDemand.schedulerDemand
+          ? {
+              peakArrivalRate: pkg.evidenceSummary.workloadDemand.schedulerDemand.peakArrivalRate ?? null,
+              unit: pkg.evidenceSummary.workloadDemand.schedulerDemand.unit ?? null,
+              population: pkg.evidenceSummary.workloadDemand.schedulerDemand.population ?? null,
+              executionModel: pkg.evidenceSummary.workloadDemand.schedulerDemand.executionModel ?? null,
+              startRate: pkg.evidenceSummary.workloadDemand.schedulerDemand.startRate ?? null
+            }
+          : null,
+        profileType: pkg.evidenceSummary.workloadDemand.profileType ?? null,
+        totalDurationSeconds: pkg.evidenceSummary.workloadDemand.totalDurationSeconds ?? null,
+        rampUpSeconds: pkg.evidenceSummary.workloadDemand.rampUpSeconds ?? null,
+        steadyStateSeconds: pkg.evidenceSummary.workloadDemand.steadyStateSeconds ?? null,
+        rampDownSeconds: pkg.evidenceSummary.workloadDemand.rampDownSeconds ?? null
+      },
       workloadAttainment: pkg.evidenceSummary.workloadAttainment,
       criterionOutcomes: [...pkg.evidenceSummary.criterionOutcomes].sort((a, b) =>
         a.criterionId.localeCompare(b.criterionId)
@@ -312,35 +339,67 @@ export function generatePerformanceEvidencePackage(
   // 1. Upstream Cryptographic Integrity Verification (§4)
   // -------------------------------------------------------------------------
 
-  // 1a. Verify Acceptance Evaluation Digest
-  const acceptanceVerification = verifyAcceptanceEvaluationDigest(acceptanceEvaluation);
-  if (!acceptanceVerification.isValid) {
-    const errorMsg =
-      acceptanceVerification.error ?? 'Acceptance evaluation digest verification failed.';
-    generationIssues.push(errorMsg);
+  // 1a. Verify Acceptance Evaluation
+  if (!acceptanceEvaluation) {
+    generationIssues.push('Acceptance evaluation is missing.');
     packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
-  }
-
-  // 1b. Verify Findings Register Digest & Individual Findings/Defect Candidates
-  const findingsVerification = verifyFindingsRegisterDigest(findingsRegister);
-  if (!findingsVerification.isValid) {
-    const errorMsg =
-      findingsVerification.error ?? 'Findings register digest verification failed.';
-    generationIssues.push(errorMsg);
-    if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+  } else {
+    if (!acceptanceEvaluation.id || !acceptanceEvaluation.evaluationDigest?.value) {
+      generationIssues.push('Acceptance evaluation is missing required id or digest.');
+      packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+    }
+    if (!acceptanceEvaluation.overallVerdict) {
+      generationIssues.push('Acceptance evaluation is missing required overallVerdict.');
+      packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+    }
+    const acceptanceVerification = verifyAcceptanceEvaluationDigest(acceptanceEvaluation);
+    if (!acceptanceVerification.isValid) {
+      const errorMsg =
+        acceptanceVerification.error ?? 'Acceptance evaluation digest verification failed.';
+      generationIssues.push(errorMsg);
+      packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
     }
   }
 
-  if (findingsRegister && findingsRegister.generationStatus !== 'VALID') {
-    generationIssues.push(
-      `Findings register generation status is '${findingsRegister.generationStatus}'.`
-    );
+  // 1b. Verify Findings Register & Individual Findings/Defect Candidates
+  if (!findingsRegister) {
+    generationIssues.push('Findings register is missing.');
     if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus =
-        findingsRegister.generationStatus === 'INVALID_ACCEPTANCE_INTEGRITY'
-          ? 'INVALID_ACCEPTANCE_INTEGRITY'
-          : 'INVALID_FINDINGS_INTEGRITY';
+      packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+    }
+  } else {
+    if (!findingsRegister.id || !findingsRegister.registerDigest?.value) {
+      generationIssues.push('Findings register is missing required id or digest.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
+    }
+    if (!findingsRegister.generationStatus) {
+      generationIssues.push('Findings register is missing required generationStatus.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
+    }
+    const findingsVerification = verifyFindingsRegisterDigest(findingsRegister);
+    if (!findingsVerification.isValid) {
+      const errorMsg =
+        findingsVerification.error ?? 'Findings register digest verification failed.';
+      generationIssues.push(errorMsg);
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
+    }
+
+    if (findingsRegister.generationStatus && findingsRegister.generationStatus !== 'VALID') {
+      generationIssues.push(
+        `Findings register generation status is '${findingsRegister.generationStatus}'.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus =
+          findingsRegister.generationStatus === 'INVALID_ACCEPTANCE_INTEGRITY'
+            ? 'INVALID_ACCEPTANCE_INTEGRITY'
+            : 'INVALID_FINDINGS_INTEGRITY';
+      }
     }
   }
 
@@ -349,18 +408,29 @@ export function generatePerformanceEvidencePackage(
   // -------------------------------------------------------------------------
 
   // 2a. Performance Contract Provenance
-  const computedContractFingerprint = contract ? computeContractFingerprint(contract) : 'unknown';
+  const computedContractFingerprint = contract ? computeContractFingerprint(contract) : undefined;
 
-  if (!contract || contract.status !== 'APPROVED') {
-    generationIssues.push(
-      `Performance Contract '${contract?.id ?? 'unknown'}' is in '${contract?.status ?? 'MISSING'}' status (must be 'APPROVED').`
-    );
+  if (!contract) {
+    generationIssues.push('Performance Contract is missing.');
     if (packageGenerationStatus === 'VALID') {
       packageGenerationStatus = 'INVALID_PROVENANCE';
     }
-  }
+  } else {
+    if (!contract.engineeringIntent) {
+      generationIssues.push('Performance Contract is missing required engineeringIntent.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (contract.status !== 'APPROVED') {
+      generationIssues.push(
+        `Performance Contract '${contract.id}' is in '${contract.status}' status (must be 'APPROVED').`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
 
-  if (contract) {
     if (
       acceptanceEvaluation?.sourceContract?.fingerprint &&
       acceptanceEvaluation.sourceContract.fingerprint !== computedContractFingerprint
@@ -473,9 +543,14 @@ export function generatePerformanceEvidencePackage(
   // 2b. Test Definition Provenance
   const computedTestDefinitionFingerprint = testDefinition
     ? computeTestDefinitionFingerprint(testDefinition)
-    : 'unknown';
+    : undefined;
 
-  if (testDefinition) {
+  if (!testDefinition) {
+    generationIssues.push('Test Definition is missing.');
+    if (packageGenerationStatus === 'VALID') {
+      packageGenerationStatus = 'INVALID_PROVENANCE';
+    }
+  } else {
     if (
       testDefinition.fingerprint &&
       testDefinition.fingerprint !== computedTestDefinitionFingerprint
@@ -562,41 +637,47 @@ export function generatePerformanceEvidencePackage(
   }
 
   // 2c. Execution Run Identity & Linkage
-  const runId = results?.run?.executionRunId ?? 'unknown';
-
-  if (
-    acceptanceEvaluation?.sourceExecutionRunId &&
-    acceptanceEvaluation.sourceExecutionRunId !== runId
-  ) {
-    generationIssues.push(
-      `Execution Run ID '${runId}' does not match Acceptance sourceExecutionRunId '${acceptanceEvaluation.sourceExecutionRunId}'.`
-    );
+  const runId = results?.run?.executionRunId;
+  if (!runId) {
+    generationIssues.push('Execution run ID is missing from canonical results.');
     if (packageGenerationStatus === 'VALID') {
       packageGenerationStatus = 'INVALID_PROVENANCE';
     }
-  }
-
-  if (
-    findingsRegister?.sourceExecutionRunId &&
-    findingsRegister.sourceExecutionRunId !== runId
-  ) {
-    generationIssues.push(
-      `Execution Run ID '${runId}' does not match Findings sourceExecutionRunId '${findingsRegister.sourceExecutionRunId}'.`
-    );
-    if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus = 'INVALID_PROVENANCE';
+  } else {
+    if (
+      acceptanceEvaluation?.sourceExecutionRunId &&
+      acceptanceEvaluation.sourceExecutionRunId !== runId
+    ) {
+      generationIssues.push(
+        `Execution Run ID '${runId}' does not match Acceptance sourceExecutionRunId '${acceptanceEvaluation.sourceExecutionRunId}'.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
     }
-  }
 
-  if (
-    acceptanceEvaluation?.canonicalResults?.executionRunId &&
-    acceptanceEvaluation.canonicalResults.executionRunId !== runId
-  ) {
-    generationIssues.push(
-      `Execution Run ID '${runId}' does not match Acceptance canonicalResults.executionRunId '${acceptanceEvaluation.canonicalResults.executionRunId}'.`
-    );
-    if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus = 'INVALID_PROVENANCE';
+    if (
+      findingsRegister?.sourceExecutionRunId &&
+      findingsRegister.sourceExecutionRunId !== runId
+    ) {
+      generationIssues.push(
+        `Execution Run ID '${runId}' does not match Findings sourceExecutionRunId '${findingsRegister.sourceExecutionRunId}'.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+
+    if (
+      acceptanceEvaluation?.canonicalResults?.executionRunId &&
+      acceptanceEvaluation.canonicalResults.executionRunId !== runId
+    ) {
+      generationIssues.push(
+        `Execution Run ID '${runId}' does not match Acceptance canonicalResults.executionRunId '${acceptanceEvaluation.canonicalResults.executionRunId}'.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
     }
   }
 
@@ -627,24 +708,38 @@ export function generatePerformanceEvidencePackage(
     }
   }
 
-  // 2e. Raw Evidence Completeness & Integrity Issues (§7)
+  // 2e. Governed Raw Evidence & Results Integrity (Unified Calculation) (§7, M4.1.1)
   const rawReferences = results?.evidenceInventory?.allReferences ?? [];
-  if (rawReferences.length === 0) {
+  const hasRawReferences = rawReferences.length > 0;
+  const missingFiles = rawReferences.filter((r) => r.presenceStatus !== 'PRESENT');
+  const allReferencesPresent = hasRawReferences && missingFiles.length === 0;
+  const isResultsComplete = results?.dataQuality?.isComplete === true;
+  const hasResultsIntegrityErrors = results?.dataQuality?.hasIntegrityErrors === true;
+  const fatalIssues = results?.dataQuality?.issues?.filter((i) => i.severity === 'FATAL') ?? [];
+  const errorIssues = results?.dataQuality?.issues?.filter((i) => i.severity === 'ERROR') ?? [];
+  const hasCredentialLeak = results?.dataQuality?.issues?.some(
+    (issue) => issue.code === 'CREDENTIAL_LEAKAGE_DETECTED'
+  );
+
+  const isRawEvidenceValid =
+    hasRawReferences &&
+    allReferencesPresent &&
+    isResultsComplete &&
+    !hasResultsIntegrityErrors &&
+    fatalIssues.length === 0 &&
+    !hasCredentialLeak;
+
+  if (!hasRawReferences) {
     generationIssues.push('Raw evidence inventory is missing or contains zero references.');
     if (packageGenerationStatus === 'VALID') {
       packageGenerationStatus = 'INCOMPLETE_REQUIRED_EVIDENCE';
     }
-  } else {
-    const missingFiles = rawReferences.filter(
-      (r) => r.presenceStatus !== 'PRESENT'
+  } else if (missingFiles.length > 0) {
+    generationIssues.push(
+      `Raw evidence inventory has missing or unverified files: ${missingFiles.map((f) => f.filename).join(', ')}.`
     );
-    if (missingFiles.length > 0) {
-      generationIssues.push(
-        `Raw evidence inventory has missing or unverified files: ${missingFiles.map((f) => f.filename).join(', ')}.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INCOMPLETE_REQUIRED_EVIDENCE';
-      }
+    if (packageGenerationStatus === 'VALID') {
+      packageGenerationStatus = 'INCOMPLETE_REQUIRED_EVIDENCE';
     }
   }
 
@@ -655,41 +750,81 @@ export function generatePerformanceEvidencePackage(
     }
   }
 
-  const hasCredentialLeak = results?.dataQuality?.issues?.some(
-    (issue) => issue.code === 'CREDENTIAL_LEAKAGE_DETECTED'
-  );
-  if (hasCredentialLeak) {
-    generationIssues.push('Credential leakage detected in raw execution evidence.');
+  if (hasResultsIntegrityErrors) {
+    const errorDetails = [...fatalIssues, ...errorIssues]
+      .map((i) => `[${i.code}] ${i.message}`)
+      .join('; ');
+    generationIssues.push(
+      `Canonical results data quality reports integrity errors: ${errorDetails || 'hasIntegrityErrors is true'}.`
+    );
     if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus = 'INVALID_PROVENANCE';
+      packageGenerationStatus = 'INVALID_RESULTS_INTEGRITY';
+    }
+  }
+
+  for (const fatal of fatalIssues) {
+    if (fatal.code === 'CREDENTIAL_LEAKAGE_DETECTED') {
+      generationIssues.push('Credential leakage detected in raw execution evidence.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    } else {
+      generationIssues.push(`Fatal data quality issue [${fatal.code}]: ${fatal.message}.`);
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_RESULTS_INTEGRITY';
+      }
     }
   }
 
   // -------------------------------------------------------------------------
-  // 3. Optional Strategy and Test Plan Artefacts Validation (§6)
+  // 3. Optional Strategy and Test Plan Artefacts Validation (§6, M4.1.1)
   // -------------------------------------------------------------------------
   let strategyPresence: ComponentPresenceStatus = 'ABSENT';
   let strategyIssues: string[] | undefined;
   let strategyVerified = false;
 
   if (strategy) {
-    const strategyContractMatches =
-      contract &&
-      strategy.sourceContractId === contract.id &&
-      String(strategy.sourceContractVersion) === String(contract.version) &&
-      strategy.sourceContractFingerprint === computedContractFingerprint;
-
-    if (strategyContractMatches) {
-      strategyPresence = 'PRESENT';
-      strategyVerified = true;
-    } else {
-      strategyPresence = 'STALE';
+    if (strategy.status === 'SUPERSEDED') {
+      strategyPresence = 'SUPERSEDED';
       strategyIssues = [
-        `Performance Strategy '${strategy.id}' source contract (${strategy.sourceContractId} v${strategy.sourceContractVersion} fp:${strategy.sourceContractFingerprint}) does not match current approved Contract (${contract?.id} v${contract?.version} fp:${computedContractFingerprint}).`
+        `Performance Strategy '${strategy.id}' is SUPERSEDED and cannot serve as current evidence.`
       ];
       generationIssues.push(...strategyIssues);
       if (packageGenerationStatus === 'VALID') {
         packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+      strategyVerified = false;
+    } else if (strategy.status === 'STALE') {
+      strategyPresence = 'STALE';
+      strategyIssues = [
+        `Performance Strategy '${strategy.id}' is in 'STALE' status.`
+      ];
+      generationIssues.push(...strategyIssues);
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+      strategyVerified = false;
+    } else {
+      const strategyContractMatches =
+        contract &&
+        strategy.sourceContractId === contract.id &&
+        String(strategy.sourceContractVersion) === String(contract.version) &&
+        computedContractFingerprint &&
+        strategy.sourceContractFingerprint === computedContractFingerprint;
+
+      if (strategyContractMatches) {
+        strategyPresence = 'PRESENT';
+        strategyVerified = true;
+      } else {
+        strategyPresence = 'STALE';
+        strategyIssues = [
+          `Performance Strategy '${strategy.id}' source contract (${strategy.sourceContractId} v${strategy.sourceContractVersion} fp:${strategy.sourceContractFingerprint}) does not match current approved Contract (${contract?.id} v${contract?.version} fp:${computedContractFingerprint}).`
+        ];
+        generationIssues.push(...strategyIssues);
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+        strategyVerified = false;
       }
     }
   }
@@ -699,29 +834,53 @@ export function generatePerformanceEvidencePackage(
   let testPlanVerified = false;
 
   if (testPlan) {
-    const testPlanContractMatches =
-      contract &&
-      testPlan.sourceContractId === contract.id &&
-      String(testPlan.sourceContractVersion) === String(contract.version) &&
-      testPlan.sourceContractFingerprint === computedContractFingerprint;
-
-    if (testPlanContractMatches) {
-      testPlanPresence = 'PRESENT';
-      testPlanVerified = true;
-    } else {
-      testPlanPresence = 'STALE';
+    if (testPlan.status === 'SUPERSEDED') {
+      testPlanPresence = 'SUPERSEDED';
       testPlanIssues = [
-        `Performance Test Plan '${testPlan.id}' source contract (${testPlan.sourceContractId} v${testPlan.sourceContractVersion} fp:${testPlan.sourceContractFingerprint}) does not match current approved Contract (${contract?.id} v${contract?.version} fp:${computedContractFingerprint}).`
+        `Performance Test Plan '${testPlan.id}' is SUPERSEDED and cannot serve as current evidence.`
       ];
       generationIssues.push(...testPlanIssues);
       if (packageGenerationStatus === 'VALID') {
         packageGenerationStatus = 'INVALID_PROVENANCE';
       }
+      testPlanVerified = false;
+    } else if (testPlan.status === 'STALE') {
+      testPlanPresence = 'STALE';
+      testPlanIssues = [
+        `Performance Test Plan '${testPlan.id}' is in 'STALE' status.`
+      ];
+      generationIssues.push(...testPlanIssues);
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+      testPlanVerified = false;
+    } else {
+      const testPlanContractMatches =
+        contract &&
+        testPlan.sourceContractId === contract.id &&
+        String(testPlan.sourceContractVersion) === String(contract.version) &&
+        computedContractFingerprint &&
+        testPlan.sourceContractFingerprint === computedContractFingerprint;
+
+      if (testPlanContractMatches) {
+        testPlanPresence = 'PRESENT';
+        testPlanVerified = true;
+      } else {
+        testPlanPresence = 'STALE';
+        testPlanIssues = [
+          `Performance Test Plan '${testPlan.id}' source contract (${testPlan.sourceContractId} v${testPlan.sourceContractVersion} fp:${testPlan.sourceContractFingerprint}) does not match current approved Contract (${contract?.id} v${contract?.version} fp:${computedContractFingerprint}).`
+        ];
+        generationIssues.push(...testPlanIssues);
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+        testPlanVerified = false;
+      }
     }
   }
 
   // -------------------------------------------------------------------------
-  // 4. Component Inventory Assembly (§2)
+  // 4. Component Inventory Assembly (§2, M4.1.1)
   // -------------------------------------------------------------------------
   const rawComponents: EvidencePackageComponentReference[] = [
     {
@@ -737,7 +896,7 @@ export function generatePerformanceEvidencePackage(
       componentType: 'PERFORMANCE_STRATEGY',
       canonicalId: strategy?.id,
       version: strategy?.version,
-      fingerprint: strategy?.sourceContractFingerprint,
+      sourceContractFingerprint: strategy?.sourceContractFingerprint,
       status: strategy?.status,
       isRequired: false,
       presenceStatus: strategyPresence,
@@ -747,7 +906,7 @@ export function generatePerformanceEvidencePackage(
       componentType: 'PERFORMANCE_TEST_PLAN',
       canonicalId: testPlan?.id,
       version: testPlan?.version,
-      fingerprint: testPlan?.sourceContractFingerprint,
+      sourceContractFingerprint: testPlan?.sourceContractFingerprint,
       status: testPlan?.status,
       isRequired: false,
       presenceStatus: testPlanPresence,
@@ -764,24 +923,24 @@ export function generatePerformanceEvidencePackage(
     },
     {
       componentType: 'EXECUTION_RUN',
-      canonicalId: results?.run?.executionRunId,
+      canonicalId: runId,
       version: results?.run?.repositoryCommitSha,
-      fingerprint: results?.run?.bundleFingerprint,
+      executionBundleFingerprint: results?.run?.bundleFingerprint,
+      executionArtifactDigest: results?.run?.executionArtifact?.digest,
       status: results?.run?.operationalStatus,
       isRequired: true,
       presenceStatus: results?.run ? 'PRESENT' : 'ABSENT'
     },
     {
       componentType: 'RAW_EVIDENCE_INVENTORY',
-      canonicalId: `raw-evidence-${runId}`,
+      canonicalId: runId ? `raw-evidence-${runId}` : undefined,
       isRequired: true,
-      presenceStatus: rawReferences.length > 0 && results?.dataQuality?.isComplete !== false ? 'PRESENT' : 'INVALID',
+      presenceStatus: isRawEvidenceValid ? 'PRESENT' : 'INVALID',
       status: `${rawReferences.length} files`
     },
     {
       componentType: 'CANONICAL_RESULTS',
-      canonicalId: `results-${runId}`,
-      fingerprint: results?.run?.executionArtifact?.digest ?? results?.run?.bundleFingerprint,
+      canonicalId: runId ? `results-${runId}` : undefined,
       status: 'INGESTED',
       isRequired: true,
       presenceStatus: results ? 'PRESENT' : 'ABSENT'
@@ -831,7 +990,7 @@ export function generatePerformanceEvidencePackage(
     .sort((a, b) => a.filename.localeCompare(b.filename));
 
   // -------------------------------------------------------------------------
-  // 6. Evidence Summary Assembly (§8)
+  // 6. Evidence Summary Assembly (§8, M4.1.1)
   // -------------------------------------------------------------------------
   const byType: Record<string, number> = {};
   const byClassification: Record<string, number> = {};
@@ -849,7 +1008,7 @@ export function generatePerformanceEvidencePackage(
       criterionId: c.criterionId,
       key: c.key,
       metric: c.metric,
-      target: contractAc?.target ?? (c.operator && c.canonicalThresholdValue != null ? `${c.operator} ${c.canonicalThresholdValue}${c.canonicalUnit ? ' ' + c.canonicalUnit : ''}` : undefined),
+      target: contractAc?.target,
       canonicalThresholdValue: c.canonicalThresholdValue,
       canonicalUnit: c.canonicalUnit,
       observedValue: c.observedValue,
@@ -859,27 +1018,85 @@ export function generatePerformanceEvidencePackage(
     };
   });
 
+  // Stage duration fidelity: derive only from explicit governed stage information
   const scenarioSchedule = testDefinition?.scenarios?.[0]?.workloadSchedule;
-  const targetRps =
+  const stages = scenarioSchedule?.stages ?? [];
+
+  let rampUpSeconds: number | undefined;
+  let steadyStateSeconds: number | undefined;
+  let rampDownSeconds: number | undefined;
+
+  for (const st of stages) {
+    const desc = (st.description ?? '').toLowerCase();
+    if (desc.includes('ramp-up') || desc.includes('ramp up')) {
+      rampUpSeconds = st.durationSeconds;
+    } else if (desc.includes('steady-state') || desc.includes('steady state') || desc.includes('sustained peak')) {
+      steadyStateSeconds = st.durationSeconds;
+    } else if (desc.includes('ramp-down') || desc.includes('ramp down') || desc.includes('cooldown')) {
+      rampDownSeconds = st.durationSeconds;
+    }
+  }
+
+  // Workload separation: strictly separate business demand from scheduler demand
+  const businessTargetValue =
     testDefinition?.workloadAttainment?.targetValue ??
-    results?.acceptanceBasisAttainment?.governedDemand?.targetValue ??
-    scenarioSchedule?.peakArrivalRate;
+    results?.acceptanceBasisAttainment?.governedDemand?.targetValue;
+  const businessUnit =
+    testDefinition?.workloadAttainment?.unit ??
+    results?.acceptanceBasisAttainment?.governedDemand?.unit;
+  const businessMetric =
+    results?.acceptanceBasisAttainment?.governedDemand?.metric ??
+    testDefinition?.workloadAttainment?.metric;
+  const businessTimeBasis = results?.acceptanceBasisAttainment?.timeBasis;
+
+  const hasBusinessDemand =
+    businessTargetValue != null ||
+    businessUnit != null ||
+    businessMetric != null ||
+    businessTimeBasis != null;
+
+  const hasSchedulerDemand =
+    scenarioSchedule?.peakArrivalRate != null ||
+    scenarioSchedule?.rateUnit != null ||
+    scenarioSchedule?.arrivalPopulation != null ||
+    scenarioSchedule?.executionModel != null ||
+    scenarioSchedule?.startRate != null;
+
+  const workloadDemand: EvidencePackageWorkloadDemand = {
+    businessDemand: hasBusinessDemand
+      ? {
+          targetValue: businessTargetValue,
+          unit: businessUnit,
+          metric: businessMetric,
+          timeBasis: businessTimeBasis
+        }
+      : undefined,
+    schedulerDemand: hasSchedulerDemand
+      ? {
+          peakArrivalRate: scenarioSchedule?.peakArrivalRate,
+          unit: scenarioSchedule?.rateUnit,
+          population: scenarioSchedule?.arrivalPopulation,
+          executionModel: scenarioSchedule?.executionModel,
+          startRate: scenarioSchedule?.startRate
+        }
+      : undefined,
+    profileType: scenarioSchedule?.executionModel,
+    totalDurationSeconds: scenarioSchedule?.totalDurationSeconds,
+    rampUpSeconds,
+    steadyStateSeconds,
+    rampDownSeconds
+  };
 
   const evidenceSummary: EvidencePackageSummary = {
     execution: {
-      executionRunId: runId,
+      executionRunId: runId ?? '',
       executionMode: results?.run?.executionMode ?? 'CANONICAL',
       operationalStatus: results?.run?.operationalStatus ?? 'UNKNOWN',
       startedAt: results?.run?.timestamps?.startedAt,
       completedAt: results?.run?.timestamps?.completedAt,
       durationSeconds: results?.run?.timestamps?.durationSeconds
     },
-    workloadDemand: {
-      targetRps,
-      profileType: scenarioSchedule?.executionModel,
-      rampUpSeconds: scenarioSchedule?.stages?.[0]?.durationSeconds,
-      steadyStateSeconds: scenarioSchedule?.totalDurationSeconds
-    },
+    workloadDemand,
     workloadAttainment: {
       status: acceptanceEvaluation?.workloadPrerequisite?.status ?? 'INVALID',
       isPrerequisiteMet: Boolean(acceptanceEvaluation?.workloadPrerequisite?.isPrerequisiteMet),
@@ -891,12 +1108,12 @@ export function generatePerformanceEvidencePackage(
     },
     criterionOutcomes,
     acceptanceVerdict: {
-      verdict: acceptanceEvaluation?.overallVerdict ?? 'INCONCLUSIVE',
+      verdict: acceptanceEvaluation?.overallVerdict!,
       reasons: [...(acceptanceEvaluation?.verdictReasons ?? [])],
       evaluatedAt: acceptanceEvaluation?.evaluatedAt
     },
     findingsSummary: {
-      generationStatus: findingsRegister?.generationStatus ?? 'VALID',
+      generationStatus: findingsRegister?.generationStatus!,
       totalFindings: findingsRegister?.findings?.length ?? 0,
       byType,
       byClassification,
@@ -905,7 +1122,7 @@ export function generatePerformanceEvidencePackage(
     dataQualityAndIntegrity: {
       provenanceValid: Boolean(acceptanceEvaluation?.provenanceGate?.isValid),
       operationalIntegrityValid: Boolean(acceptanceEvaluation?.operationalIntegrityGate?.isValid),
-      rawEvidenceComplete: results?.dataQuality?.isComplete !== false,
+      rawEvidenceComplete: isRawEvidenceValid,
       governedObservationsCount: acceptanceEvaluation?.governedObservations?.length ?? 0,
       blockingObservationsCount:
         acceptanceEvaluation?.governedObservations?.filter((o) => o.isBlocking)?.length ?? 0
@@ -913,12 +1130,13 @@ export function generatePerformanceEvidencePackage(
   };
 
   // -------------------------------------------------------------------------
-  // 7. Source-to-Result Lineage Graph (§9)
+  // 7. Source-to-Result Lineage Graph (§9, M4.1.1)
   // -------------------------------------------------------------------------
   const lineageEdges: EvidencePackageLineageEdge[] = [];
 
   const contractId = contract?.id ?? 'unknown';
   const testDefId = testDefinition?.id ?? 'unknown';
+  const safeRunId = runId ?? 'unknown';
 
   lineageEdges.push({
     fromComponent: 'PERFORMANCE_CONTRACT',
@@ -930,6 +1148,7 @@ export function generatePerformanceEvidencePackage(
       contract &&
         testDefinition &&
         testDefinition.sourceContractId === contract.id &&
+        computedContractFingerprint &&
         testDefinition.sourceContractFingerprint === computedContractFingerprint
     ),
     details: 'Contract specifies workload demand and acceptance criteria for Test Definition.'
@@ -963,10 +1182,12 @@ export function generatePerformanceEvidencePackage(
     fromComponent: 'TEST_DEFINITION',
     fromId: testDefId,
     toComponent: 'EXECUTION_RUN',
-    toId: runId,
+    toId: safeRunId,
     bindingType: 'PRODUCES',
     verified: Boolean(
-      results?.run?.testDefinition?.id === testDefId &&
+      testDefinition &&
+        results?.run?.testDefinition?.id === testDefId &&
+        computedTestDefinitionFingerprint &&
         results?.run?.testDefinition?.fingerprint === computedTestDefinitionFingerprint
     ),
     details: 'Test Definition compiled and executed in execution run.'
@@ -974,32 +1195,33 @@ export function generatePerformanceEvidencePackage(
 
   lineageEdges.push({
     fromComponent: 'EXECUTION_RUN',
-    fromId: runId,
+    fromId: safeRunId,
     toComponent: 'RAW_EVIDENCE_INVENTORY',
-    toId: `raw-evidence-${runId}`,
+    toId: runId ? `raw-evidence-${runId}` : 'unknown',
     bindingType: 'CAPTURES',
-    verified: rawReferences.length > 0,
+    verified: isRawEvidenceValid,
     details: 'Execution harness captured raw execution evidence logs and metrics.'
   });
 
   lineageEdges.push({
     fromComponent: 'RAW_EVIDENCE_INVENTORY',
-    fromId: `raw-evidence-${runId}`,
+    fromId: runId ? `raw-evidence-${runId}` : 'unknown',
     toComponent: 'CANONICAL_RESULTS',
-    toId: `results-${runId}`,
+    toId: runId ? `results-${runId}` : 'unknown',
     bindingType: 'PARSES',
-    verified: Boolean(results?.metrics),
+    verified: isRawEvidenceValid && Boolean(results?.metrics),
     details: 'Ingestion engine parsed and corroborated canonical results from raw evidence.'
   });
 
   lineageEdges.push({
     fromComponent: 'CANONICAL_RESULTS',
-    fromId: `results-${runId}`,
+    fromId: runId ? `results-${runId}` : 'unknown',
     toComponent: 'ACCEPTANCE_EVALUATION',
     toId: acceptanceEvaluation?.id ?? 'unknown',
     bindingType: 'EVALUATES',
     verified: Boolean(
-      acceptanceEvaluation?.canonicalResults?.executionRunId === runId &&
+      runId &&
+        acceptanceEvaluation?.canonicalResults?.executionRunId === runId &&
         acceptanceEvaluation?.sourceExecutionRunId === runId
     ),
     details: 'Acceptance engine evaluated criteria and workload against canonical results.'
@@ -1012,7 +1234,8 @@ export function generatePerformanceEvidencePackage(
     toId: findingsRegister?.id ?? 'unknown',
     bindingType: 'REGISTERS',
     verified: Boolean(
-      findingsRegister?.sourceAcceptanceEvaluationId === acceptanceEvaluation?.id &&
+      acceptanceEvaluation?.id &&
+        findingsRegister?.sourceAcceptanceEvaluationId === acceptanceEvaluation?.id &&
         findingsRegister?.sourceAcceptanceEvaluationDigest ===
           acceptanceEvaluation?.evaluationDigest?.value
     ),
@@ -1035,28 +1258,28 @@ export function generatePerformanceEvidencePackage(
     generationIssues,
     projectId: contract?.projectId,
     projectName: contract?.projectName,
-    engineeringIntent: contract?.engineeringIntent ?? 'CERTIFICATION',
-    sourceExecutionRunId: runId,
+    engineeringIntent: contract?.engineeringIntent,
+    sourceExecutionRunId: safeRunId,
     sourceContract: {
-      id: contract?.id ?? 'unknown',
-      version: contract?.version ?? 'unknown',
+      id: contract?.id,
+      version: contract?.version,
       fingerprint: computedContractFingerprint,
       status: contract?.status
     },
     sourceTestDefinition: {
-      id: testDefinition?.id ?? 'unknown',
-      version: testDefinition?.version ?? 'unknown',
+      id: testDefinition?.id,
+      version: testDefinition?.version,
       fingerprint: computedTestDefinitionFingerprint
     },
     acceptanceEvaluation: {
-      id: acceptanceEvaluation?.id ?? 'unknown',
-      digest: acceptanceEvaluation?.evaluationDigest?.value ?? 'unknown',
-      overallVerdict: acceptanceEvaluation?.overallVerdict ?? 'INCONCLUSIVE'
+      id: acceptanceEvaluation?.id,
+      digest: acceptanceEvaluation?.evaluationDigest?.value,
+      overallVerdict: acceptanceEvaluation?.overallVerdict
     },
     findingsRegister: {
-      id: findingsRegister?.id ?? 'unknown',
-      digest: findingsRegister?.registerDigest?.value ?? 'unknown',
-      generationStatus: findingsRegister?.generationStatus ?? 'VALID',
+      id: findingsRegister?.id,
+      digest: findingsRegister?.registerDigest?.value,
+      generationStatus: findingsRegister?.generationStatus,
       totalFindings: findingsRegister?.findings?.length ?? 0,
       totalDefectCandidates: findingsRegister?.defectCandidates?.length ?? 0
     },
@@ -1074,29 +1297,29 @@ export function generatePerformanceEvidencePackage(
     schemaVersion: 'performance-evidence-package-v1',
     projectId: contract?.projectId,
     projectName: contract?.projectName,
-    engineeringIntent: contract?.engineeringIntent ?? 'CERTIFICATION',
-    sourceExecutionRunId: runId,
+    engineeringIntent: contract?.engineeringIntent,
+    sourceExecutionRunId: safeRunId,
     sourceContract: {
-      id: contract?.id ?? 'unknown',
-      version: contract?.version ?? 'unknown',
+      id: contract?.id,
+      version: contract?.version,
       fingerprint: computedContractFingerprint,
       status: contract?.status
     },
     sourceTestDefinition: {
-      id: testDefinition?.id ?? 'unknown',
-      version: testDefinition?.version ?? 'unknown',
+      id: testDefinition?.id,
+      version: testDefinition?.version,
       fingerprint: computedTestDefinitionFingerprint
     },
     acceptanceEvaluation: {
-      id: acceptanceEvaluation?.id ?? 'unknown',
-      digest: acceptanceEvaluation?.evaluationDigest?.value ?? 'unknown',
-      overallVerdict: acceptanceEvaluation?.overallVerdict ?? 'INCONCLUSIVE',
+      id: acceptanceEvaluation?.id,
+      digest: acceptanceEvaluation?.evaluationDigest?.value,
+      overallVerdict: acceptanceEvaluation?.overallVerdict,
       evaluatedAt: acceptanceEvaluation?.evaluatedAt
     },
     findingsRegister: {
-      id: findingsRegister?.id ?? 'unknown',
-      digest: findingsRegister?.registerDigest?.value ?? 'unknown',
-      generationStatus: findingsRegister?.generationStatus ?? 'VALID',
+      id: findingsRegister?.id,
+      digest: findingsRegister?.registerDigest?.value,
+      generationStatus: findingsRegister?.generationStatus,
       totalFindings: findingsRegister?.findings?.length ?? 0,
       totalDefectCandidates: findingsRegister?.defectCandidates?.length ?? 0
     },

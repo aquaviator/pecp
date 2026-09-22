@@ -280,6 +280,43 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
         (e) => e.fromComponent === 'ACCEPTANCE_EVALUATION' && e.toComponent === 'FINDINGS_REGISTER'
       );
       expect(evalToFindings?.verified).toBe(true);
+
+      // M4.1.1 Workload Demand separation & stage duration fidelity
+      expect(pkg.evidenceSummary.workloadDemand.businessDemand).toBeDefined();
+      expect(pkg.evidenceSummary.workloadDemand.businessDemand?.targetValue).toBe(8.75);
+      expect(pkg.evidenceSummary.workloadDemand.businessDemand?.unit).toBe('orders/second');
+
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand).toBeDefined();
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand?.peakArrivalRate).toBe(109.375);
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand?.unit).toBe('journey_iterations/second');
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand?.population).toBe('JOURNEY_ITERATION');
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand?.executionModel).toBe('OPEN');
+
+      expect(pkg.evidenceSummary.workloadDemand.rampUpSeconds).toBe(300);
+      expect(pkg.evidenceSummary.workloadDemand.steadyStateSeconds).toBe(900);
+      expect(pkg.evidenceSummary.workloadDemand.rampDownSeconds).toBe(120);
+      expect(pkg.evidenceSummary.workloadDemand.totalDurationSeconds).toBe(1320);
+
+      // M4.1.1 Component identity check: CANONICAL_RESULTS must not carry artifact/bundle fingerprint
+      const resultsComp = pkg.components.find((c) => c.componentType === 'CANONICAL_RESULTS');
+      expect(resultsComp?.fingerprint).toBeUndefined();
+      expect(resultsComp?.digest).toBeUndefined();
+
+      // EXECUTION_RUN component carries execution bundle & artifact identity
+      const runComp = pkg.components.find((c) => c.componentType === 'EXECUTION_RUN');
+      expect(runComp?.executionBundleFingerprint).toBe(results.run.bundleFingerprint);
+      expect(runComp?.executionArtifactDigest).toBe(results.run.executionArtifact?.digest);
+
+      // Acceptance criterion outcomes fidelity
+      const checkoutOutcome = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'checkout_response_time');
+      expect(checkoutOutcome?.target).toBe('p95 < 2000ms');
+      expect(checkoutOutcome?.status).toBe('PASS');
+      expect(checkoutOutcome?.observedValue).toBeCloseTo(0.3906885, 4);
+
+      const errorRateOutcome = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'global_error_rate');
+      expect(errorRateOutcome?.target).toBe('< 0.5%');
+      expect(errorRateOutcome?.status).toBe('PASS');
+      expect(errorRateOutcome?.observedValue).toBe(0);
     });
   });
 
@@ -1224,6 +1261,721 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
       expect(pkgKeys).not.toContain('jiraIssueKey');
       expect(pkgKeys).not.toContain('adoWorkItemId');
       expect(pkgKeys).not.toContain('confluencePageUrl');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. M4.1.1 Semantic Integrity & Zero-Invention Gate Regression Matrix
+  // -------------------------------------------------------------------------
+  describe('8. M4.1.1 Semantic Integrity & Zero-Invention Gate Regression Matrix', () => {
+    it('1 & 2 & 3. Separates business workload demand (8.75 orders/sec) from scheduler demand (109.375 journey_iterations/sec) with no substitution', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      const wd = pkg.evidenceSummary.workloadDemand;
+
+      // Business demand check
+      expect(wd.businessDemand).toBeDefined();
+      expect(wd.businessDemand?.targetValue).toBe(8.75);
+      expect(wd.businessDemand?.unit).toBe('orders/second');
+      expect(wd.businessDemand?.metric).toBe('orders');
+
+      // Scheduler demand check
+      expect(wd.schedulerDemand).toBeDefined();
+      expect(wd.schedulerDemand?.peakArrivalRate).toBe(109.375);
+      expect(wd.schedulerDemand?.unit).toBe('journey_iterations/second');
+      expect(wd.schedulerDemand?.population).toBe('JOURNEY_ITERATION');
+      expect(wd.schedulerDemand?.executionModel).toBe('OPEN');
+
+      // Zero-invention / no substitution check: business demand must NOT use scheduler values
+      expect(wd.businessDemand?.targetValue).not.toBe(109.375);
+      expect(wd.businessDemand?.unit).not.toBe('journey_iterations/second');
+      expect(wd.schedulerDemand?.peakArrivalRate).not.toBe(8.75);
+      expect(wd.schedulerDemand?.unit).not.toBe('orders/second');
+    });
+
+    it('4. Preserves exact RetailCo schedule timings: ramp-up 300 / steady-state 900 / ramp-down 120 / total 1320', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      const wd = pkg.evidenceSummary.workloadDemand;
+      expect(wd.rampUpSeconds).toBe(300);
+      expect(wd.steadyStateSeconds).toBe(900);
+      expect(wd.rampDownSeconds).toBe(120);
+      expect(wd.totalDurationSeconds).toBe(1320);
+
+      // Verify steady-state duration is NOT conflated with total duration
+      expect(wd.steadyStateSeconds).not.toBe(wd.totalDurationSeconds);
+    });
+
+    it('5. Results with hasIntegrityErrors = true causes INVALID_RESULTS_INTEGRITY', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const integrityFailingResults: CanonicalExecutionResult = {
+        ...results,
+        dataQuality: {
+          ...results.dataQuality,
+          hasIntegrityErrors: true,
+          issues: [
+            {
+              code: 'CHECKSUM_MISMATCH',
+              severity: 'FATAL',
+              message: 'Raw log checksum verification failed'
+            }
+          ]
+        }
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results: integrityFailingResults,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_RESULTS_INTEGRITY');
+      expect(pkg.generationIssues.some((i) => i.includes('integrity errors'))).toBe(true);
+      expect(pkg.evidenceSummary.dataQualityAndIntegrity.rawEvidenceComplete).toBe(false);
+    });
+
+    it('6. Unifies raw evidence lineage verification: edges are NOT verified when raw evidence is incomplete', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const incompleteResults: CanonicalExecutionResult = {
+        ...results,
+        dataQuality: {
+          ...results.dataQuality,
+          isComplete: false,
+          issues: [
+            {
+              code: 'MISSING_REQUIRED_ARTIFACT',
+              severity: 'FATAL',
+              message: 'Missing k6 raw metrics log'
+            }
+          ]
+        }
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results: incompleteResults,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INCOMPLETE_REQUIRED_EVIDENCE');
+
+      // Shared governed validity: Lineage edges depending on raw evidence MUST NOT be marked verified
+      const runToRawEdge = pkg.lineage.edges.find(
+        (e) => e.fromComponent === 'EXECUTION_RUN' && e.toComponent === 'RAW_EVIDENCE_INVENTORY'
+      );
+      expect(runToRawEdge?.verified).toBe(false);
+
+      const rawToResultsEdge = pkg.lineage.edges.find(
+        (e) => e.fromComponent === 'RAW_EVIDENCE_INVENTORY' && e.toComponent === 'CANONICAL_RESULTS'
+      );
+      expect(rawToResultsEdge?.verified).toBe(false);
+    });
+
+    it('7. CANONICAL_RESULTS component does not carry execution artifact/bundle digest as its own fingerprint', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      const resultsComp = pkg.components.find((c) => c.componentType === 'CANONICAL_RESULTS');
+      expect(resultsComp).toBeDefined();
+      expect(resultsComp?.fingerprint).toBeUndefined();
+      expect(resultsComp?.digest).toBeUndefined();
+
+      // Ensure execution artifact digest & bundle fingerprint are strictly bound to EXECUTION_RUN
+      const runComp = pkg.components.find((c) => c.componentType === 'EXECUTION_RUN');
+      expect(runComp?.executionBundleFingerprint).toBe(results.run.bundleFingerprint);
+      expect(runComp?.executionArtifactDigest).toBe(results.run.executionArtifact?.digest);
+    });
+
+    it('8. Missing engineering intent does not become CERTIFICATION fallback', () => {
+      const contractWithoutIntent: PerformanceContract = {
+        ...RETAILCO_M3_APPROVED_CONTRACT,
+        engineeringIntent: undefined as any
+      };
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract: contractWithoutIntent,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract: contractWithoutIntent,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract: contractWithoutIntent,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.engineeringIntent).toBeUndefined();
+      expect(pkg.engineeringIntent).not.toBe('CERTIFICATION');
+    });
+
+    it('9. Missing Findings generation status causes INVALID_FINDINGS_INTEGRITY rather than defaulting to VALID', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const registerWithoutStatus = {
+        ...register,
+        generationStatus: undefined as any
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: registerWithoutStatus
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_FINDINGS_INTEGRITY');
+      expect(pkg.generationIssues.some((i) => i.includes('generationStatus'))).toBe(true);
+    });
+
+    it('10. Missing Acceptance verdict or id causes INVALID_ACCEPTANCE_INTEGRITY rather than fabricating values', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const evaluationWithoutVerdict = {
+        ...evaluation,
+        overallVerdict: undefined as any
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluationWithoutVerdict,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+      expect(pkg.generationIssues.some((i) => i.includes('overallVerdict'))).toBe(true);
+    });
+
+    it('11. PASS_WITH_OBSERVATION package remains VALID and preserves observation finding', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      // Add a non-fatal observation to acceptance evaluation
+      const observationEvaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results,
+        governedObservations: [
+          {
+            id: 'obs-latency-trend',
+            source: 'SYSTEM',
+            severity: 'INFO',
+            description: 'Slight latency increase in last 2 minutes',
+            isBlocking: false
+          }
+        ]
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: observationEvaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: observationEvaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('VALID');
+      expect(pkg.acceptanceEvaluation.overallVerdict).toBe('PASS_WITH_OBSERVATION');
+      expect(pkg.evidenceSummary.acceptanceVerdict.verdict).toBe('PASS_WITH_OBSERVATION');
+      expect(verifyPerformanceEvidencePackageDigest(pkg).isValid).toBe(true);
+    });
+
+    it('12. Tampered Defect Candidate digest causes INVALID_FINDINGS_INTEGRITY', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAttainedResults();
+
+      // Induce performance criterion failure to create a defect candidate
+      results.metrics.httpReqDurationCheckout = {
+        p95: 3500,
+        p90: 3100,
+        avg: 2800,
+        min: 200,
+        max: 4500
+      };
+      results.thresholdObservations = results.thresholdObservations.map((t) =>
+        t.metric === 'http_req_duration{journey:checkout}'
+          ? { ...t, status: 'OBSERVED_FAILED', engineResult: false }
+          : t
+      );
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      expect(register.defectCandidates.length).toBeGreaterThan(0);
+
+      // Tamper with Defect Candidate digest
+      const tamperedDefectCandidate = {
+        ...register.defectCandidates[0],
+        candidateDigest: '0000000000000000000000000000000000000000000000000000000000000000'
+      };
+
+      const tamperedRegister = {
+        ...register,
+        defectCandidates: [tamperedDefectCandidate]
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: tamperedRegister
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_FINDINGS_INTEGRITY');
+      expect(pkg.generationIssues.some((i) => i.toLowerCase().includes('digest mismatch'))).toBe(true);
+    });
+
+    it('13. Caller-supplied generation timestamp does NOT change package digest or id', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkgA = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register,
+        generationTimestamp: '2026-09-22T08:00:00.000Z'
+      });
+
+      const pkgB = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register,
+        generationTimestamp: '2026-09-22T16:30:00.000Z'
+      });
+
+      // Metadata timestamp differs
+      expect(pkgA.generatedAt).toBe('2026-09-22T08:00:00.000Z');
+      expect(pkgB.generatedAt).toBe('2026-09-22T16:30:00.000Z');
+
+      // Cryptographic digest and ID MUST be byte-for-byte identical
+      expect(pkgA.packageDigest.value).toBe(pkgB.packageDigest.value);
+      expect(pkgA.id).toBe(pkgB.id);
+    });
+
+    it('14. Strategy status STALE causes component STALE presence and INVALID_PROVENANCE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const staleStatusStrategy: EngineeringArtefact = {
+        id: 'strategy-retailco-bf2026-stale',
+        projectId: contract.projectId,
+        projectName: contract.projectName,
+        type: 'PERFORMANCE_STRATEGY',
+        title: 'RetailCo Performance Strategy',
+        version: 'v1.0',
+        status: 'STALE',
+        engineeringIntent: contract.engineeringIntent,
+        sourceContractId: contract.id,
+        sourceContractVersion: contract.version,
+        sourceContractFingerprint: evaluation.sourceContract.fingerprint,
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-09-21T10:00:00.000Z',
+        sections: [],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          canApprove: false,
+          status: 'STALE',
+          blockingReasons: ['Stale strategy'],
+          unresolvedIssuesCount: 1
+        }
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register,
+        strategy: staleStatusStrategy
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+      const stratComp = pkg.components.find((c) => c.componentType === 'PERFORMANCE_STRATEGY');
+      expect(stratComp?.presenceStatus).toBe('STALE');
+      expect(pkg.generationIssues.some((i) => i.includes("'STALE' status"))).toBe(true);
+    });
+
+    it('15. Strategy status SUPERSEDED causes component SUPERSEDED presence and INVALID_PROVENANCE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const supersededStrategy: EngineeringArtefact = {
+        id: 'strategy-retailco-bf2026-v0.5',
+        projectId: contract.projectId,
+        projectName: contract.projectName,
+        type: 'PERFORMANCE_STRATEGY',
+        title: 'RetailCo Performance Strategy v0.5',
+        version: 'v0.5',
+        status: 'SUPERSEDED',
+        engineeringIntent: contract.engineeringIntent,
+        sourceContractId: contract.id,
+        sourceContractVersion: contract.version,
+        sourceContractFingerprint: evaluation.sourceContract.fingerprint,
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-09-20T10:00:00.000Z',
+        sections: [],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          canApprove: false,
+          status: 'SUPERSEDED',
+          blockingReasons: ['Superseded by v1.0'],
+          unresolvedIssuesCount: 0
+        }
+      };
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register,
+        strategy: supersededStrategy
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+      const stratComp = pkg.components.find((c) => c.componentType === 'PERFORMANCE_STRATEGY');
+      expect(stratComp?.presenceStatus).toBe('SUPERSEDED');
+      expect(pkg.generationIssues.some((i) => i.includes('SUPERSEDED'))).toBe(true);
+    });
+
+    it('16. Test Plan status STALE and SUPERSEDED cause explicit presence status and INVALID_PROVENANCE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const staleTestPlan: EngineeringArtefact = {
+        id: 'testplan-retailco-bf2026-stale',
+        projectId: contract.projectId,
+        projectName: contract.projectName,
+        type: 'PERFORMANCE_TEST_PLAN',
+        title: 'RetailCo Performance Test Plan',
+        version: 'v1.0',
+        status: 'STALE',
+        engineeringIntent: contract.engineeringIntent,
+        sourceContractId: contract.id,
+        sourceContractVersion: contract.version,
+        sourceContractFingerprint: evaluation.sourceContract.fingerprint,
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-09-21T11:00:00.000Z',
+        sections: [],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          canApprove: false,
+          status: 'STALE',
+          blockingReasons: ['Stale test plan'],
+          unresolvedIssuesCount: 1
+        }
+      };
+
+      const pkgStale = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register,
+        testPlan: staleTestPlan
+      });
+
+      expect(pkgStale.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+      const planCompStale = pkgStale.components.find((c) => c.componentType === 'PERFORMANCE_TEST_PLAN');
+      expect(planCompStale?.presenceStatus).toBe('STALE');
+
+      const supersededPlan: EngineeringArtefact = {
+        ...staleTestPlan,
+        id: 'testplan-retailco-bf2026-superseded',
+        status: 'SUPERSEDED'
+      };
+
+      const pkgSuperseded = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register,
+        testPlan: supersededPlan
+      });
+
+      expect(pkgSuperseded.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+      const planCompSuperseded = pkgSuperseded.components.find((c) => c.componentType === 'PERFORMANCE_TEST_PLAN');
+      expect(planCompSuperseded?.presenceStatus).toBe('SUPERSEDED');
+    });
+
+    it('17. Authoritative RetailCo remains VALID package carrying INCONCLUSIVE Acceptance, one finding, and zero defect candidates', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({
+        contract,
+        testDefinition: testDef,
+        results
+      });
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      // Package validity vs Acceptance verdict
+      expect(pkg.packageGenerationStatus).toBe('VALID');
+      expect(pkg.acceptanceEvaluation.overallVerdict).toBe('INCONCLUSIVE');
+
+      // Workload prerequisite unresolved
+      expect(pkg.evidenceSummary.workloadAttainment.status).toBe('UNRESOLVED');
+      expect(pkg.evidenceSummary.workloadAttainment.isPrerequisiteMet).toBe(false);
+
+      // Criteria evaluations
+      const checkout = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'checkout_response_time');
+      expect(checkout?.status).toBe('PASS');
+      expect(checkout?.observedValue).toBeCloseTo(0.3906885, 4);
+
+      const errRate = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'global_error_rate');
+      expect(errRate?.status).toBe('PASS');
+      expect(errRate?.observedValue).toBe(0);
+
+      // Findings & defect candidate counts
+      expect(pkg.findingsRegister.totalFindings).toBe(1);
+      expect(pkg.findingsRegister.totalDefectCandidates).toBe(0);
+
+      // Cryptographic verification
+      const verify = verifyPerformanceEvidencePackageDigest(pkg);
+      expect(verify.isValid).toBe(true);
     });
   });
 });

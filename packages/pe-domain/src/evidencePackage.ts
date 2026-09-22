@@ -25,6 +25,7 @@ export type EvidencePackageGenerationStatus =
   | 'INVALID_PROVENANCE'
   | 'INVALID_ACCEPTANCE_INTEGRITY'
   | 'INVALID_FINDINGS_INTEGRITY'
+  | 'INVALID_RESULTS_INTEGRITY'
   | 'INCOMPLETE_REQUIRED_EVIDENCE';
 
 /**
@@ -48,6 +49,7 @@ export type ComponentPresenceStatus =
   | 'PRESENT'
   | 'ABSENT'
   | 'STALE'
+  | 'SUPERSEDED'
   | 'INVALID';
 
 /**
@@ -62,6 +64,9 @@ export interface EvidencePackageComponentReference {
   algorithm?: string;
   schemaVersion?: string;
   status?: string;
+  sourceContractFingerprint?: string;
+  executionBundleFingerprint?: string;
+  executionArtifactDigest?: string;
   sourceLocator?: string;
   isRequired: boolean;
   presenceStatus: ComponentPresenceStatus;
@@ -82,6 +87,31 @@ export interface RawEvidencePackageItem {
 }
 
 /**
+ * Workload demand breakdown separating business demand from scheduler demand
+ * and preserving governed stage timings (M4.1.1).
+ */
+export interface EvidencePackageWorkloadDemand {
+  businessDemand?: {
+    targetValue?: number;
+    unit?: string;
+    metric?: string;
+    timeBasis?: string;
+  };
+  schedulerDemand?: {
+    peakArrivalRate?: number;
+    unit?: string;
+    population?: string;
+    executionModel?: string;
+    startRate?: number;
+  };
+  profileType?: string;
+  totalDurationSeconds?: number;
+  rampUpSeconds?: number;
+  steadyStateSeconds?: number;
+  rampDownSeconds?: number;
+}
+
+/**
  * Deterministic render-neutral evidence summary.
  */
 export interface EvidencePackageSummary {
@@ -93,12 +123,7 @@ export interface EvidencePackageSummary {
     completedAt?: string;
     durationSeconds?: number;
   };
-  workloadDemand: {
-    targetRps?: number;
-    profileType?: string;
-    rampUpSeconds?: number;
-    steadyStateSeconds?: number;
-  };
+  workloadDemand: EvidencePackageWorkloadDemand;
   workloadAttainment: {
     status: WorkloadAttainmentEvaluationStatus;
     isPrerequisiteMet: boolean;
@@ -192,29 +217,29 @@ export interface PerformanceEvidencePackage {
   schemaVersion: 'performance-evidence-package-v1';
   projectId?: string;
   projectName?: string;
-  engineeringIntent: EngineeringIntent;
+  engineeringIntent?: EngineeringIntent;
   sourceExecutionRunId: string;
   sourceContract: {
-    id: string;
-    version: string | number;
-    fingerprint: string;
+    id?: string;
+    version?: string | number;
+    fingerprint?: string;
     status?: string;
   };
   sourceTestDefinition: {
-    id: string;
-    version: string;
-    fingerprint: string;
+    id?: string;
+    version?: string;
+    fingerprint?: string;
   };
   acceptanceEvaluation: {
-    id: string;
-    digest: string;
-    overallVerdict: AcceptanceVerdict;
+    id?: string;
+    digest?: string;
+    overallVerdict?: AcceptanceVerdict;
     evaluatedAt?: string;
   };
   findingsRegister: {
-    id: string;
-    digest: string;
-    generationStatus: FindingsGenerationStatus;
+    id?: string;
+    digest?: string;
+    generationStatus?: FindingsGenerationStatus;
     totalFindings: number;
     totalDefectCandidates: number;
   };
