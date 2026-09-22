@@ -58,19 +58,23 @@ function deepFreeze<T>(obj: T): T {
 /**
  * Input for building an acceptance evaluation digest payload.
  */
-export type AcceptanceEvaluationDigestInput = Pick<
-  AcceptanceEvaluation,
-  | 'sourceContract'
-  | 'testDefinition'
-  | 'canonicalResults'
-  | 'provenanceGate'
-  | 'operationalIntegrityGate'
-  | 'workloadPrerequisite'
-  | 'criterionEvaluations'
-  | 'governedObservations'
-  | 'overallVerdict'
-  | 'verdictReasons'
->;
+export type AcceptanceEvaluationDigestInput = Omit<
+  Pick<
+    AcceptanceEvaluation,
+    | 'sourceContract'
+    | 'testDefinition'
+    | 'canonicalResults'
+    | 'provenanceGate'
+    | 'operationalIntegrityGate'
+    | 'criterionEvaluations'
+    | 'governedObservations'
+    | 'overallVerdict'
+    | 'verdictReasons'
+  >,
+  'workloadPrerequisite'
+> & {
+  workloadPrerequisite?: WorkloadAttainmentEvaluation | null;
+};
 
 /**
  * Builds the canonical normalized acceptance evaluation digest payload according to acceptance-evaluation-v1.
@@ -103,18 +107,20 @@ export function buildAcceptanceEvaluationDigestPayload(
       isValid: evaluation.operationalIntegrityGate.isValid,
       reasons: [...evaluation.operationalIntegrityGate.reasons]
     },
-    workloadPrerequisite: {
-      status: evaluation.workloadPrerequisite.status,
-      isPrerequisiteMet: evaluation.workloadPrerequisite.isPrerequisiteMet,
-      targetValue: evaluation.workloadPrerequisite.targetValue,
-      observedValue: evaluation.workloadPrerequisite.observedValue,
-      unit: evaluation.workloadPrerequisite.unit,
-      timeBasis: evaluation.workloadPrerequisite.timeBasis,
-      tolerancePercentage: evaluation.workloadPrerequisite.tolerancePercentage,
-      requiredMinimum: evaluation.workloadPrerequisite.requiredMinimum,
-      derivationStatus: evaluation.workloadPrerequisite.derivationStatus,
-      rationale: evaluation.workloadPrerequisite.rationale
-    },
+    workloadPrerequisite: evaluation.workloadPrerequisite
+      ? {
+          status: evaluation.workloadPrerequisite.status,
+          isPrerequisiteMet: evaluation.workloadPrerequisite.isPrerequisiteMet,
+          targetValue: evaluation.workloadPrerequisite.targetValue,
+          observedValue: evaluation.workloadPrerequisite.observedValue,
+          unit: evaluation.workloadPrerequisite.unit,
+          timeBasis: evaluation.workloadPrerequisite.timeBasis,
+          tolerancePercentage: evaluation.workloadPrerequisite.tolerancePercentage,
+          requiredMinimum: evaluation.workloadPrerequisite.requiredMinimum,
+          derivationStatus: evaluation.workloadPrerequisite.derivationStatus,
+          rationale: evaluation.workloadPrerequisite.rationale
+        }
+      : null,
     criteria: evaluation.criterionEvaluations
       .slice()
       .sort((a, b) => a.criterionId.localeCompare(b.criterionId))

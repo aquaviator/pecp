@@ -116,22 +116,22 @@ export interface EvidencePackageWorkloadDemand {
  */
 export interface EvidencePackageSummary {
   execution: {
-    executionRunId: string;
-    executionMode: string;
-    operationalStatus: string;
+    executionRunId?: string;
+    executionMode?: string;
+    operationalStatus?: string;
     startedAt?: string;
     completedAt?: string;
     durationSeconds?: number;
   };
   workloadDemand: EvidencePackageWorkloadDemand;
-  workloadAttainment: {
-    status: WorkloadAttainmentEvaluationStatus;
-    isPrerequisiteMet: boolean;
+  workloadAttainment?: {
+    status?: WorkloadAttainmentEvaluationStatus;
+    isPrerequisiteMet?: boolean;
     observedValue?: number;
     targetValue?: number;
     unit?: string;
     derivationStatus?: string;
-    rationale: string;
+    rationale?: string;
   };
   criterionOutcomes: Array<{
     criterionId: string;
@@ -145,13 +145,13 @@ export interface EvidencePackageSummary {
     status: CriterionEvaluationStatus;
     rationale: string;
   }>;
-  acceptanceVerdict: {
-    verdict: AcceptanceVerdict;
-    reasons: string[];
+  acceptanceVerdict?: {
+    verdict?: AcceptanceVerdict;
+    reasons?: string[];
     evaluatedAt?: string;
   };
-  findingsSummary: {
-    generationStatus: FindingsGenerationStatus;
+  findingsSummary?: {
+    generationStatus?: FindingsGenerationStatus;
     totalFindings: number;
     byType: Record<string, number>;
     byClassification: Record<string, number>;
@@ -218,7 +218,7 @@ export interface PerformanceEvidencePackage {
   projectId?: string;
   projectName?: string;
   engineeringIntent?: EngineeringIntent;
-  sourceExecutionRunId: string;
+  sourceExecutionRunId?: string;
   sourceContract: {
     id?: string;
     version?: string | number;

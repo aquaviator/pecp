@@ -185,7 +185,14 @@ export function buildEvidencePackageDigestPayload(pkg: {
         details: e.details
       })),
     evidenceSummary: {
-      execution: pkg.evidenceSummary.execution,
+      execution: {
+        executionRunId: pkg.evidenceSummary.execution.executionRunId ?? null,
+        executionMode: pkg.evidenceSummary.execution.executionMode ?? null,
+        operationalStatus: pkg.evidenceSummary.execution.operationalStatus ?? null,
+        startedAt: pkg.evidenceSummary.execution.startedAt ?? null,
+        completedAt: pkg.evidenceSummary.execution.completedAt ?? null,
+        durationSeconds: pkg.evidenceSummary.execution.durationSeconds ?? null
+      },
       workloadDemand: {
         businessDemand: pkg.evidenceSummary.workloadDemand.businessDemand
           ? {
@@ -210,21 +217,38 @@ export function buildEvidencePackageDigestPayload(pkg: {
         steadyStateSeconds: pkg.evidenceSummary.workloadDemand.steadyStateSeconds ?? null,
         rampDownSeconds: pkg.evidenceSummary.workloadDemand.rampDownSeconds ?? null
       },
-      workloadAttainment: pkg.evidenceSummary.workloadAttainment,
+      workloadAttainment: pkg.evidenceSummary.workloadAttainment
+        ? {
+            status: pkg.evidenceSummary.workloadAttainment.status ?? null,
+            isPrerequisiteMet:
+              pkg.evidenceSummary.workloadAttainment.isPrerequisiteMet != null
+                ? pkg.evidenceSummary.workloadAttainment.isPrerequisiteMet
+                : null,
+            observedValue: pkg.evidenceSummary.workloadAttainment.observedValue ?? null,
+            targetValue: pkg.evidenceSummary.workloadAttainment.targetValue ?? null,
+            unit: pkg.evidenceSummary.workloadAttainment.unit ?? null,
+            derivationStatus: pkg.evidenceSummary.workloadAttainment.derivationStatus ?? null,
+            rationale: pkg.evidenceSummary.workloadAttainment.rationale ?? null
+          }
+        : null,
       criterionOutcomes: [...pkg.evidenceSummary.criterionOutcomes].sort((a, b) =>
         a.criterionId.localeCompare(b.criterionId)
       ),
-      acceptanceVerdict: {
-        verdict: pkg.evidenceSummary.acceptanceVerdict.verdict,
-        reasons: [...pkg.evidenceSummary.acceptanceVerdict.reasons].sort()
-      },
-      findingsSummary: {
-        generationStatus: pkg.evidenceSummary.findingsSummary.generationStatus,
-        totalFindings: pkg.evidenceSummary.findingsSummary.totalFindings,
-        byType: pkg.evidenceSummary.findingsSummary.byType,
-        byClassification: pkg.evidenceSummary.findingsSummary.byClassification,
-        totalDefectCandidates: pkg.evidenceSummary.findingsSummary.totalDefectCandidates
-      },
+      acceptanceVerdict: pkg.evidenceSummary.acceptanceVerdict
+        ? {
+            verdict: pkg.evidenceSummary.acceptanceVerdict.verdict ?? null,
+            reasons: [...(pkg.evidenceSummary.acceptanceVerdict.reasons ?? [])].sort()
+          }
+        : null,
+      findingsSummary: pkg.evidenceSummary.findingsSummary
+        ? {
+            generationStatus: pkg.evidenceSummary.findingsSummary.generationStatus ?? null,
+            totalFindings: pkg.evidenceSummary.findingsSummary.totalFindings,
+            byType: pkg.evidenceSummary.findingsSummary.byType,
+            byClassification: pkg.evidenceSummary.findingsSummary.byClassification,
+            totalDefectCandidates: pkg.evidenceSummary.findingsSummary.totalDefectCandidates
+          }
+        : null,
       dataQualityAndIntegrity: pkg.evidenceSummary.dataQualityAndIntegrity
     }
   };
@@ -416,6 +440,24 @@ export function generatePerformanceEvidencePackage(
       packageGenerationStatus = 'INVALID_PROVENANCE';
     }
   } else {
+    if (!contract.id) {
+      generationIssues.push('Performance Contract is missing required ID.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!contract.version) {
+      generationIssues.push('Performance Contract is missing required version.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!computedContractFingerprint) {
+      generationIssues.push('Performance Contract is missing computable fingerprint.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
     if (!contract.engineeringIntent) {
       generationIssues.push('Performance Contract is missing required engineeringIntent.');
       if (packageGenerationStatus === 'VALID') {
@@ -551,6 +593,24 @@ export function generatePerformanceEvidencePackage(
       packageGenerationStatus = 'INVALID_PROVENANCE';
     }
   } else {
+    if (!testDefinition.id) {
+      generationIssues.push('Test Definition is missing required ID.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!testDefinition.version) {
+      generationIssues.push('Test Definition is missing required version.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!computedTestDefinitionFingerprint) {
+      generationIssues.push('Test Definition is missing computable fingerprint.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
     if (
       testDefinition.fingerprint &&
       testDefinition.fingerprint !== computedTestDefinitionFingerprint
@@ -638,12 +698,55 @@ export function generatePerformanceEvidencePackage(
 
   // 2c. Execution Run Identity & Linkage
   const runId = results?.run?.executionRunId;
-  if (!runId) {
-    generationIssues.push('Execution run ID is missing from canonical results.');
+  if (!results?.run) {
+    generationIssues.push('Execution run metadata is missing from canonical results.');
     if (packageGenerationStatus === 'VALID') {
       packageGenerationStatus = 'INVALID_PROVENANCE';
     }
   } else {
+    if (!results.run.executionRunId) {
+      generationIssues.push('Execution run ID is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!results.run.executionMode) {
+      generationIssues.push('Execution run executionMode is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!results.run.operationalStatus) {
+      generationIssues.push('Execution run operationalStatus is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!results.run.timestamps?.startedAt) {
+      generationIssues.push('Execution run startedAt timestamp is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!results.run.timestamps?.completedAt) {
+      generationIssues.push('Execution run completedAt timestamp is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    const commitSha = results.run.repositoryCommitSha ?? results.run.commitSha;
+    if (!commitSha) {
+      generationIssues.push('Execution run repository/commit SHA is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+    if (!results.run.bundleFingerprint) {
+      generationIssues.push('Execution run bundleFingerprint is missing from canonical results.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
     if (
       acceptanceEvaluation?.sourceExecutionRunId &&
       acceptanceEvaluation.sourceExecutionRunId !== runId
@@ -917,14 +1020,14 @@ export function generatePerformanceEvidencePackage(
       canonicalId: testDefinition?.id,
       version: testDefinition?.version,
       fingerprint: computedTestDefinitionFingerprint,
-      status: 'ACTIVE',
+      status: testDefinition?.status,
       isRequired: true,
       presenceStatus: testDefinition ? 'PRESENT' : 'ABSENT'
     },
     {
       componentType: 'EXECUTION_RUN',
       canonicalId: runId,
-      version: results?.run?.repositoryCommitSha,
+      version: results?.run?.repositoryCommitSha ?? results?.run?.commitSha,
       executionBundleFingerprint: results?.run?.bundleFingerprint,
       executionArtifactDigest: results?.run?.executionArtifact?.digest,
       status: results?.run?.operationalStatus,
@@ -941,7 +1044,6 @@ export function generatePerformanceEvidencePackage(
     {
       componentType: 'CANONICAL_RESULTS',
       canonicalId: runId ? `results-${runId}` : undefined,
-      status: 'INGESTED',
       isRequired: true,
       presenceStatus: results ? 'PRESENT' : 'ABSENT'
     },
@@ -974,6 +1076,17 @@ export function generatePerformanceEvidencePackage(
     }
     return (a.canonicalId || '').localeCompare(b.canonicalId || '');
   });
+
+  for (const comp of components) {
+    if (comp.isRequired && comp.presenceStatus === 'PRESENT' && !comp.canonicalId) {
+      generationIssues.push(
+        `Required component '${comp.componentType}' is present but lacks required canonical identity.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
+  }
 
   // -------------------------------------------------------------------------
   // 5. Raw Evidence Manifest Assembly (§7)
@@ -1089,36 +1202,42 @@ export function generatePerformanceEvidencePackage(
 
   const evidenceSummary: EvidencePackageSummary = {
     execution: {
-      executionRunId: runId ?? '',
-      executionMode: results?.run?.executionMode ?? 'CANONICAL',
-      operationalStatus: results?.run?.operationalStatus ?? 'UNKNOWN',
+      executionRunId: runId,
+      executionMode: results?.run?.executionMode,
+      operationalStatus: results?.run?.operationalStatus,
       startedAt: results?.run?.timestamps?.startedAt,
       completedAt: results?.run?.timestamps?.completedAt,
       durationSeconds: results?.run?.timestamps?.durationSeconds
     },
     workloadDemand,
-    workloadAttainment: {
-      status: acceptanceEvaluation?.workloadPrerequisite?.status ?? 'INVALID',
-      isPrerequisiteMet: Boolean(acceptanceEvaluation?.workloadPrerequisite?.isPrerequisiteMet),
-      observedValue: acceptanceEvaluation?.workloadPrerequisite?.observedValue,
-      targetValue: acceptanceEvaluation?.workloadPrerequisite?.targetValue,
-      unit: acceptanceEvaluation?.workloadPrerequisite?.unit,
-      derivationStatus: acceptanceEvaluation?.workloadPrerequisite?.derivationStatus,
-      rationale: acceptanceEvaluation?.workloadPrerequisite?.rationale ?? ''
-    },
+    workloadAttainment: acceptanceEvaluation?.workloadPrerequisite
+      ? {
+          status: acceptanceEvaluation.workloadPrerequisite.status,
+          isPrerequisiteMet: acceptanceEvaluation.workloadPrerequisite.isPrerequisiteMet,
+          observedValue: acceptanceEvaluation.workloadPrerequisite.observedValue,
+          targetValue: acceptanceEvaluation.workloadPrerequisite.targetValue,
+          unit: acceptanceEvaluation.workloadPrerequisite.unit,
+          derivationStatus: acceptanceEvaluation.workloadPrerequisite.derivationStatus,
+          rationale: acceptanceEvaluation.workloadPrerequisite.rationale
+        }
+      : undefined,
     criterionOutcomes,
-    acceptanceVerdict: {
-      verdict: acceptanceEvaluation?.overallVerdict!,
-      reasons: [...(acceptanceEvaluation?.verdictReasons ?? [])],
-      evaluatedAt: acceptanceEvaluation?.evaluatedAt
-    },
-    findingsSummary: {
-      generationStatus: findingsRegister?.generationStatus!,
-      totalFindings: findingsRegister?.findings?.length ?? 0,
-      byType,
-      byClassification,
-      totalDefectCandidates: findingsRegister?.defectCandidates?.length ?? 0
-    },
+    acceptanceVerdict: acceptanceEvaluation?.overallVerdict
+      ? {
+          verdict: acceptanceEvaluation.overallVerdict,
+          reasons: [...(acceptanceEvaluation?.verdictReasons ?? [])],
+          evaluatedAt: acceptanceEvaluation?.evaluatedAt
+        }
+      : undefined,
+    findingsSummary: findingsRegister?.generationStatus
+      ? {
+          generationStatus: findingsRegister.generationStatus,
+          totalFindings: findingsRegister?.findings?.length ?? 0,
+          byType,
+          byClassification,
+          totalDefectCandidates: findingsRegister?.defectCandidates?.length ?? 0
+        }
+      : undefined,
     dataQualityAndIntegrity: {
       provenanceValid: Boolean(acceptanceEvaluation?.provenanceGate?.isValid),
       operationalIntegrityValid: Boolean(acceptanceEvaluation?.operationalIntegrityGate?.isValid),
@@ -1134,30 +1253,26 @@ export function generatePerformanceEvidencePackage(
   // -------------------------------------------------------------------------
   const lineageEdges: EvidencePackageLineageEdge[] = [];
 
-  const contractId = contract?.id ?? 'unknown';
-  const testDefId = testDefinition?.id ?? 'unknown';
-  const safeRunId = runId ?? 'unknown';
-
-  lineageEdges.push({
-    fromComponent: 'PERFORMANCE_CONTRACT',
-    fromId: contractId,
-    toComponent: 'TEST_DEFINITION',
-    toId: testDefId,
-    bindingType: 'SPECIFIES',
-    verified: Boolean(
-      contract &&
-        testDefinition &&
-        testDefinition.sourceContractId === contract.id &&
-        computedContractFingerprint &&
-        testDefinition.sourceContractFingerprint === computedContractFingerprint
-    ),
-    details: 'Contract specifies workload demand and acceptance criteria for Test Definition.'
-  });
-
-  if (strategy) {
+  if (contract?.id && testDefinition?.id) {
     lineageEdges.push({
       fromComponent: 'PERFORMANCE_CONTRACT',
-      fromId: contractId,
+      fromId: contract.id,
+      toComponent: 'TEST_DEFINITION',
+      toId: testDefinition.id,
+      bindingType: 'SPECIFIES',
+      verified: Boolean(
+        testDefinition.sourceContractId === contract.id &&
+          computedContractFingerprint &&
+          testDefinition.sourceContractFingerprint === computedContractFingerprint
+      ),
+      details: 'Contract specifies workload demand and acceptance criteria for Test Definition.'
+    });
+  }
+
+  if (strategy?.id && contract?.id) {
+    lineageEdges.push({
+      fromComponent: 'PERFORMANCE_CONTRACT',
+      fromId: contract.id,
       toComponent: 'PERFORMANCE_STRATEGY',
       toId: strategy.id,
       bindingType: 'GOVERNS',
@@ -1166,10 +1281,10 @@ export function generatePerformanceEvidencePackage(
     });
   }
 
-  if (testPlan) {
+  if (testPlan?.id && contract?.id) {
     lineageEdges.push({
       fromComponent: 'PERFORMANCE_CONTRACT',
-      fromId: contractId,
+      fromId: contract.id,
       toComponent: 'PERFORMANCE_TEST_PLAN',
       toId: testPlan.id,
       bindingType: 'GOVERNS',
@@ -1178,69 +1293,74 @@ export function generatePerformanceEvidencePackage(
     });
   }
 
-  lineageEdges.push({
-    fromComponent: 'TEST_DEFINITION',
-    fromId: testDefId,
-    toComponent: 'EXECUTION_RUN',
-    toId: safeRunId,
-    bindingType: 'PRODUCES',
-    verified: Boolean(
-      testDefinition &&
-        results?.run?.testDefinition?.id === testDefId &&
-        computedTestDefinitionFingerprint &&
-        results?.run?.testDefinition?.fingerprint === computedTestDefinitionFingerprint
-    ),
-    details: 'Test Definition compiled and executed in execution run.'
-  });
+  if (testDefinition?.id && runId) {
+    lineageEdges.push({
+      fromComponent: 'TEST_DEFINITION',
+      fromId: testDefinition.id,
+      toComponent: 'EXECUTION_RUN',
+      toId: runId,
+      bindingType: 'PRODUCES',
+      verified: Boolean(
+        results?.run?.testDefinition?.id === testDefinition.id &&
+          computedTestDefinitionFingerprint &&
+          results?.run?.testDefinition?.fingerprint === computedTestDefinitionFingerprint
+      ),
+      details: 'Test Definition compiled and executed in execution run.'
+    });
+  }
 
-  lineageEdges.push({
-    fromComponent: 'EXECUTION_RUN',
-    fromId: safeRunId,
-    toComponent: 'RAW_EVIDENCE_INVENTORY',
-    toId: runId ? `raw-evidence-${runId}` : 'unknown',
-    bindingType: 'CAPTURES',
-    verified: isRawEvidenceValid,
-    details: 'Execution harness captured raw execution evidence logs and metrics.'
-  });
+  if (runId) {
+    lineageEdges.push({
+      fromComponent: 'EXECUTION_RUN',
+      fromId: runId,
+      toComponent: 'RAW_EVIDENCE_INVENTORY',
+      toId: `raw-evidence-${runId}`,
+      bindingType: 'CAPTURES',
+      verified: isRawEvidenceValid,
+      details: 'Execution harness captured raw execution evidence logs and metrics.'
+    });
 
-  lineageEdges.push({
-    fromComponent: 'RAW_EVIDENCE_INVENTORY',
-    fromId: runId ? `raw-evidence-${runId}` : 'unknown',
-    toComponent: 'CANONICAL_RESULTS',
-    toId: runId ? `results-${runId}` : 'unknown',
-    bindingType: 'PARSES',
-    verified: isRawEvidenceValid && Boolean(results?.metrics),
-    details: 'Ingestion engine parsed and corroborated canonical results from raw evidence.'
-  });
+    lineageEdges.push({
+      fromComponent: 'RAW_EVIDENCE_INVENTORY',
+      fromId: `raw-evidence-${runId}`,
+      toComponent: 'CANONICAL_RESULTS',
+      toId: `results-${runId}`,
+      bindingType: 'PARSES',
+      verified: isRawEvidenceValid && Boolean(results?.metrics),
+      details: 'Ingestion engine parsed and corroborated canonical results from raw evidence.'
+    });
+  }
 
-  lineageEdges.push({
-    fromComponent: 'CANONICAL_RESULTS',
-    fromId: runId ? `results-${runId}` : 'unknown',
-    toComponent: 'ACCEPTANCE_EVALUATION',
-    toId: acceptanceEvaluation?.id ?? 'unknown',
-    bindingType: 'EVALUATES',
-    verified: Boolean(
-      runId &&
-        acceptanceEvaluation?.canonicalResults?.executionRunId === runId &&
-        acceptanceEvaluation?.sourceExecutionRunId === runId
-    ),
-    details: 'Acceptance engine evaluated criteria and workload against canonical results.'
-  });
+  if (runId && acceptanceEvaluation?.id) {
+    lineageEdges.push({
+      fromComponent: 'CANONICAL_RESULTS',
+      fromId: `results-${runId}`,
+      toComponent: 'ACCEPTANCE_EVALUATION',
+      toId: acceptanceEvaluation.id,
+      bindingType: 'EVALUATES',
+      verified: Boolean(
+        acceptanceEvaluation.canonicalResults?.executionRunId === runId &&
+          acceptanceEvaluation.sourceExecutionRunId === runId
+      ),
+      details: 'Acceptance engine evaluated criteria and workload against canonical results.'
+    });
+  }
 
-  lineageEdges.push({
-    fromComponent: 'ACCEPTANCE_EVALUATION',
-    fromId: acceptanceEvaluation?.id ?? 'unknown',
-    toComponent: 'FINDINGS_REGISTER',
-    toId: findingsRegister?.id ?? 'unknown',
-    bindingType: 'REGISTERS',
-    verified: Boolean(
-      acceptanceEvaluation?.id &&
-        findingsRegister?.sourceAcceptanceEvaluationId === acceptanceEvaluation?.id &&
-        findingsRegister?.sourceAcceptanceEvaluationDigest ===
-          acceptanceEvaluation?.evaluationDigest?.value
-    ),
-    details: 'Findings engine registered governed findings and defect candidates.'
-  });
+  if (acceptanceEvaluation?.id && findingsRegister?.id) {
+    lineageEdges.push({
+      fromComponent: 'ACCEPTANCE_EVALUATION',
+      fromId: acceptanceEvaluation.id,
+      toComponent: 'FINDINGS_REGISTER',
+      toId: findingsRegister.id,
+      bindingType: 'REGISTERS',
+      verified: Boolean(
+        findingsRegister.sourceAcceptanceEvaluationId === acceptanceEvaluation.id &&
+          findingsRegister.sourceAcceptanceEvaluationDigest ===
+            acceptanceEvaluation.evaluationDigest?.value
+      ),
+      details: 'Findings engine registered governed findings and defect candidates.'
+    });
+  }
 
   const lineage: EvidencePackageLineage = {
     edges: lineageEdges.sort((a, b) => {
@@ -1259,7 +1379,7 @@ export function generatePerformanceEvidencePackage(
     projectId: contract?.projectId,
     projectName: contract?.projectName,
     engineeringIntent: contract?.engineeringIntent,
-    sourceExecutionRunId: safeRunId,
+    sourceExecutionRunId: runId,
     sourceContract: {
       id: contract?.id,
       version: contract?.version,
@@ -1298,7 +1418,7 @@ export function generatePerformanceEvidencePackage(
     projectId: contract?.projectId,
     projectName: contract?.projectName,
     engineeringIntent: contract?.engineeringIntent,
-    sourceExecutionRunId: safeRunId,
+    sourceExecutionRunId: runId,
     sourceContract: {
       id: contract?.id,
       version: contract?.version,

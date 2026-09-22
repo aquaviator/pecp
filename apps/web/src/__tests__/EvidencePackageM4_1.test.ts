@@ -10,6 +10,8 @@ import {
   compileTestDefinition,
   ingestGovernedExecutionEvidence,
   evaluateAcceptance,
+  computeAcceptanceEvaluationDigest,
+  buildAcceptanceEvaluationDigestPayload,
   generateFindings,
   generatePerformanceEvidencePackage,
   verifyPerformanceEvidencePackageDigest,
@@ -357,7 +359,7 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
 
       expect(pkg.packageGenerationStatus).toBe('VALID');
       expect(pkg.acceptanceEvaluation.overallVerdict).toBe('PASS');
-      expect(pkg.evidenceSummary.acceptanceVerdict.verdict).toBe('PASS');
+      expect(pkg.evidenceSummary.acceptanceVerdict?.verdict).toBe('PASS');
       expect(verifyPerformanceEvidencePackageDigest(pkg).isValid).toBe(true);
     });
 
@@ -409,7 +411,7 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
       expect(pkg.packageGenerationStatus).toBe('VALID');
       expect(pkg.acceptanceEvaluation.overallVerdict).toBe('FAIL');
       expect(pkg.findingsRegister.totalDefectCandidates).toBe(1);
-      expect(pkg.evidenceSummary.findingsSummary.totalDefectCandidates).toBe(1);
+      expect(pkg.evidenceSummary.findingsSummary?.totalDefectCandidates).toBe(1);
       expect(verifyPerformanceEvidencePackageDigest(pkg).isValid).toBe(true);
     });
   });
@@ -1631,7 +1633,7 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
 
       expect(pkg.packageGenerationStatus).toBe('VALID');
       expect(pkg.acceptanceEvaluation.overallVerdict).toBe('PASS_WITH_OBSERVATION');
-      expect(pkg.evidenceSummary.acceptanceVerdict.verdict).toBe('PASS_WITH_OBSERVATION');
+      expect(pkg.evidenceSummary.acceptanceVerdict?.verdict).toBe('PASS_WITH_OBSERVATION');
       expect(verifyPerformanceEvidencePackageDigest(pkg).isValid).toBe(true);
     });
 
@@ -1957,8 +1959,8 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
       expect(pkg.acceptanceEvaluation.overallVerdict).toBe('INCONCLUSIVE');
 
       // Workload prerequisite unresolved
-      expect(pkg.evidenceSummary.workloadAttainment.status).toBe('UNRESOLVED');
-      expect(pkg.evidenceSummary.workloadAttainment.isPrerequisiteMet).toBe(false);
+      expect(pkg.evidenceSummary.workloadAttainment?.status).toBe('UNRESOLVED');
+      expect(pkg.evidenceSummary.workloadAttainment?.isPrerequisiteMet).toBe(false);
 
       // Criteria evaluations
       const checkout = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'checkout_response_time');
@@ -1976,6 +1978,244 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
       // Cryptographic verification
       const verify = verifyPerformanceEvidencePackageDigest(pkg);
       expect(verify.isValid).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 18. M4.1.2 Audit Metadata Fidelity & Placeholder Elimination Gate
+  // -------------------------------------------------------------------------
+  describe('18. M4.1.2 Audit Metadata Fidelity & Placeholder Elimination Gate', () => {
+    it('preserves exact canonical TestDefinition status instead of hardcoding ACTIVE', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      (testDef as any).status = 'STABLE';
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      const testDefComponent = pkg.components.find((c) => c.componentType === 'TEST_DEFINITION');
+      expect(testDefComponent?.status).toBe('STABLE');
+    });
+
+    it('does not invent CANONICAL_RESULTS status = INGESTED', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      const resultsComponent = pkg.components.find((c) => c.componentType === 'CANONICAL_RESULTS');
+      expect(resultsComponent?.status).toBeUndefined();
+    });
+
+    it('does not synthesize executionMode=CANONICAL or operationalStatus=UNKNOWN fallbacks', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      delete (results.run as any).executionMode;
+      delete (results.run as any).operationalStatus;
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+      expect(pkg.evidenceSummary.execution.executionMode).toBeUndefined();
+      expect(pkg.evidenceSummary.execution.operationalStatus).toBeUndefined();
+      expect(verifyPerformanceEvidencePackageDigest(pkg).isValid).toBe(true);
+    });
+
+    it('does not synthesize missing workload prerequisite into INVALID or empty rationale', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      // Simulate absent workload prerequisite with valid cryptographic digest
+      const evaluationWithoutPrereq: any = {
+        ...evaluation,
+        workloadPrerequisite: undefined
+      };
+      evaluationWithoutPrereq.evaluationDigest = computeAcceptanceEvaluationDigest(
+        buildAcceptanceEvaluationDigestPayload(evaluationWithoutPrereq)
+      );
+
+      const register = generateFindings({
+        acceptanceEvaluation: evaluationWithoutPrereq,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluationWithoutPrereq,
+        findingsRegister: register
+      });
+
+      expect(pkg.evidenceSummary.workloadAttainment).toBeUndefined();
+      expect(verifyPerformanceEvidencePackageDigest(pkg).isValid).toBe(true);
+    });
+
+    it('eliminates all literal unknown strings in lineage edges and package identity', () => {
+      const contract = { ...RETAILCO_M3_APPROVED_CONTRACT, id: '' } as any;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+      delete (results.run as any).executionRunId;
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).not.toBe('VALID');
+      expect(pkg.sourceExecutionRunId).toBeUndefined();
+
+      // Check no lineage edges contain 'unknown'
+      for (const edge of pkg.lineage.edges) {
+        expect(edge.fromId).not.toBe('unknown');
+        expect(edge.toId).not.toBe('unknown');
+      }
+
+      // Check JSON representation has no "unknown" values
+      const jsonStr = JSON.stringify(pkg);
+      expect(jsonStr).not.toContain('"unknown"');
+    });
+
+    it('requires complete audit identities before a package can be VALID', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      // Missing commit SHA
+      delete (results.run as any).repositoryCommitSha;
+      delete (results.run as any).commitSha;
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+      expect(pkg.generationIssues).toContain(
+        'Execution run repository/commit SHA is missing from canonical results.'
+      );
+    });
+
+    it('strictly preserves authoritative RetailCo package facts and invariant values', () => {
+      const contract = RETAILCO_M3_APPROVED_CONTRACT;
+      const testDef = createAuthoritativeTestDef();
+      const results = createAuthoritativeResults();
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+      const register = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDef
+      });
+
+      const pkg = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDef,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister: register
+      });
+
+      // Status invariants
+      expect(pkg.packageGenerationStatus).toBe('VALID');
+      expect(pkg.acceptanceEvaluation.overallVerdict).toBe('INCONCLUSIVE');
+
+      // Demand invariants
+      expect(pkg.evidenceSummary.workloadDemand.businessDemand?.targetValue).toBe(8.75);
+      expect(pkg.evidenceSummary.workloadDemand.businessDemand?.unit).toBe('orders/second');
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand?.peakArrivalRate).toBe(109.375);
+      expect(pkg.evidenceSummary.workloadDemand.schedulerDemand?.unit).toBe('journey_iterations/second');
+
+      // Timings: 300 / 900 / 120 / 1320
+      expect(pkg.evidenceSummary.workloadDemand.rampUpSeconds).toBe(300);
+      expect(pkg.evidenceSummary.workloadDemand.steadyStateSeconds).toBe(900);
+      expect(pkg.evidenceSummary.workloadDemand.rampDownSeconds).toBe(120);
+      expect(pkg.evidenceSummary.workloadDemand.totalDurationSeconds).toBe(1320);
+
+      // Criteria outcomes
+      const checkout = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'checkout_response_time');
+      expect(checkout?.status).toBe('PASS');
+      expect(checkout?.observedValue).toBeCloseTo(0.3906885, 4);
+
+      const errorRate = pkg.evidenceSummary.criterionOutcomes.find((c) => c.key === 'global_error_rate');
+      expect(errorRate?.status).toBe('PASS');
+      expect(errorRate?.observedValue).toBe(0);
+
+      // Findings & defect candidates
+      expect(pkg.findingsRegister.totalFindings).toBe(1);
+      expect(pkg.findingsRegister.totalDefectCandidates).toBe(0);
+
+      // Verifiable digest
+      const verification = verifyPerformanceEvidencePackageDigest(pkg);
+      expect(verification.isValid).toBe(true);
     });
   });
 });
