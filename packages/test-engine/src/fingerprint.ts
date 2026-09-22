@@ -1,4 +1,10 @@
-import { TestDefinition, K6ExecutionBundle, AcceptanceEvaluationDigest, FindingsRegisterDigest } from '@pecp/pe-domain';
+import {
+  TestDefinition,
+  K6ExecutionBundle,
+  AcceptanceEvaluationDigest,
+  FindingsRegisterDigest,
+  EvidencePackageDigest
+} from '@pecp/pe-domain';
 
 /**
  * Standard FIPS 180-4 SHA-256 implementation in pure TypeScript.
@@ -234,6 +240,20 @@ export function computeFindingsRegisterDigest(payload: unknown): FindingsRegiste
   return {
     algorithm: 'SHA-256',
     schemaVersion: 'findings-register-v1',
+    value: hash
+  };
+}
+
+/**
+ * Computes deterministic SHA-256 cryptographic digest of a normalized Performance Evidence Package.
+ * Adheres to M4.1 performance-evidence-package-v1 schema without wall-clock timestamps.
+ */
+export function computeEvidencePackageDigest(payload: unknown): EvidencePackageDigest {
+  const canonicalJson = JSON.stringify(payload);
+  const hash = sha256Hex(canonicalJson);
+  return {
+    algorithm: 'SHA-256',
+    schemaVersion: 'performance-evidence-package-v1',
     value: hash
   };
 }

@@ -51,12 +51,12 @@ function deepFreeze<T>(obj: T): Readonly<T> {
 }
 
 /**
- * Computes deterministic SHA-256 digest and ID for a CanonicalFinding.
+ * Builds deterministic digest payload for a CanonicalFinding.
  */
-function finalizeFinding(
-  finding: Omit<CanonicalFinding, 'id' | 'findingDigest'>
-): CanonicalFinding {
-  const payload = {
+export function computeCanonicalFindingDigestPayload(
+  finding: CanonicalFinding | Omit<CanonicalFinding, 'id' | 'findingDigest'>
+) {
+  return {
     sourceAcceptanceEvaluationDigest: finding.sourceAcceptanceEvaluationDigest,
     sourceExecutionRunId: finding.sourceExecutionRunId,
     sourceContractFingerprint: finding.sourceContractFingerprint,
@@ -78,8 +78,25 @@ function finalizeFinding(
     deterministicReason: finding.deterministicReason,
     severity: finding.severity ?? null
   };
+}
 
-  const digest = sha256Hex(JSON.stringify(payload));
+/**
+ * Computes deterministic SHA-256 digest string for a CanonicalFinding.
+ */
+export function computeCanonicalFindingDigest(
+  finding: CanonicalFinding | Omit<CanonicalFinding, 'id' | 'findingDigest'>
+): string {
+  const payload = computeCanonicalFindingDigestPayload(finding);
+  return sha256Hex(JSON.stringify(payload));
+}
+
+/**
+ * Computes deterministic SHA-256 digest and ID for a CanonicalFinding.
+ */
+function finalizeFinding(
+  finding: Omit<CanonicalFinding, 'id' | 'findingDigest'>
+): CanonicalFinding {
+  const digest = computeCanonicalFindingDigest(finding);
   return {
     ...finding,
     id: `finding-${digest.slice(0, 16)}`,
@@ -88,13 +105,12 @@ function finalizeFinding(
 }
 
 /**
- * Computes deterministic SHA-256 digest and ID for a DefectCandidate.
- * Invariant: Never contains fallback substituted values.
+ * Builds deterministic digest payload for a DefectCandidate.
  */
-function finalizeDefectCandidate(
-  candidate: Omit<DefectCandidate, 'id' | 'candidateDigest'>
-): DefectCandidate {
-  const payload = {
+export function computeDefectCandidateDigestPayload(
+  candidate: DefectCandidate | Omit<DefectCandidate, 'id' | 'candidateDigest'>
+) {
+  return {
     sourceFindingId: candidate.sourceFindingId,
     title: candidate.title,
     factualProblemStatement: candidate.factualProblemStatement,
@@ -120,13 +136,197 @@ function finalizeDefectCandidate(
     publicationEligibility: candidate.publicationEligibility,
     blockingReasonsToPublication: [...candidate.blockingReasonsToPublication].sort()
   };
+}
 
-  const digest = sha256Hex(JSON.stringify(payload));
+/**
+ * Computes deterministic SHA-256 digest string for a DefectCandidate.
+ */
+export function computeDefectCandidateDigest(
+  candidate: DefectCandidate | Omit<DefectCandidate, 'id' | 'candidateDigest'>
+): string {
+  const payload = computeDefectCandidateDigestPayload(candidate);
+  return sha256Hex(JSON.stringify(payload));
+}
+
+/**
+ * Computes deterministic SHA-256 digest and ID for a DefectCandidate.
+ * Invariant: Never contains fallback substituted values.
+ */
+function finalizeDefectCandidate(
+  candidate: Omit<DefectCandidate, 'id' | 'candidateDigest'>
+): DefectCandidate {
+  const digest = computeDefectCandidateDigest(candidate);
   return {
     ...candidate,
     id: `candidate-${digest.slice(0, 16)}`,
     candidateDigest: digest
   };
+}
+
+export interface VerifyFindingsRegisterDigestResult {
+  isValid: boolean;
+  recomputedDigest: string;
+  expectedDigest?: string;
+  error?: string;
+}
+
+/**
+ * Builds normalized payload for FindingsRegister digest computation.
+ */
+export function buildFindingsRegisterDigestPayload(register: FindingsRegister) {
+  return {
+    sourceAcceptanceEvaluationId: register.sourceAcceptanceEvaluationId,
+    sourceAcceptanceEvaluationDigest: register.sourceAcceptanceEvaluationDigest,
+    sourceExecutionRunId: register.sourceExecutionRunId,
+    overallVerdict: register.overallVerdict,
+    generationStatus: register.generationStatus,
+    generationIssues: [...(register.generationIssues || [])].sort(),
+    findings: (register.findings || []).map((f) => f.findingDigest),
+    defectCandidates: (register.defectCandidates || []).map((d) => d.candidateDigest)
+  };
+}
+
+/**
+ * Recomputes and verifies the cryptographic integrity of a FindingsRegister,
+ * including all individual findings and defect candidates.
+ */
+export function verifyFindingsRegisterDigest(
+  register: FindingsRegister
+): VerifyFindingsRegisterDigestResult {
+  if (!register) {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      error: 'Findings register is null or undefined.'
+    };
+  }
+
+  if (!register.registerDigest) {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      error: 'Findings register missing registerDigest object.'
+    };
+  }
+
+  if (register.registerDigest.algorithm !== 'SHA-256') {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      expectedDigest: register.registerDigest.value,
+      error: `Unsupported digest algorithm: '${register.registerDigest.algorithm}'. Expected 'SHA-256'.`
+    };
+  }
+
+  if (register.registerDigest.schemaVersion !== 'findings-register-v1') {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      expectedDigest: register.registerDigest.value,
+      error: `Unsupported digest schemaVersion: '${register.registerDigest.schemaVersion}'. Expected 'findings-register-v1'.`
+    };
+  }
+
+  // Verify individual findings digests
+  if (Array.isArray(register.findings)) {
+    for (const finding of register.findings) {
+      if (!finding.findingDigest) {
+        return {
+          isValid: false,
+          recomputedDigest: '',
+          expectedDigest: register.registerDigest.value,
+          error: `Finding '${finding.id}' is missing findingDigest.`
+        };
+      }
+      const recomputedFindingDigest = computeCanonicalFindingDigest(finding);
+      if (recomputedFindingDigest !== finding.findingDigest) {
+        return {
+          isValid: false,
+          recomputedDigest: '',
+          expectedDigest: register.registerDigest.value,
+          error: `Finding '${finding.id}' digest mismatch: recomputed '${recomputedFindingDigest}' does not match stored '${finding.findingDigest}'.`
+        };
+      }
+      const expectedFindingId = `finding-${recomputedFindingDigest.slice(0, 16)}`;
+      if (finding.id !== expectedFindingId) {
+        return {
+          isValid: false,
+          recomputedDigest: '',
+          expectedDigest: register.registerDigest.value,
+          error: `Finding ID mismatch: '${finding.id}' does not match expected '${expectedFindingId}'.`
+        };
+      }
+    }
+  }
+
+  // Verify individual defect candidates digests
+  if (Array.isArray(register.defectCandidates)) {
+    for (const candidate of register.defectCandidates) {
+      if (!candidate.candidateDigest) {
+        return {
+          isValid: false,
+          recomputedDigest: '',
+          expectedDigest: register.registerDigest.value,
+          error: `Defect candidate '${candidate.id}' is missing candidateDigest.`
+        };
+      }
+      const recomputedCandidateDigest = computeDefectCandidateDigest(candidate);
+      if (recomputedCandidateDigest !== candidate.candidateDigest) {
+        return {
+          isValid: false,
+          recomputedDigest: '',
+          expectedDigest: register.registerDigest.value,
+          error: `Defect candidate '${candidate.id}' digest mismatch: recomputed '${recomputedCandidateDigest}' does not match stored '${candidate.candidateDigest}'.`
+        };
+      }
+      const expectedCandidateId = `candidate-${recomputedCandidateDigest.slice(0, 16)}`;
+      if (candidate.id !== expectedCandidateId) {
+        return {
+          isValid: false,
+          recomputedDigest: '',
+          expectedDigest: register.registerDigest.value,
+          error: `Defect candidate ID mismatch: '${candidate.id}' does not match expected '${expectedCandidateId}'.`
+        };
+      }
+    }
+  }
+
+  try {
+    const payload = buildFindingsRegisterDigestPayload(register);
+    const recomputed = computeFindingsRegisterDigest(payload).value;
+
+    if (recomputed !== register.registerDigest.value) {
+      return {
+        isValid: false,
+        recomputedDigest: recomputed,
+        expectedDigest: register.registerDigest.value,
+        error: `Findings register digest mismatch: recomputed '${recomputed}' does not match stored '${register.registerDigest.value}'.`
+      };
+    }
+
+    const expectedRegisterId = `findings-reg-${recomputed.slice(0, 16)}`;
+    if (register.id && register.id !== expectedRegisterId) {
+      return {
+        isValid: false,
+        recomputedDigest: recomputed,
+        expectedDigest: register.registerDigest.value,
+        error: `Findings register ID mismatch: '${register.id}' does not match expected '${expectedRegisterId}'.`
+      };
+    }
+
+    return {
+      isValid: true,
+      recomputedDigest: recomputed,
+      expectedDigest: register.registerDigest.value
+    };
+  } catch (err) {
+    return {
+      isValid: false,
+      recomputedDigest: '',
+      expectedDigest: register.registerDigest.value,
+      error: `Failed to recompute findings register digest: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
 }
 
 /**
