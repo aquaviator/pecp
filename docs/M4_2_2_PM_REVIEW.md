@@ -2,65 +2,139 @@
 
 ## Status
 
-**M4.2.2 — PASSED, M4.2 FORMALLY CLOSED**
+**M4.2.2 — PASS**
 
-The M4.2.2 Companion Isolation, Source-Binding & Report Integrity Gate has successfully resolved all outstanding closure gaps identified in the M4.2.1 review:
+The Companion Isolation, Source-Binding & Report Integrity Gate has been independently audited against live `master`.
 
-1. **Companion Isolation**: Unverified `TestDefinition` and `FindingsRegister` objects are strictly prevented from influencing `RenderNeutralResultsReport` content. `generateResultsReport` accepts only cryptographically verified companions. If companion verification fails, the bundle transitions to `BLOCKED_INVALID_SOURCE` and results report projection operates strictly against the verified `PerformanceEvidencePackage`.
-2. **Strategy / Test Plan Source Contract Authority Binding**: Component contract validation now checks `comp.sourceContractFingerprint` against `strategy.sourceContractFingerprint` / `testPlan.sourceContractFingerprint`. Any mismatch is deterministically blocked with `BLOCKED_INVALID_SOURCE`.
-3. **Execution Timestamps Cryptographically Bound**: `projectExecutionIdentity.startedAt`, `projectExecutionIdentity.completedAt`, and `acceptanceVerdict.evaluatedAt` are now explicitly bound into `buildResultsReportDigestPayload`. Any modification or drift in these timestamps invalidates the `reportDigest`.
-4. **Publication Bundle Top-Level Schema Verification**: `verifyPublicationBundleDigest` now explicitly validates top-level `PublicationBundle.schemaVersion === 'publication-bundle-v1'`.
-5. **Governed Absence of Scheduler `startRate`**: Missing or undefined scheduler `startRate` is preserved as `null`/absent across the domain model, Results Report visualization hook, and export serializations, rather than being fabricated as `0`.
-6. **No Synthetic Workload Stages Without Verified Test Definition**: When an authoritative `TestDefinition` companion is absent or unverified, the export engine never invents or reconstructs exact load profile stages; `stages` and `journeyDistribution` remain empty arrays `[]` while preserving governed summary fields.
-7. **Authoritative RetailCo Exactness Preserved**: RetailCo BF2026 execution remains governed, bit-identical, and fully verified across all metrics:
-   - Status: `VALID` Evidence Package
-   - Acceptance: `INCONCLUSIVE` (Workload Prerequisite `NOT_ATTAINED`)
-   - Business demand: `8.75` orders/second
-   - Scheduler peak demand: `109.375` journey_iterations/second
-   - Scheduler start rate: `0`
-   - Scheduler population: `JOURNEY_ITERATION`
-   - Scheduler model: `OPEN`
-   - Timings: `300s` ramp-up / `900s` steady-state / `120s` ramp-down (`1320s` total)
-   - Journeys: Browse 55% / Search 20% / Basket 15% / Checkout 8% / Account 2%
-   - Checkout p95: `0.3906885 ms` (`PASS` against `p95 < 2000ms`)
-   - HTTP failure rate: `0` (`PASS` against `rate < 0.005`)
+M4.2 is ready for formal closure.
 
----
+## Authoritative implementation
 
-## Verification & Test Results
+Implementation SHA:
 
-### Test Execution Summary
+`1596db9dea72464be5d999e4fea3ae493fd919c6`
 
-- **Vitest Test Files**: 22 passed (22 total)
-- **Vitest Unit/Integration Tests**: **429 passed** (429 total)
-- **M4.2 / M4.2.1 / M4.2.2 Export & Publication Tests**: **27 passed** (27 total)
-- **RetailCo Reference Lab Service TAP Tests**: **10 passed** (10 total)
-- **Total Combined Tests**: **439 passed**, 0 failed
-- **TypeScript Typecheck (`tsc --noEmit`)**: **PASSED** (0 errors)
-- **Vite Production Compilation**: **PASSED** (exit code 0)
+CI run:
 
----
+`35850417318`
 
-## Verified M4.2.2 Gate Criteria
+Result: **SUCCESS**
 
-| Requirement | Implementation Summary | Status |
-| :--- | :--- | :--- |
-| **1. Companion Isolation** | `generatePublicationBundle` passes only `verifiedTestDefinition` and `verifiedFindingsRegister` to `generateResultsReport`. Drifted or tampered companions never pollute the results report. | **PASSED** |
-| **2. Strategy / Test Plan Source Contract Binding** | Validates `comp.sourceContractFingerprint === artefact.sourceContractFingerprint`. Mismatches trigger `BLOCKED_INVALID_SOURCE`. | **PASSED** |
-| **3. Execution Timestamps in Digest** | `startedAt`, `completedAt`, and `evaluatedAt` bound into `buildResultsReportDigestPayload`. Timestamp tamper changes `reportDigest`. | **PASSED** |
-| **4. Bundle Top-Level Schema Verification** | `verifyPublicationBundleDigest` validates `bundle.schemaVersion === 'publication-bundle-v1'`. Schema tampering fails bundle verification. | **PASSED** |
-| **5. Absent `startRate` Preservation** | `ResultsReportVisualisationStage.startArrivalRate` is optional/nullable. Undefined `startRate` is preserved as `null`. | **PASSED** |
-| **6. No Reconstructed Stages Without Verified Test Definition** | Without verified `TestDefinition`, `stages` is `[]` and `journeyDistribution` is `[]`. | **PASSED** |
-| **7. RetailCo Authoritative Lab Invariant** | Full 10/10 Reference Lab assertions pass. Authoritative metrics preserved exactly. | **PASSED** |
+Verified:
 
----
+- 22 Vitest files passed;
+- **429 Vitest tests passed**;
+- **27 M4.2/M4.2.1/M4.2.2 Export & Publication tests passed**;
+- **10 RetailCo Reference Lab TAP tests passed**;
+- **439 combined tests**;
+- TypeScript typecheck passed;
+- production build passed.
 
-## Milestone M4.2 Closure Declaration
+## Verified M4.2.2 controls
 
-Milestone **M4.2: Canonical Export & Publication Contract** is now **FORMALLY CLOSED**.
+### Companion isolation
 
-The export and publication boundary satisfies all architectural invariants:
-- Pure, deterministic export and publication models outside the UI;
-- Strict cryptographic binding across Evidence Packages, Results Reports, Export Artifacts, Defect Payloads, and Publication Bundles;
-- Total isolation of unverified companion artifacts;
-- Complete preservation of governed absence without semantic default fabrication.
+`generatePublicationBundle()` now passes only:
+
+- `verifiedTestDefinition`;
+- `verifiedFindingsRegister`;
+
+into Results Report generation.
+
+A failed companion verification blocks publication and the unverified caller object does not alter report schedule, journey distribution, findings counts or defect payloads.
+
+### Strategy/Test Plan source binding
+
+Optional Strategy/Test Plan validation now compares:
+
+`component.sourceContractFingerprint`
+
+against the supplied artefact's source Contract fingerprint.
+
+This matches the M4.1 Evidence Package component model.
+
+### Results Report cryptographic completeness
+
+The Results Report digest now binds governed source timestamps:
+
+- execution `startedAt`;
+- execution `completedAt`;
+- Acceptance `evaluatedAt`.
+
+Changing those source facts changes `reportDigest`.
+
+### Publication Bundle schema integrity
+
+Bundle verification now checks:
+
+- top-level `bundle.schemaVersion`;
+- digest algorithm;
+- digest schema;
+- bundle id derivation;
+- artifact content/id;
+- Defect Payload digest/id;
+- top-level bundle digest.
+
+### Visualisation fidelity
+
+For a verified Test Definition:
+
+- exact source stages are projected;
+- cumulative stage time boundaries are deterministic;
+- a supplied scheduler `startRate` is preserved exactly;
+- missing `startRate` remains absent/null;
+- later stage start rates derive only from the previous governed target;
+- exact journey distribution is preserved.
+
+Without a verified Test Definition:
+
+- scheduler/business summary facts may be shown;
+- exact stage reconstruction is not attempted;
+- `stages = []`;
+- `journeyDistribution = []`.
+
+## Authoritative RetailCo regression
+
+The authoritative RetailCo chain remains:
+
+- Evidence Package = VALID;
+- Acceptance verdict = INCONCLUSIVE;
+- workload prerequisite = **UNRESOLVED**;
+- derivation status = `UNRESOLVED_INSUFFICIENT_TIME_SERIES`;
+- business demand = 8.75 orders/second;
+- scheduler peak = 109.375 journey_iterations/second;
+- scheduler start rate = 0;
+- scheduler population = JOURNEY_ITERATION;
+- execution model = OPEN;
+- schedule = 300s ramp-up / 900s steady-state / 120s ramp-down / 1320s total;
+- journey mix = Browse 55% / Search 20% / Basket 15% / Checkout 8% / Account 2%;
+- Checkout p95 = 0.3906885 ms against p95 < 2000ms => PASS detail;
+- HTTP failure rate = 0 against rate < 0.005 => PASS detail;
+- one WORKLOAD_ATTAINMENT_UNRESOLVED Finding;
+- zero Defect Candidates;
+- zero Defect Payloads;
+- DOWNLOAD/API = READY.
+
+## Documentation correction
+
+The Studio-generated review described the authoritative workload prerequisite as `NOT_ATTAINED`.
+
+That is incorrect.
+
+The authoritative M3.1B/M3.2/M3.3 chain remains:
+
+`UNRESOLVED`
+
+because acceptance-basis steady-state time-series attainment was not captured.
+
+## Non-blocking cleanup
+
+The external-destination readiness path currently appends the same destination blocking reason twice to the bundle-level blocking reasons for a requested unconfigured external destination.
+
+This is deterministic and does not alter readiness or engineering meaning, so it does not block M4.2 closure. It should be cleaned up with the next normal UI/product integration change.
+
+## Decision
+
+**M4.2.2 PASS.**
+
+**M4.2 is authorized for formal closure.**
