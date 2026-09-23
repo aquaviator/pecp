@@ -2,14 +2,17 @@ import React, { createContext, useContext, useMemo } from 'react';
 import { IProjectService } from './interfaces/IProjectService';
 import { IIntelligenceService } from './interfaces/IIntelligenceService';
 import { IIntegrationService } from './interfaces/IIntegrationService';
+import { IExecutionEvidenceService } from './interfaces/IExecutionEvidenceService';
 import { MockProjectService } from './mock/MockProjectService';
 import { MockIntelligenceService } from './mock/MockIntelligenceService';
 import { MockIntegrationService } from './mock/MockIntegrationService';
+import { MockExecutionEvidenceService } from './mock/MockExecutionEvidenceService';
 
 export interface ServiceContainer {
   projectService: IProjectService;
   intelligenceService: IIntelligenceService;
   integrationService: IIntegrationService;
+  executionEvidenceService: IExecutionEvidenceService;
 }
 
 const ServiceContext = createContext<ServiceContainer | null>(null);
@@ -27,7 +30,8 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
     return {
       projectService: overrideServices?.projectService || new MockProjectService(),
       intelligenceService: overrideServices?.intelligenceService || new MockIntelligenceService(),
-      integrationService: overrideServices?.integrationService || new MockIntegrationService()
+      integrationService: overrideServices?.integrationService || new MockIntegrationService(),
+      executionEvidenceService: overrideServices?.executionEvidenceService || new MockExecutionEvidenceService()
     };
   }, [overrideServices]);
 

@@ -32,6 +32,7 @@ import {
   RETAILCO_M3_APPROVED_CONTRACT,
   RETAILCO_M3_EXECUTION_INTELLIGENCE
 } from '../../fixtures/retailco/m3ExecutionFixture';
+import { WorkloadProfileChart } from '../../components/workload/WorkloadProfileChart';
 
 interface TestsPageProps {
   project: ProjectSummary;
@@ -89,6 +90,44 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
   const isReferenceLab = scenarioView === 'M3_REFERENCE_LAB';
   const testDef = isReferenceLab ? referenceTestDef : currentTestDef;
   const bundle = isReferenceLab ? referenceBundle : currentBundle;
+
+  const scheduleVisualisationHook = {
+    scheduler: {
+      executionModel: testDef.scenarios[0]?.workloadSchedule.executionModel ?? null,
+      population: testDef.scenarios[0]?.workloadSchedule.arrivalPopulation ?? null,
+      rateUnit: testDef.scenarios[0]?.workloadSchedule.rateUnit ?? null,
+      startRate: testDef.scenarios[0]?.workloadSchedule.startRate ?? null,
+      peakArrivalRate: testDef.scenarios[0]?.workloadSchedule.peakArrivalRate ?? null
+    },
+    businessTarget: testDef.workloadAttainment
+      ? {
+          metric: testDef.workloadAttainment.metric ?? null,
+          targetValue: testDef.workloadAttainment.targetValue ?? null,
+          unit: testDef.workloadAttainment.unit ?? null,
+          timeBasis: (testDef.workloadAttainment as any).timeBasis ?? null
+        }
+      : null,
+    stages: (testDef.scenarios[0]?.workloadSchedule.stages || []).map((stage, idx, all) => {
+      const prevEnd = idx === 0 ? 0 : all.slice(0, idx).reduce((sum, s) => sum + s.durationSeconds, 0);
+      return {
+        stageIndex: idx + 1,
+        name: stage.description ?? null,
+        durationSeconds: stage.durationSeconds,
+        startTimeSeconds: prevEnd,
+        endTimeSeconds: prevEnd + stage.durationSeconds,
+        startArrivalRate: (stage as any).startArrivalRate ?? (idx === 0 ? testDef.scenarios[0]?.workloadSchedule.startRate ?? null : all[idx - 1].targetArrivalRate),
+        targetArrivalRate: stage.targetArrivalRate
+      };
+    }),
+    journeyDistribution: (testDef.journeys || []).map((j) => ({
+      journeyId: j.id,
+      journeyKey: j.key,
+      name: j.name,
+      percentage: j.percentage ?? null,
+      weight: j.weight ?? null,
+      description: j.description ?? null
+    }))
+  };
 
   const currentFileContent =
     bundle.files.find((f) => f.filename === activeBundleFile)?.content ||
@@ -313,7 +352,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
               <p className="text-xs text-slate-400">Workload Model</p>
               <p className="text-base font-bold text-white mt-1">
-                {testDef.scenarios[0]?.workloadSchedule.executionModel || 'OPEN'}
+                {testDef.scenarios[0]?.workloadSchedule.executionModel ?? 'NOT_SUPPLIED'}
               </p>
               <p className="text-[11px] text-slate-500 mt-1">Arrival-Rate Driven</p>
             </div>
@@ -323,7 +362,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                 {testDef.scenarios[0]?.workloadSchedule.peakArrivalRate}
               </p>
               <p className="text-[11px] text-slate-500 mt-1">
-                {testDef.scenarios[0]?.workloadSchedule.rateUnit || 'journey_iterations/second'}
+                {testDef.scenarios[0]?.workloadSchedule.rateUnit ?? 'NOT_SUPPLIED'}
               </p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
@@ -464,6 +503,11 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
       {/* Tab 2: Workload Schedule */}
       {activeTab === 'schedule' && (
         <div className="space-y-6">
+          <WorkloadProfileChart
+            visualisationHook={scheduleVisualisationHook}
+            showBusinessDemandKpi={true}
+          />
+
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -478,10 +522,10 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
               <div className="text-right">
                 <span className="text-xs text-slate-400">Peak Scheduler Rate:</span>
                 <span className="text-sm font-bold text-sky-400 ml-2">
-                  {testDef.scenarios[0]?.workloadSchedule.peakArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit || 'journey_iterations/second'}
+                  {testDef.scenarios[0]?.workloadSchedule.peakArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit ?? 'NOT_SUPPLIED'}
                 </span>
                 <span className="block text-[11px] text-slate-500">
-                  Population: {testDef.scenarios[0]?.workloadSchedule.arrivalPopulation || 'JOURNEY_ITERATION'}
+                  Population: {testDef.scenarios[0]?.workloadSchedule.arrivalPopulation ?? 'NOT_SUPPLIED'}
                 </span>
               </div>
             </div>
@@ -505,9 +549,9 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                           {Math.round(stage.durationSeconds / 60)} min ({stage.durationSeconds}s)
                         </td>
                         <td className="p-3 font-mono font-bold text-sky-400">
-                          {stage.targetArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit || 'journey_iterations/s'}
+                          {stage.targetArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit ?? 'NOT_SUPPLIED'}
                         </td>
-                        <td className="p-3 text-slate-400">{stage.description || 'Execution stage'}</td>
+                        <td className="p-3 text-slate-400">{stage.description ?? 'Execution stage'}</td>
                       </tr>
                     ))}
                   </tbody>
