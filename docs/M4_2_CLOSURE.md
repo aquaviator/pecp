@@ -4,14 +4,22 @@
 
 **M4.2 — NOT CLOSED**
 
-The implementation in commit `c5fdb050d2ac7405a2c3640a3a0f3d304a571738` is a substantial M4.2 foundation and CI is green, but the Studio-created closure has been superseded by the independent Project Manager audit in:
+M4.2 core and M4.2.1 are implemented with green CI, but formal closure remains held pending the final Project Manager integrity gate:
 
-`docs/M4_2_PM_REVIEW.md`
+`docs/work-packages/M4_2_2_COMPANION_ISOLATION_SOURCE_BINDING_REPORT_INTEGRITY_GATE.md`
 
-M4.2 closure is held pending:
+Authoritative M4.2.1 implementation:
 
-`docs/work-packages/M4_2_1_EXPORT_SEMANTIC_INTEGRITY_CRYPTOGRAPHIC_BINDING_VISUALISATION_FIDELITY_GATE.md`
+`7b849c84d855233bf759a47480b91c57911005fe`
 
-Do not treat M4.2 as formally closed until M4.2.1 has passed PM audit.
+CI:
+
+`35844650290` — SUCCESS
+
+See:
+
+`docs/M4_2_1_PM_REVIEW.md`
+
+Do not treat M4.2 as formally closed until M4.2.2 passes PM audit.
 
 No live external connector execution is authorized by this document.
