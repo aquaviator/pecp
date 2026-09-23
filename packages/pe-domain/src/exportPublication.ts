@@ -1,5 +1,6 @@
-// PECP Canonical Export & Publication Contract Domain Model (M4.2)
+// PECP Canonical Export & Publication Contract Domain Model (M4.2 / M4.2.1)
 // Defined according to docs/work-packages/M4_2_CANONICAL_EXPORT_PUBLICATION_CONTRACT.md
+// and docs/work-packages/M4_2_1_EXPORT_SEMANTIC_INTEGRITY_CRYPTOGRAPHIC_BINDING_VISUALISATION_FIDELITY_GATE.md
 // Invariant: Pure, deterministic export and publication boundary outside UI without external mutation or invented fields.
 
 import { AcceptanceVerdict } from './acceptance.js';
@@ -49,9 +50,9 @@ export interface ExportArtifact {
   id: string;
   artifactType: ExportArtifactType;
   sourceId: string;
-  sourceVersion?: string | number;
-  sourceFingerprint?: string;
-  sourceDigest?: string;
+  sourceVersion?: string | number | null;
+  sourceFingerprint?: string | null;
+  sourceDigest?: string | null;
   format: ExportFormat;
   mediaType: string;
   content: string;
@@ -64,13 +65,14 @@ export interface ExportArtifact {
 /**
  * Destination-neutral defect publication payload derived deterministically from DefectCandidate.
  * Invariant: Never contains invented priority, severity, assignee, team/component, sprint, due date, or root cause.
+ * Invariant (M4.2.1): Target expressions remain exact strings (e.g. 'p95 < 2000ms'); never cast to Number.
  */
 export interface DestinationNeutralDefectPayload {
   id: string;
   sourceFindingId: string;
   sourceCandidateId: string;
   sourceExecutionRunId: string;
-  sourceAcceptanceEvaluationId?: string;
+  sourceAcceptanceEvaluationId?: string | null;
   sourceEvidencePackageId: string;
   title: string;
   factualProblemStatement: string;
@@ -78,7 +80,7 @@ export interface DestinationNeutralDefectPayload {
     criterionId: string;
     metric: string;
     scope: string;
-    target?: number | null;
+    target?: string | null;
   };
   observedEvidence: {
     observedValue: number;
@@ -86,10 +88,10 @@ export interface DestinationNeutralDefectPayload {
     evidenceSourcePath?: string | null;
   };
   expectedCriterion: {
-    target?: number | null;
-    operator: string;
-    thresholdValue: number;
-    unit: string;
+    target?: string | null;
+    operator?: string | null;
+    thresholdValue?: number | null;
+    unit?: string | null;
   };
   executionRunReference: string;
   evidenceReferences: string[];
@@ -99,107 +101,133 @@ export interface DestinationNeutralDefectPayload {
 }
 
 /**
+ * Governed stage for workload visualisation hook (M4.2.1).
+ * Preserves exact sequence, start/target arrival rates, and cumulative timestamps.
+ */
+export interface ResultsReportVisualisationStage {
+  stageIndex: number;
+  name?: string | null;
+  durationSeconds: number;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  startArrivalRate: number;
+  targetArrivalRate: number;
+}
+
+/**
+ * Governed journey distribution item for workload visualisation hook (M4.2.1).
+ */
+export interface ResultsReportJourneyDistributionItem {
+  journeyId?: string | null;
+  journeyKey?: string | null;
+  name: string;
+  percentage?: number | null;
+  weight?: number | null;
+  description?: string | null;
+}
+
+/**
  * Governed visualisation reference hook exposed in Results Report model.
- * Supplies sufficient governed data for a future UI/rendering layer to plot without coupling chart libraries.
+ * Supplies sufficient governed data for a future UI/rendering layer to plot arbitrary schedules
+ * (load, stress, soak, spike, custom) without coupling chart libraries into domain core.
+ * Invariant (M4.2.1): No default rates, units, or populations; faithfully models source schedule.
  */
 export interface ResultsReportVisualisationHook {
-  totalSchedulerLoadOverTime: {
-    unit: string;
-    timeBasis: string;
-    targetRate: number;
-  };
-  businessWorkloadTarget: {
-    businessMetric: string;
-    targetRate: number;
-    unit: string;
-  };
-  journeyDistribution: Array<{
-    journeyName: string;
-    ratioPercentage?: number;
-    description?: string;
-  }>;
-  stages: Array<{
-    stageIndex: number;
-    stageName: string;
-    durationSeconds: number;
-    targetArrivalRate: number;
-  }>;
+  scheduler?: {
+    executionModel?: string | null;
+    population?: string | null;
+    rateUnit?: string | null;
+    startRate?: number | null;
+    peakArrivalRate?: number | null;
+  } | null;
+  businessTarget?: {
+    metric?: string | null;
+    targetValue?: number | null;
+    unit?: string | null;
+    timeBasis?: string | null;
+  } | null;
+  stages: ResultsReportVisualisationStage[];
+  journeyDistribution: ResultsReportJourneyDistributionItem[];
 }
 
 /**
  * Governed render-neutral Results Report projection.
  * Derived factually from a verified PerformanceEvidencePackage.
+ * Invariant (M4.2.1): Zero invented engineering defaults when source fields are absent in audit-only packages.
  */
 export interface RenderNeutralResultsReport {
   id: string;
   sourcePackageId: string;
   sourcePackageDigest: string;
   projectExecutionIdentity: {
-    contractId: string;
-    contractVersion: string | number;
-    testDefinitionId: string;
-    testDefinitionVersion: string | number;
-    executionRunId: string;
-    executionMode?: string;
-    operationalStatus?: string;
-    commitSha?: string;
-    startedAt?: string;
-    completedAt?: string;
-    durationSeconds?: number;
+    contractId?: string | null;
+    contractVersion?: string | number | null;
+    testDefinitionId?: string | null;
+    testDefinitionVersion?: string | number | null;
+    executionRunId?: string | null;
+    executionMode?: string | null;
+    operationalStatus?: string | null;
+    commitSha?: string | null;
+    startedAt?: string | null;
+    completedAt?: string | null;
+    durationSeconds?: number | null;
   };
   workloadDemand: {
-    businessDemand: number;
-    businessDemandUnit: string;
-    schedulerDemand: number;
-    schedulerDemandUnit: string;
-    schedulerPopulation: string;
-    executionModel: string;
+    businessDemand?: number | null;
+    businessDemandUnit?: string | null;
+    businessDemandMetric?: string | null;
+    businessDemandTimeBasis?: string | null;
+    schedulerDemand?: number | null;
+    schedulerDemandUnit?: string | null;
+    schedulerPopulation?: string | null;
+    executionModel?: string | null;
+    profileType?: string | null;
   };
   scheduleTimings: {
-    rampUpSeconds?: number;
-    steadyStateSeconds?: number;
-    rampDownSeconds?: number;
-    totalDurationSeconds?: number;
+    rampUpSeconds?: number | null;
+    steadyStateSeconds?: number | null;
+    rampDownSeconds?: number | null;
+    totalDurationSeconds?: number | null;
   };
   visualisationHook: ResultsReportVisualisationHook;
-  workloadAttainment: {
-    status: string;
-    isPrerequisiteMet: boolean;
-    observedValue?: number;
-    targetValue?: number;
-    unit?: string;
-    derivationStatus?: string;
-    rationale: string;
-  };
+  workloadAttainment?: {
+    status?: string | null;
+    isPrerequisiteMet?: boolean | null;
+    observedValue?: number | null;
+    targetValue?: number | null;
+    unit?: string | null;
+    derivationStatus?: string | null;
+    rationale?: string | null;
+  } | null;
   criterionOutcomes: Array<{
     criterionId: string;
     key: string;
     metric: string;
-    target?: string;
-    canonicalThresholdValue?: number;
-    canonicalUnit?: string;
-    observedValue?: number;
-    observedUnit?: string;
+    target?: string | null;
+    canonicalThresholdValue?: number | null;
+    canonicalUnit?: string | null;
+    observedValue?: number | null;
+    observedUnit?: string | null;
     status: string;
-    rationale: string;
+    rationale?: string | null;
   }>;
-  acceptanceVerdict: {
-    verdict: string;
-    reasons: string[];
-    evaluatedAt?: string;
-  };
-  findingsSummary: {
+  acceptanceVerdict?: {
+    verdict?: string | null;
+    reasons?: string[];
+    evaluatedAt?: string | null;
+  } | null;
+  findingsSummary?: {
     totalFindings: number;
     byType: Record<string, number>;
     byClassification: Record<string, number>;
     totalDefectCandidates: number;
-    generationStatus?: string;
-  };
-  defectCandidatesSummary: {
+    generationStatus?: string | null;
+  } | null;
+  defectCandidatesSummary?: {
     totalCandidates: number;
     eligibleForPublication: number;
     blockedFromPublication: number;
-  };
+  } | null;
   evidencePackageIntegrity: {
     packageGenerationStatus: string;
     coreLineageEdgesVerified: boolean;
@@ -228,14 +256,15 @@ export interface DestinationPublicationStatus {
 
 /**
  * Immutable Publication Bundle binding all export artefacts, defect payloads, and publication readiness.
+ * Invariant (M4.2.1): Source verdict is optional for invalid audit-only sources; never synthesize INCONCLUSIVE.
  */
 export interface PublicationBundle {
   id: string;
   schemaVersion: 'publication-bundle-v1';
   sourceEvidencePackageId: string;
   sourceEvidencePackageDigest: string;
-  sourceAcceptanceVerdict: AcceptanceVerdict;
-  sourceFindingsRegisterDigest?: string;
+  sourceAcceptanceVerdict?: AcceptanceVerdict | null;
+  sourceFindingsRegisterDigest?: string | null;
   artifacts: ExportArtifact[];
   defectPayloads: DestinationNeutralDefectPayload[];
   requestedDestinations: PublicationDestination[];
