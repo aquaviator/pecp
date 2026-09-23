@@ -16,6 +16,7 @@ import {
   EngineeringArtefact,
   PerformanceEvidencePackage,
   EvidencePackageGenerationStatus,
+  EvidencePackageComponentType,
   EvidencePackageComponentReference,
   RawEvidencePackageItem,
   EvidencePackageSummary,
@@ -42,6 +43,22 @@ export interface GeneratePerformanceEvidencePackageInput {
   testPlan?: EngineeringArtefact;
   generationTimestamp?: string;
 }
+
+/**
+ * Six required core lineage edges in M4.1.
+ * Contract -> Test Definition -> Execution Run -> Raw Evidence -> Canonical Results -> Acceptance Evaluation -> Findings Register.
+ */
+export const REQUIRED_CORE_LINEAGE_EDGES: ReadonlyArray<{
+  fromComponent: EvidencePackageComponentType;
+  toComponent: EvidencePackageComponentType;
+}> = [
+  { fromComponent: 'PERFORMANCE_CONTRACT', toComponent: 'TEST_DEFINITION' },
+  { fromComponent: 'TEST_DEFINITION', toComponent: 'EXECUTION_RUN' },
+  { fromComponent: 'EXECUTION_RUN', toComponent: 'RAW_EVIDENCE_INVENTORY' },
+  { fromComponent: 'RAW_EVIDENCE_INVENTORY', toComponent: 'CANONICAL_RESULTS' },
+  { fromComponent: 'CANONICAL_RESULTS', toComponent: 'ACCEPTANCE_EVALUATION' },
+  { fromComponent: 'ACCEPTANCE_EVALUATION', toComponent: 'FINDINGS_REGISTER' }
+];
 
 export interface VerifyPerformanceEvidencePackageDigestResult {
   isValid: boolean;
@@ -376,12 +393,32 @@ export function generatePerformanceEvidencePackage(
       generationIssues.push('Acceptance evaluation is missing required overallVerdict.');
       packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
     }
+    if (!acceptanceEvaluation.workloadPrerequisite) {
+      generationIssues.push('Acceptance evaluation is missing required workloadPrerequisite.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+      }
+    }
+    if (!acceptanceEvaluation.provenanceGate) {
+      generationIssues.push('Acceptance evaluation is missing required provenanceGate.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+      }
+    }
+    if (!acceptanceEvaluation.operationalIntegrityGate) {
+      generationIssues.push('Acceptance evaluation is missing required operationalIntegrityGate.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+      }
+    }
     const acceptanceVerification = verifyAcceptanceEvaluationDigest(acceptanceEvaluation);
     if (!acceptanceVerification.isValid) {
       const errorMsg =
         acceptanceVerification.error ?? 'Acceptance evaluation digest verification failed.';
       generationIssues.push(errorMsg);
-      packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_ACCEPTANCE_INTEGRITY';
+      }
     }
   }
 
@@ -422,6 +459,8 @@ export function generatePerformanceEvidencePackage(
         packageGenerationStatus =
           findingsRegister.generationStatus === 'INVALID_ACCEPTANCE_INTEGRITY'
             ? 'INVALID_ACCEPTANCE_INTEGRITY'
+            : findingsRegister.generationStatus === 'INVALID_PROVENANCE'
+            ? 'INVALID_PROVENANCE'
             : 'INVALID_FINDINGS_INTEGRITY';
       }
     }
@@ -473,111 +512,138 @@ export function generatePerformanceEvidencePackage(
       }
     }
 
-    if (
-      acceptanceEvaluation?.sourceContract?.fingerprint &&
-      acceptanceEvaluation.sourceContract.fingerprint !== computedContractFingerprint
-    ) {
-      generationIssues.push(
-        `Contract fingerprint '${computedContractFingerprint}' does not match Acceptance sourceContract fingerprint '${acceptanceEvaluation.sourceContract.fingerprint}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+    // Test Definition source Contract bindings
+    if (testDefinition) {
+      if (!testDefinition.sourceContractId) {
+        generationIssues.push('Test Definition is missing required sourceContractId binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (testDefinition.sourceContractId !== contract.id) {
+        generationIssues.push(
+          `Contract ID '${contract.id}' does not match Test Definition sourceContractId '${testDefinition.sourceContractId}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!testDefinition.sourceContractVersion) {
+        generationIssues.push('Test Definition is missing required sourceContractVersion binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (String(testDefinition.sourceContractVersion) !== String(contract.version)) {
+        generationIssues.push(
+          `Contract version '${contract.version}' does not match Test Definition sourceContractVersion '${testDefinition.sourceContractVersion}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!testDefinition.sourceContractFingerprint) {
+        generationIssues.push('Test Definition is missing required sourceContractFingerprint binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (testDefinition.sourceContractFingerprint !== computedContractFingerprint) {
+        generationIssues.push(
+          `Contract fingerprint '${computedContractFingerprint}' does not match Test Definition sourceContractFingerprint '${testDefinition.sourceContractFingerprint}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
 
-    if (
-      results?.run?.sourceContract?.fingerprint &&
-      results.run.sourceContract.fingerprint !== computedContractFingerprint
-    ) {
-      generationIssues.push(
-        `Contract fingerprint '${computedContractFingerprint}' does not match Results sourceContract fingerprint '${results.run.sourceContract.fingerprint}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+    // Results source Contract bindings
+    if (results?.run) {
+      if (!results.run.sourceContract?.id) {
+        generationIssues.push('Results execution run is missing required sourceContract.id binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (results.run.sourceContract.id !== contract.id) {
+        generationIssues.push(
+          `Contract ID '${contract.id}' does not match Results sourceContract ID '${results.run.sourceContract.id}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!results.run.sourceContract?.version) {
+        generationIssues.push('Results execution run is missing required sourceContract.version binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (String(results.run.sourceContract.version) !== String(contract.version)) {
+        generationIssues.push(
+          `Contract version '${contract.version}' does not match Results sourceContract version '${results.run.sourceContract.version}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!results.run.sourceContract?.fingerprint) {
+        generationIssues.push('Results execution run is missing required sourceContract.fingerprint binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (results.run.sourceContract.fingerprint !== computedContractFingerprint) {
+        generationIssues.push(
+          `Contract fingerprint '${computedContractFingerprint}' does not match Results sourceContract fingerprint '${results.run.sourceContract.fingerprint}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
 
-    if (
-      testDefinition?.sourceContractFingerprint &&
-      testDefinition.sourceContractFingerprint !== computedContractFingerprint
-    ) {
-      generationIssues.push(
-        `Contract fingerprint '${computedContractFingerprint}' does not match Test Definition sourceContractFingerprint '${testDefinition.sourceContractFingerprint}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+    // Acceptance source Contract bindings
+    if (acceptanceEvaluation) {
+      if (!acceptanceEvaluation.sourceContract?.id) {
+        generationIssues.push('Acceptance evaluation is missing required sourceContract.id binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (acceptanceEvaluation.sourceContract.id !== contract.id) {
+        generationIssues.push(
+          `Contract ID '${contract.id}' does not match Acceptance sourceContract ID '${acceptanceEvaluation.sourceContract.id}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
-    }
 
-    if (
-      acceptanceEvaluation?.sourceContract?.id &&
-      acceptanceEvaluation.sourceContract.id !== contract.id
-    ) {
-      generationIssues.push(
-        `Contract ID '${contract.id}' does not match Acceptance sourceContract ID '${acceptanceEvaluation.sourceContract.id}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+      if (!acceptanceEvaluation.sourceContract?.version) {
+        generationIssues.push('Acceptance evaluation is missing required sourceContract.version binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (String(acceptanceEvaluation.sourceContract.version) !== String(contract.version)) {
+        generationIssues.push(
+          `Contract version '${contract.version}' does not match Acceptance sourceContract version '${acceptanceEvaluation.sourceContract.version}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
-    }
 
-    if (
-      results?.run?.sourceContract?.id &&
-      results.run.sourceContract.id !== contract.id
-    ) {
-      generationIssues.push(
-        `Contract ID '${contract.id}' does not match Results sourceContract ID '${results.run.sourceContract.id}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      testDefinition?.sourceContractId &&
-      testDefinition.sourceContractId !== contract.id
-    ) {
-      generationIssues.push(
-        `Contract ID '${contract.id}' does not match Test Definition sourceContractId '${testDefinition.sourceContractId}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      acceptanceEvaluation?.sourceContract?.version &&
-      String(acceptanceEvaluation.sourceContract.version) !== String(contract.version)
-    ) {
-      generationIssues.push(
-        `Contract version '${contract.version}' does not match Acceptance sourceContract version '${acceptanceEvaluation.sourceContract.version}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      results?.run?.sourceContract?.version &&
-      String(results.run.sourceContract.version) !== String(contract.version)
-    ) {
-      generationIssues.push(
-        `Contract version '${contract.version}' does not match Results sourceContract version '${results.run.sourceContract.version}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      testDefinition?.sourceContractVersion &&
-      String(testDefinition.sourceContractVersion) !== String(contract.version)
-    ) {
-      generationIssues.push(
-        `Contract version '${contract.version}' does not match Test Definition sourceContractVersion '${testDefinition.sourceContractVersion}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+      if (!acceptanceEvaluation.sourceContract?.fingerprint) {
+        generationIssues.push('Acceptance evaluation is missing required sourceContract.fingerprint binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (acceptanceEvaluation.sourceContract.fingerprint !== computedContractFingerprint) {
+        generationIssues.push(
+          `Contract fingerprint '${computedContractFingerprint}' does not match Acceptance sourceContract fingerprint '${acceptanceEvaluation.sourceContract.fingerprint}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
   }
@@ -623,75 +689,93 @@ export function generatePerformanceEvidencePackage(
       }
     }
 
-    if (
-      acceptanceEvaluation?.testDefinition?.fingerprint &&
-      acceptanceEvaluation.testDefinition.fingerprint !== computedTestDefinitionFingerprint
-    ) {
-      generationIssues.push(
-        `Test Definition fingerprint '${computedTestDefinitionFingerprint}' does not match Acceptance testDefinition fingerprint '${acceptanceEvaluation.testDefinition.fingerprint}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+    // Results source Test Definition bindings
+    if (results?.run) {
+      if (!results.run.testDefinition?.id) {
+        generationIssues.push('Results execution run is missing required testDefinition.id binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (results.run.testDefinition.id !== testDefinition.id) {
+        generationIssues.push(
+          `Test Definition ID '${testDefinition.id}' does not match Results testDefinition ID '${results.run.testDefinition.id}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!results.run.testDefinition?.version) {
+        generationIssues.push('Results execution run is missing required testDefinition.version binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (String(results.run.testDefinition.version) !== String(testDefinition.version)) {
+        generationIssues.push(
+          `Test Definition version '${testDefinition.version}' does not match Results testDefinition version '${results.run.testDefinition.version}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!results.run.testDefinition?.fingerprint) {
+        generationIssues.push('Results execution run is missing required testDefinition.fingerprint binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (results.run.testDefinition.fingerprint !== computedTestDefinitionFingerprint) {
+        generationIssues.push(
+          `Test Definition fingerprint '${computedTestDefinitionFingerprint}' does not match Results testDefinition fingerprint '${results.run.testDefinition.fingerprint}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
 
-    if (
-      results?.run?.testDefinition?.fingerprint &&
-      results.run.testDefinition.fingerprint !== computedTestDefinitionFingerprint
-    ) {
-      generationIssues.push(
-        `Test Definition fingerprint '${computedTestDefinitionFingerprint}' does not match Results testDefinition fingerprint '${results.run.testDefinition.fingerprint}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+    // Acceptance source Test Definition bindings
+    if (acceptanceEvaluation) {
+      if (!acceptanceEvaluation.testDefinition?.id) {
+        generationIssues.push('Acceptance evaluation is missing required testDefinition.id binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (acceptanceEvaluation.testDefinition.id !== testDefinition.id) {
+        generationIssues.push(
+          `Test Definition ID '${testDefinition.id}' does not match Acceptance testDefinition ID '${acceptanceEvaluation.testDefinition.id}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
-    }
 
-    if (
-      acceptanceEvaluation?.testDefinition?.id &&
-      acceptanceEvaluation.testDefinition.id !== testDefinition.id
-    ) {
-      generationIssues.push(
-        `Test Definition ID '${testDefinition.id}' does not match Acceptance testDefinition ID '${acceptanceEvaluation.testDefinition.id}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+      if (!acceptanceEvaluation.testDefinition?.version) {
+        generationIssues.push('Acceptance evaluation is missing required testDefinition.version binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (String(acceptanceEvaluation.testDefinition.version) !== String(testDefinition.version)) {
+        generationIssues.push(
+          `Test Definition version '${testDefinition.version}' does not match Acceptance testDefinition version '${acceptanceEvaluation.testDefinition.version}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
-    }
 
-    if (
-      results?.run?.testDefinition?.id &&
-      results.run.testDefinition.id !== testDefinition.id
-    ) {
-      generationIssues.push(
-        `Test Definition ID '${testDefinition.id}' does not match Results testDefinition ID '${results.run.testDefinition.id}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      acceptanceEvaluation?.testDefinition?.version &&
-      String(acceptanceEvaluation.testDefinition.version) !== String(testDefinition.version)
-    ) {
-      generationIssues.push(
-        `Test Definition version '${testDefinition.version}' does not match Acceptance testDefinition version '${acceptanceEvaluation.testDefinition.version}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      results?.run?.testDefinition?.version &&
-      String(results.run.testDefinition.version) !== String(testDefinition.version)
-    ) {
-      generationIssues.push(
-        `Test Definition version '${testDefinition.version}' does not match Results testDefinition version '${results.run.testDefinition.version}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+      if (!acceptanceEvaluation.testDefinition?.fingerprint) {
+        generationIssues.push('Acceptance evaluation is missing required testDefinition.fingerprint binding.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (acceptanceEvaluation.testDefinition.fingerprint !== computedTestDefinitionFingerprint) {
+        generationIssues.push(
+          `Test Definition fingerprint '${computedTestDefinitionFingerprint}' does not match Acceptance testDefinition fingerprint '${acceptanceEvaluation.testDefinition.fingerprint}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
   }
@@ -747,67 +831,88 @@ export function generatePerformanceEvidencePackage(
         packageGenerationStatus = 'INVALID_PROVENANCE';
       }
     }
-    if (
-      acceptanceEvaluation?.sourceExecutionRunId &&
-      acceptanceEvaluation.sourceExecutionRunId !== runId
-    ) {
-      generationIssues.push(
-        `Execution Run ID '${runId}' does not match Acceptance sourceExecutionRunId '${acceptanceEvaluation.sourceExecutionRunId}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+
+    if (acceptanceEvaluation) {
+      if (!acceptanceEvaluation.sourceExecutionRunId) {
+        generationIssues.push('Acceptance evaluation is missing required sourceExecutionRunId.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (runId && acceptanceEvaluation.sourceExecutionRunId !== runId) {
+        generationIssues.push(
+          `Execution Run ID '${runId}' does not match Acceptance sourceExecutionRunId '${acceptanceEvaluation.sourceExecutionRunId}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      }
+
+      if (!acceptanceEvaluation.canonicalResults?.executionRunId) {
+        generationIssues.push('Acceptance evaluation is missing required canonicalResults.executionRunId.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (runId && acceptanceEvaluation.canonicalResults.executionRunId !== runId) {
+        generationIssues.push(
+          `Execution Run ID '${runId}' does not match Acceptance canonicalResults.executionRunId '${acceptanceEvaluation.canonicalResults.executionRunId}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
 
-    if (
-      findingsRegister?.sourceExecutionRunId &&
-      findingsRegister.sourceExecutionRunId !== runId
-    ) {
-      generationIssues.push(
-        `Execution Run ID '${runId}' does not match Findings sourceExecutionRunId '${findingsRegister.sourceExecutionRunId}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
-      }
-    }
-
-    if (
-      acceptanceEvaluation?.canonicalResults?.executionRunId &&
-      acceptanceEvaluation.canonicalResults.executionRunId !== runId
-    ) {
-      generationIssues.push(
-        `Execution Run ID '${runId}' does not match Acceptance canonicalResults.executionRunId '${acceptanceEvaluation.canonicalResults.executionRunId}'.`
-      );
-      if (packageGenerationStatus === 'VALID') {
-        packageGenerationStatus = 'INVALID_PROVENANCE';
+    if (findingsRegister) {
+      if (!findingsRegister.sourceExecutionRunId) {
+        generationIssues.push('Findings register is missing required sourceExecutionRunId.');
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
+      } else if (runId && findingsRegister.sourceExecutionRunId !== runId) {
+        generationIssues.push(
+          `Execution Run ID '${runId}' does not match Findings sourceExecutionRunId '${findingsRegister.sourceExecutionRunId}'.`
+        );
+        if (packageGenerationStatus === 'VALID') {
+          packageGenerationStatus = 'INVALID_PROVENANCE';
+        }
       }
     }
   }
 
   // 2d. Findings source Acceptance linkage
-  if (
-    findingsRegister &&
-    acceptanceEvaluation &&
-    findingsRegister.sourceAcceptanceEvaluationId !== acceptanceEvaluation.id
-  ) {
-    generationIssues.push(
-      `Findings Register source Acceptance Evaluation ID '${findingsRegister.sourceAcceptanceEvaluationId}' does not match Acceptance Evaluation ID '${acceptanceEvaluation.id}'.`
-    );
-    if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+  if (findingsRegister) {
+    if (!findingsRegister.sourceAcceptanceEvaluationId) {
+      generationIssues.push('Findings register is missing required sourceAcceptanceEvaluationId.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
+    } else if (
+      acceptanceEvaluation &&
+      findingsRegister.sourceAcceptanceEvaluationId !== acceptanceEvaluation.id
+    ) {
+      generationIssues.push(
+        `Findings Register source Acceptance Evaluation ID '${findingsRegister.sourceAcceptanceEvaluationId}' does not match Acceptance Evaluation ID '${acceptanceEvaluation.id}'.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
     }
-  }
 
-  if (
-    findingsRegister &&
-    acceptanceEvaluation &&
-    findingsRegister.sourceAcceptanceEvaluationDigest !== acceptanceEvaluation.evaluationDigest?.value
-  ) {
-    generationIssues.push(
-      `Findings Register source Acceptance Evaluation Digest '${findingsRegister.sourceAcceptanceEvaluationDigest}' does not match Acceptance Evaluation Digest '${acceptanceEvaluation.evaluationDigest?.value}'.`
-    );
-    if (packageGenerationStatus === 'VALID') {
-      packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+    if (!findingsRegister.sourceAcceptanceEvaluationDigest) {
+      generationIssues.push('Findings register is missing required sourceAcceptanceEvaluationDigest.');
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
+    } else if (
+      acceptanceEvaluation?.evaluationDigest?.value &&
+      findingsRegister.sourceAcceptanceEvaluationDigest !== acceptanceEvaluation.evaluationDigest.value
+    ) {
+      generationIssues.push(
+        `Findings Register source Acceptance Evaluation Digest '${findingsRegister.sourceAcceptanceEvaluationDigest}' does not match Acceptance Evaluation Digest '${acceptanceEvaluation.evaluationDigest?.value}'.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_FINDINGS_INTEGRITY';
+      }
     }
   }
 
@@ -1263,7 +1368,8 @@ export function generatePerformanceEvidencePackage(
       verified: Boolean(
         testDefinition.sourceContractId === contract.id &&
           computedContractFingerprint &&
-          testDefinition.sourceContractFingerprint === computedContractFingerprint
+          testDefinition.sourceContractFingerprint === computedContractFingerprint &&
+          String(testDefinition.sourceContractVersion) === String(contract.version)
       ),
       details: 'Contract specifies workload demand and acceptance criteria for Test Definition.'
     });
@@ -1303,7 +1409,8 @@ export function generatePerformanceEvidencePackage(
       verified: Boolean(
         results?.run?.testDefinition?.id === testDefinition.id &&
           computedTestDefinitionFingerprint &&
-          results?.run?.testDefinition?.fingerprint === computedTestDefinitionFingerprint
+          results?.run?.testDefinition?.fingerprint === computedTestDefinitionFingerprint &&
+          String(results?.run?.testDefinition?.version) === String(testDefinition.version)
       ),
       details: 'Test Definition compiled and executed in execution run.'
     });
@@ -1356,10 +1463,42 @@ export function generatePerformanceEvidencePackage(
       verified: Boolean(
         findingsRegister.sourceAcceptanceEvaluationId === acceptanceEvaluation.id &&
           findingsRegister.sourceAcceptanceEvaluationDigest ===
-            acceptanceEvaluation.evaluationDigest?.value
+            acceptanceEvaluation.evaluationDigest?.value &&
+          (!findingsRegister.sourceExecutionRunId ||
+            !acceptanceEvaluation.sourceExecutionRunId ||
+            findingsRegister.sourceExecutionRunId === acceptanceEvaluation.sourceExecutionRunId)
       ),
       details: 'Findings engine registered governed findings and defect candidates.'
     });
+  }
+
+  // Enforce the 6 required core lineage edges (§6, M4.1.3)
+  for (const req of REQUIRED_CORE_LINEAGE_EDGES) {
+    const edge = lineageEdges.find(
+      (e) => e.fromComponent === req.fromComponent && e.toComponent === req.toComponent
+    );
+    if (!edge) {
+      generationIssues.push(
+        `Required core lineage edge ${req.fromComponent} -> ${req.toComponent} is missing.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    } else if (!edge.fromId || !edge.toId) {
+      generationIssues.push(
+        `Required core lineage edge ${req.fromComponent} -> ${req.toComponent} lacks source-backed endpoint IDs.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    } else if (!edge.verified) {
+      generationIssues.push(
+        `Required core lineage edge ${req.fromComponent} -> ${req.toComponent} is not verified.`
+      );
+      if (packageGenerationStatus === 'VALID') {
+        packageGenerationStatus = 'INVALID_PROVENANCE';
+      }
+    }
   }
 
   const lineage: EvidencePackageLineage = {

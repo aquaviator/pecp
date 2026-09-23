@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PerformanceContract,
   TestDefinition,
+  TestDefinitionStatus,
   CanonicalExecutionResult,
   EngineeringArtefact,
   PerformanceEvidencePackage
@@ -15,7 +16,10 @@ import {
   generateFindings,
   generatePerformanceEvidencePackage,
   verifyPerformanceEvidencePackageDigest,
-  computeEvidencePackageDigest
+  computeEvidencePackageDigest,
+  buildFindingsRegisterDigestPayload,
+  computeFindingsRegisterDigest,
+  REQUIRED_CORE_LINEAGE_EDGES
 } from '@pecp/test-engine';
 import {
   RETAILCO_M3_APPROVED_CONTRACT,
@@ -2216,6 +2220,542 @@ describe('M4.1 — Canonical Performance Evidence Package & Audit Manifest', () 
       // Verifiable digest
       const verification = verifyPerformanceEvidencePackageDigest(pkg);
       expect(verification.isValid).toBe(true);
+    });
+
+    describe('M4.1.3 — Required Lineage Binding Completeness Gate & Invariants', () => {
+      const recomputeEvaluation = (evalObj: any) => {
+        const payload = buildAcceptanceEvaluationDigestPayload(evalObj);
+        const digest = computeAcceptanceEvaluationDigest(payload);
+        evalObj.evaluationDigest = digest;
+        evalObj.evaluationFingerprint = digest.value;
+        return evalObj;
+      };
+
+      const recomputeRegister = (regObj: any) => {
+        const payload = buildFindingsRegisterDigestPayload(regObj);
+        const digest = computeFindingsRegisterDigest(payload);
+        regObj.registerDigest = digest;
+        regObj.id = `findings-reg-${digest.value.slice(0, 16)}`;
+        return regObj;
+      };
+
+      it('rejects Test Definition missing sourceContractId with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = { ...createAuthoritativeTestDef(), sourceContractId: undefined as any };
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+        const pkg = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg.generationIssues).toContain('Test Definition is missing required sourceContractId binding.');
+      });
+
+      it('rejects Test Definition missing sourceContractVersion with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = { ...createAuthoritativeTestDef(), sourceContractVersion: undefined as any };
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+        const pkg = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg.generationIssues).toContain('Test Definition is missing required sourceContractVersion binding.');
+      });
+
+      it('rejects Test Definition missing sourceContractFingerprint with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = { ...createAuthoritativeTestDef(), sourceContractFingerprint: undefined as any };
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+        const pkg = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg.generationIssues).toContain('Test Definition is missing required sourceContractFingerprint binding.');
+      });
+
+      it('rejects Results missing sourceContract id/version/fingerprint with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+
+        const resultsWithoutContractId = createAuthoritativeResults();
+        delete (resultsWithoutContractId.run.sourceContract as any).id;
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results: resultsWithoutContractId });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results: resultsWithoutContractId,
+          contract,
+          testDefinition: testDef
+        });
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results: resultsWithoutContractId,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg1.generationIssues).toContain('Results execution run is missing required sourceContract.id binding.');
+
+        const resultsWithoutVersion = createAuthoritativeResults();
+        delete (resultsWithoutVersion.run.sourceContract as any).version;
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results: resultsWithoutVersion,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg2.generationIssues).toContain('Results execution run is missing required sourceContract.version binding.');
+
+        const resultsWithoutFp = createAuthoritativeResults();
+        delete (resultsWithoutFp.run.sourceContract as any).fingerprint;
+        const pkg3 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results: resultsWithoutFp,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg3.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg3.generationIssues).toContain('Results execution run is missing required sourceContract.fingerprint binding.');
+      });
+
+      it('rejects Results missing testDefinition id/version/fingerprint with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+
+        const resultsWithoutDefId = createAuthoritativeResults();
+        delete (resultsWithoutDefId.run.testDefinition as any).id;
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results: resultsWithoutDefId });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results: resultsWithoutDefId,
+          contract,
+          testDefinition: testDef
+        });
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results: resultsWithoutDefId,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg1.generationIssues).toContain('Results execution run is missing required testDefinition.id binding.');
+
+        const resultsWithoutDefVersion = createAuthoritativeResults();
+        delete (resultsWithoutDefVersion.run.testDefinition as any).version;
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results: resultsWithoutDefVersion,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg2.generationIssues).toContain('Results execution run is missing required testDefinition.version binding.');
+
+        const resultsWithoutDefFp = createAuthoritativeResults();
+        delete (resultsWithoutDefFp.run.testDefinition as any).fingerprint;
+        const pkg3 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results: resultsWithoutDefFp,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg3.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg3.generationIssues).toContain('Results execution run is missing required testDefinition.fingerprint binding.');
+      });
+
+      it('rejects Acceptance missing sourceExecutionRunId or canonicalResults.executionRunId with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const evalMissingRunId = recomputeEvaluation({ ...evaluation });
+        delete (evalMissingRunId as any).sourceExecutionRunId;
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingRunId,
+          findingsRegister: register
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg1.generationIssues).toContain('Acceptance evaluation is missing required sourceExecutionRunId.');
+
+        const evalMissingResultsRunId = recomputeEvaluation({
+          ...evaluation,
+          canonicalResults: { ...evaluation.canonicalResults, executionRunId: undefined as any }
+        });
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingResultsRunId,
+          findingsRegister: register
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg2.generationIssues).toContain('Acceptance evaluation is missing required canonicalResults.executionRunId.');
+      });
+
+      it('rejects Acceptance missing sourceContract id/version/fingerprint with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const evalMissingCId = recomputeEvaluation({
+          ...evaluation,
+          sourceContract: { ...evaluation.sourceContract, id: undefined as any }
+        });
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingCId,
+          findingsRegister: register
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg1.generationIssues).toContain('Acceptance evaluation is missing required sourceContract.id binding.');
+
+        const evalMissingCVer = recomputeEvaluation({
+          ...evaluation,
+          sourceContract: { ...evaluation.sourceContract, version: undefined as any }
+        });
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingCVer,
+          findingsRegister: register
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg2.generationIssues).toContain('Acceptance evaluation is missing required sourceContract.version binding.');
+
+        const evalMissingCFp = recomputeEvaluation({
+          ...evaluation,
+          sourceContract: { ...evaluation.sourceContract, fingerprint: undefined as any }
+        });
+        const pkg3 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingCFp,
+          findingsRegister: register
+        });
+        expect(pkg3.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg3.generationIssues).toContain('Acceptance evaluation is missing required sourceContract.fingerprint binding.');
+      });
+
+      it('rejects Acceptance missing testDefinition id/version/fingerprint with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const evalMissingTDefId = recomputeEvaluation({
+          ...evaluation,
+          testDefinition: { ...evaluation.testDefinition, id: undefined as any }
+        });
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingTDefId,
+          findingsRegister: register
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg1.generationIssues).toContain('Acceptance evaluation is missing required testDefinition.id binding.');
+
+        const evalMissingTDefVer = recomputeEvaluation({
+          ...evaluation,
+          testDefinition: { ...evaluation.testDefinition, version: undefined as any }
+        });
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingTDefVer,
+          findingsRegister: register
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg2.generationIssues).toContain('Acceptance evaluation is missing required testDefinition.version binding.');
+
+        const evalMissingTDefFp = recomputeEvaluation({
+          ...evaluation,
+          testDefinition: { ...evaluation.testDefinition, fingerprint: undefined as any }
+        });
+        const pkg3 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingTDefFp,
+          findingsRegister: register
+        });
+        expect(pkg3.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg3.generationIssues).toContain('Acceptance evaluation is missing required testDefinition.fingerprint binding.');
+      });
+
+      it('rejects Acceptance missing workloadPrerequisite, provenanceGate, or operationalIntegrityGate with INVALID_ACCEPTANCE_INTEGRITY', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const evalMissingWorkload = { ...evaluation };
+        delete (evalMissingWorkload as any).workloadPrerequisite;
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingWorkload,
+          findingsRegister: register
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+        expect(pkg1.generationIssues).toContain('Acceptance evaluation is missing required workloadPrerequisite.');
+
+        const evalMissingProvGate = { ...evaluation };
+        delete (evalMissingProvGate as any).provenanceGate;
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingProvGate,
+          findingsRegister: register
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+        expect(pkg2.generationIssues).toContain('Acceptance evaluation is missing required provenanceGate.');
+
+        const evalMissingOpGate = { ...evaluation };
+        delete (evalMissingOpGate as any).operationalIntegrityGate;
+        const pkg3 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evalMissingOpGate,
+          findingsRegister: register
+        });
+        expect(pkg3.packageGenerationStatus).toBe('INVALID_ACCEPTANCE_INTEGRITY');
+        expect(pkg3.generationIssues).toContain('Acceptance evaluation is missing required operationalIntegrityGate.');
+      });
+
+      it('rejects Findings missing sourceExecutionRunId with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const registerMissingRunId = { ...register };
+        delete (registerMissingRunId as any).sourceExecutionRunId;
+        recomputeRegister(registerMissingRunId);
+
+        const pkg = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: registerMissingRunId
+        });
+        expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        expect(pkg.generationIssues).toContain('Findings register is missing required sourceExecutionRunId.');
+      });
+
+      it('rejects Findings missing sourceAcceptanceEvaluationId or sourceAcceptanceEvaluationDigest with INVALID_FINDINGS_INTEGRITY', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const registerMissingEvalId = { ...register };
+        delete (registerMissingEvalId as any).sourceAcceptanceEvaluationId;
+        const pkg1 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: registerMissingEvalId
+        });
+        expect(pkg1.packageGenerationStatus).toBe('INVALID_FINDINGS_INTEGRITY');
+        expect(pkg1.generationIssues).toContain('Findings register is missing required sourceAcceptanceEvaluationId.');
+
+        const registerMissingEvalDigest = { ...register };
+        delete (registerMissingEvalDigest as any).sourceAcceptanceEvaluationDigest;
+        const pkg2 = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: registerMissingEvalDigest
+        });
+        expect(pkg2.packageGenerationStatus).toBe('INVALID_FINDINGS_INTEGRITY');
+        expect(pkg2.generationIssues).toContain('Findings register is missing required sourceAcceptanceEvaluationDigest.');
+      });
+
+      it('verifies that REQUIRED_CORE_LINEAGE_EDGES contains all six core edges', () => {
+        expect(REQUIRED_CORE_LINEAGE_EDGES).toHaveLength(6);
+        expect(REQUIRED_CORE_LINEAGE_EDGES).toEqual([
+          { fromComponent: 'PERFORMANCE_CONTRACT', toComponent: 'TEST_DEFINITION' },
+          { fromComponent: 'TEST_DEFINITION', toComponent: 'EXECUTION_RUN' },
+          { fromComponent: 'EXECUTION_RUN', toComponent: 'RAW_EVIDENCE_INVENTORY' },
+          { fromComponent: 'RAW_EVIDENCE_INVENTORY', toComponent: 'CANONICAL_RESULTS' },
+          { fromComponent: 'CANONICAL_RESULTS', toComponent: 'ACCEPTANCE_EVALUATION' },
+          { fromComponent: 'ACCEPTANCE_EVALUATION', toComponent: 'FINDINGS_REGISTER' }
+        ]);
+      });
+
+      it('rejects unverified core edge in lineage with INVALID_PROVENANCE', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        // Mismatched sourceContractVersion on testDef
+        const testDefMismatchedVersion = { ...testDef, sourceContractVersion: 'v999.0' };
+        const pkg = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDefMismatchedVersion,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+        expect(pkg.packageGenerationStatus).toBe('INVALID_PROVENANCE');
+        const contractToTestDefEdge = pkg.lineage.edges.find(
+          (e) => e.fromComponent === 'PERFORMANCE_CONTRACT' && e.toComponent === 'TEST_DEFINITION'
+        );
+        expect(contractToTestDefEdge?.verified).toBe(false);
+      });
+
+      it('ensures TestDefinitionStatus is strictly canonical and never non-canonical STABLE', () => {
+        const testDef = createAuthoritativeTestDef();
+        expect(testDef.status).toBe('READY_FOR_EXECUTION');
+        expect((testDef.status as string)).not.toBe('STABLE');
+
+        const canonicalStatuses: TestDefinitionStatus[] = [
+          'DRAFT',
+          'BLOCKED',
+          'NOT_EXECUTABLE',
+          'READY_FOR_EXECUTION',
+          'APPROVED',
+          'SUPERSEDED'
+        ];
+        expect(canonicalStatuses).toContain(testDef.status);
+      });
+
+      it('strictly preserves authoritative RetailCo facts and maintains package VALID status', () => {
+        const contract = RETAILCO_M3_APPROVED_CONTRACT;
+        const testDef = createAuthoritativeTestDef();
+        const results = createAuthoritativeResults();
+        const evaluation = evaluateAcceptance({ contract, testDefinition: testDef, results });
+        const register = generateFindings({
+          acceptanceEvaluation: evaluation,
+          results,
+          contract,
+          testDefinition: testDef
+        });
+
+        const pkg = generatePerformanceEvidencePackage({
+          contract,
+          testDefinition: testDef,
+          results,
+          acceptanceEvaluation: evaluation,
+          findingsRegister: register
+        });
+
+        expect(pkg.packageGenerationStatus).toBe('VALID');
+        expect(pkg.generationIssues).toHaveLength(0);
+
+        // Verify all 6 core lineage edges are present and verified
+        for (const req of REQUIRED_CORE_LINEAGE_EDGES) {
+          const edge = pkg.lineage.edges.find(
+            (e) => e.fromComponent === req.fromComponent && e.toComponent === req.toComponent
+          );
+          expect(edge).toBeDefined();
+          expect(edge?.verified).toBe(true);
+          expect(edge?.fromId).toBeTruthy();
+          expect(edge?.toId).toBeTruthy();
+        }
+
+        const verification = verifyPerformanceEvidencePackageDigest(pkg);
+        expect(verification.isValid).toBe(true);
+      });
     });
   });
 });
