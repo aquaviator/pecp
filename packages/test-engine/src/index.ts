@@ -7,3 +7,4 @@ export * from './resultsIngestion.js';
 export * from './acceptanceEngine.js';
 export * from './findingsGenerator.js';
 export * from './evidencePackageGenerator.js';
+export * from './exportEngine.js';

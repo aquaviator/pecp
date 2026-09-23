@@ -866,4 +866,5 @@ export * from './results.js';
 export * from './acceptance.js';
 export * from './findings.js';
 export * from './evidencePackage.js';
+export * from './exportPublication.js';
 
