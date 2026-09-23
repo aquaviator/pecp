@@ -110,7 +110,7 @@ export interface ResultsReportVisualisationStage {
   durationSeconds: number;
   startTimeSeconds: number;
   endTimeSeconds: number;
-  startArrivalRate: number;
+  startArrivalRate?: number | null;
   targetArrivalRate: number;
 }
 

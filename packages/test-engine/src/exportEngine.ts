@@ -96,6 +96,8 @@ export function buildResultsReportDigestPayload(
       executionMode: report.projectExecutionIdentity.executionMode ?? null,
       operationalStatus: report.projectExecutionIdentity.operationalStatus ?? null,
       commitSha: report.projectExecutionIdentity.commitSha ?? null,
+      startedAt: report.projectExecutionIdentity.startedAt ?? null,
+      completedAt: report.projectExecutionIdentity.completedAt ?? null,
       durationSeconds: report.projectExecutionIdentity.durationSeconds ?? null
     },
     workloadDemand: {
@@ -124,7 +126,7 @@ export function buildResultsReportDigestPayload(
         durationSeconds: st.durationSeconds,
         startTimeSeconds: st.startTimeSeconds,
         endTimeSeconds: st.endTimeSeconds,
-        startArrivalRate: st.startArrivalRate,
+        startArrivalRate: st.startArrivalRate ?? null,
         targetArrivalRate: st.targetArrivalRate
       })),
       journeyDistribution: report.visualisationHook.journeyDistribution.map((j) => ({
@@ -162,7 +164,8 @@ export function buildResultsReportDigestPayload(
     acceptanceVerdict: report.acceptanceVerdict
       ? {
           verdict: report.acceptanceVerdict.verdict ?? null,
-          reasons: [...(report.acceptanceVerdict.reasons || [])]
+          reasons: [...(report.acceptanceVerdict.reasons || [])],
+          evaluatedAt: report.acceptanceVerdict.evaluatedAt ?? null
         }
       : null,
     findingsSummary: report.findingsSummary
@@ -211,7 +214,7 @@ export function generateResultsReport(
     const sched = scenario.workloadSchedule;
 
     let currentTime = 0;
-    let currentRate = sched.startRate !== undefined ? sched.startRate : 0;
+    let currentRate: number | null = sched.startRate !== undefined ? sched.startRate : null;
 
     const stages: ResultsReportVisualisationStage[] = (sched.stages || []).map((st, idx) => {
       const startArrivalRate = currentRate;
@@ -271,7 +274,7 @@ export function generateResultsReport(
         executionModel: sched.executionModel ?? null,
         population: sched.arrivalPopulation ?? null,
         rateUnit: sched.rateUnit ?? null,
-        startRate: sched.startRate !== undefined ? sched.startRate : 0,
+        startRate: sched.startRate !== undefined ? sched.startRate : null,
         peakArrivalRate: sched.peakArrivalRate ?? null
       },
       businessTarget,
@@ -279,52 +282,7 @@ export function generateResultsReport(
       journeyDistribution
     };
   } else {
-    // TestDefinition not supplied: project from evidence package summary without synthesizing defaults
-    const peak = evidencePackage.evidenceSummary?.workloadDemand?.schedulerDemand?.peakArrivalRate;
-    const stages: ResultsReportVisualisationStage[] = [];
-    let t = 0;
-    let sIdx = 1;
-
-    const rampUpSec = evidencePackage.evidenceSummary?.workloadDemand?.rampUpSeconds;
-    const steadySec = evidencePackage.evidenceSummary?.workloadDemand?.steadyStateSeconds;
-    const rampDownSec = evidencePackage.evidenceSummary?.workloadDemand?.rampDownSeconds;
-
-    if (rampUpSec != null && peak != null) {
-      stages.push({
-        stageIndex: sIdx++,
-        name: 'ramp-up',
-        durationSeconds: rampUpSec,
-        startTimeSeconds: t,
-        endTimeSeconds: t + rampUpSec,
-        startArrivalRate: 0,
-        targetArrivalRate: peak
-      });
-      t += rampUpSec;
-    }
-    if (steadySec != null && peak != null) {
-      stages.push({
-        stageIndex: sIdx++,
-        name: 'steady-state',
-        durationSeconds: steadySec,
-        startTimeSeconds: t,
-        endTimeSeconds: t + steadySec,
-        startArrivalRate: peak,
-        targetArrivalRate: peak
-      });
-      t += steadySec;
-    }
-    if (rampDownSec != null) {
-      stages.push({
-        stageIndex: sIdx++,
-        name: 'ramp-down',
-        durationSeconds: rampDownSec,
-        startTimeSeconds: t,
-        endTimeSeconds: t + rampDownSec,
-        startArrivalRate: peak ?? 0,
-        targetArrivalRate: 0
-      });
-    }
-
+    // M4.2.2: Without a verified Test Definition, do not reconstruct exact visualisation stages
     const businessTarget = evidencePackage.evidenceSummary?.workloadDemand?.businessDemand
       ? {
           metric: evidencePackage.evidenceSummary.workloadDemand.businessDemand.metric ?? null,
@@ -347,7 +305,7 @@ export function generateResultsReport(
     visualisationHook = {
       scheduler,
       businessTarget,
-      stages,
+      stages: [],
       journeyDistribution: []
     };
   }
@@ -876,6 +834,7 @@ export function generateDefectPayloads(
  * mediaType, defect payloads, and destination readiness. Excludes non-semantic timestamps.
  */
 export function buildPublicationBundleDigestPayload(bundle: {
+  schemaVersion?: string;
   sourceEvidencePackageId: string;
   sourceEvidencePackageDigest: string;
   sourceAcceptanceVerdict?: AcceptanceVerdict | null;
@@ -888,7 +847,7 @@ export function buildPublicationBundleDigestPayload(bundle: {
   publicationReadiness: Record<PublicationDestination, DestinationPublicationStatus>;
 }): any {
   return {
-    schemaVersion: 'publication-bundle-v1',
+    schemaVersion: bundle.schemaVersion ?? 'publication-bundle-v1',
     sourceEvidencePackageId: bundle.sourceEvidencePackageId,
     sourceEvidencePackageDigest: bundle.sourceEvidencePackageDigest,
     sourceAcceptanceVerdict: bundle.sourceAcceptanceVerdict ?? null,
@@ -1063,9 +1022,9 @@ export function generatePublicationBundle(input: GeneratePublicationBundleInput)
       componentMismatches.push(
         `Strategy version ${strategy.version} does not match component version ${comp.version}.`
       );
-    } else if (comp.fingerprint && comp.fingerprint !== strategy.sourceContractFingerprint) {
+    } else if (comp.sourceContractFingerprint !== strategy.sourceContractFingerprint) {
       componentMismatches.push(
-        `Strategy sourceContractFingerprint ${strategy.sourceContractFingerprint} does not match component fingerprint ${comp.fingerprint}.`
+        `Strategy sourceContractFingerprint ${strategy.sourceContractFingerprint} does not match component sourceContractFingerprint ${comp.sourceContractFingerprint}.`
       );
     } else if (comp.status && comp.status !== strategy.status) {
       componentMismatches.push(
@@ -1099,9 +1058,9 @@ export function generatePublicationBundle(input: GeneratePublicationBundleInput)
       componentMismatches.push(
         `TestPlan version ${testPlan.version} does not match component version ${comp.version}.`
       );
-    } else if (comp.fingerprint && comp.fingerprint !== testPlan.sourceContractFingerprint) {
+    } else if (comp.sourceContractFingerprint !== testPlan.sourceContractFingerprint) {
       componentMismatches.push(
-        `TestPlan sourceContractFingerprint ${testPlan.sourceContractFingerprint} does not match component fingerprint ${comp.fingerprint}.`
+        `TestPlan sourceContractFingerprint ${testPlan.sourceContractFingerprint} does not match component sourceContractFingerprint ${comp.sourceContractFingerprint}.`
       );
     } else if (comp.status && comp.status !== testPlan.status) {
       componentMismatches.push(
@@ -1201,11 +1160,11 @@ export function generatePublicationBundle(input: GeneratePublicationBundleInput)
     }
   }
 
-  // Generate Render-Neutral Results Report (only pass verified companions to prevent unverified drift)
+  // Generate Render-Neutral Results Report (M4.2.2: strictly only pass verified companions)
   const resultsReport = generateResultsReport(
     evidencePackage,
-    verifiedTestDefinition ?? testDefinition,
-    verifiedFindingsRegister ?? findingsRegister
+    verifiedTestDefinition,
+    verifiedFindingsRegister
   );
 
   // Generate Export Artefacts
@@ -1399,6 +1358,7 @@ export function generatePublicationBundle(input: GeneratePublicationBundleInput)
   const findingsComp = evidencePackage.components.find((c) => c.componentType === 'FINDINGS_REGISTER');
 
   const bundlePayload = buildPublicationBundleDigestPayload({
+    schemaVersion: 'publication-bundle-v1',
     sourceEvidencePackageId: evidencePackage.id,
     sourceEvidencePackageDigest: evidencePackage.packageDigest.value,
     sourceAcceptanceVerdict: sourceAcceptanceVerdict ?? null,
@@ -1434,8 +1394,8 @@ export function generatePublicationBundle(input: GeneratePublicationBundleInput)
 
 /**
  * Cryptographically verifies a PublicationBundle.
- * Invariant (M4.2.1): Checks bundle digest algorithm/schema, bundle ID derivation,
- * artifact content digests, artifact ID derivation, defect payload digests and ID derivation,
+ * Invariant (M4.2.1 / M4.2.2): Checks top-level bundle schemaVersion, bundle digest algorithm/schema,
+ * bundle ID derivation, artifact content digests, artifact ID derivation, defect payload digests and ID derivation,
  * and full bundle semantic identity.
  */
 export function verifyPublicationBundleDigest(
@@ -1443,7 +1403,13 @@ export function verifyPublicationBundleDigest(
 ): VerifyPublicationBundleDigestResult {
   const mismatches: string[] = [];
 
-  // 1. Verify bundle digest envelope metadata
+  // 1. Verify bundle top-level schemaVersion and digest envelope metadata
+  if (bundle.schemaVersion !== 'publication-bundle-v1') {
+    mismatches.push(
+      `Unsupported bundle schemaVersion: '${bundle.schemaVersion}'. Expected 'publication-bundle-v1'.`
+    );
+  }
+
   if (!bundle.bundleDigest) {
     mismatches.push('PublicationBundle is missing bundleDigest object.');
     return {
@@ -1509,6 +1475,7 @@ export function verifyPublicationBundleDigest(
 
   // 5. Verify top-level bundle digest
   const payload = buildPublicationBundleDigestPayload({
+    schemaVersion: bundle.schemaVersion,
     sourceEvidencePackageId: bundle.sourceEvidencePackageId,
     sourceEvidencePackageDigest: bundle.sourceEvidencePackageDigest,
     sourceAcceptanceVerdict: bundle.sourceAcceptanceVerdict ?? null,

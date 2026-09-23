@@ -8,7 +8,8 @@ import {
   PerformanceEvidencePackage,
   PublicationBundle,
   GovernedObservation,
-  EngineeringArtefact
+  EngineeringArtefact,
+  RenderNeutralResultsReport
 } from '@pecp/pe-domain';
 import {
   compileTestDefinition,
@@ -645,7 +646,7 @@ describe('M4.2 / M4.2.1 — Canonical Export & Publication Contract Gate', () =>
             componentType: 'PERFORMANCE_STRATEGY',
             canonicalId: strategy.id,
             version: strategy.version,
-            fingerprint: strategy.sourceContractFingerprint,
+            sourceContractFingerprint: strategy.sourceContractFingerprint,
             status: 'SUPERSEDED',
             isRequired: false,
             presenceStatus: 'SUPERSEDED'
@@ -965,6 +966,366 @@ describe('M4.2 / M4.2.1 — Canonical Export & Publication Contract Gate', () =>
         startArrivalRate: 200,
         targetArrivalRate: 300
       });
+    });
+  });
+
+  describe('7. Companion Isolation, Source-Binding & Report Integrity Gate (M4.2.2)', () => {
+    it('unverified Test Definition cannot change Results Report visualisation in publication bundle', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      // Tampered / drifted TestDefinition
+      const tamperedTestDef: TestDefinition = {
+        ...testDef,
+        fingerprint: 'fp-drifted-fake-fingerprint',
+        scenarios: [
+          {
+            ...testDef.scenarios[0],
+            workloadSchedule: {
+              ...testDef.scenarios[0].workloadSchedule,
+              stages: [
+                { durationSeconds: 999, targetArrivalRate: 9999, description: 'hacked-stage' }
+              ]
+            }
+          }
+        ]
+      };
+
+      const bundle = generatePublicationBundle({
+        evidencePackage,
+        testDefinition: tamperedTestDef,
+        findingsRegister,
+        destinations: ['DOWNLOAD']
+      });
+
+      // Bundle must be blocked because TestDefinition failed verification
+      expect(bundle.overallReadiness).toBe('BLOCKED_INVALID_SOURCE');
+
+      // The report artifact must NOT contain the hacked stage from the unverified TestDefinition!
+      const reportArtifact = bundle.artifacts.find(
+        (a) => a.artifactType === 'RESULTS_REPORT' && a.format === 'JSON'
+      );
+      expect(reportArtifact).toBeDefined();
+      const parsedReport: RenderNeutralResultsReport = JSON.parse(reportArtifact!.content);
+
+      // Without a verified test definition, stages must be []
+      expect(parsedReport.visualisationHook.stages).toEqual([]);
+      expect(parsedReport.visualisationHook.journeyDistribution).toEqual([]);
+    });
+
+    it('unverified Findings Register cannot change Results Report summaries in publication bundle', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      // Tampered Findings Register with corrupted digest
+      const tamperedRegister: FindingsRegister = {
+        ...findingsRegister,
+        registerDigest: {
+          ...findingsRegister.registerDigest,
+          value: '0000000000000000000000000000000000000000000000000000000000000000'
+        }
+      };
+
+      const bundle = generatePublicationBundle({
+        evidencePackage,
+        testDefinition: testDef,
+        findingsRegister: tamperedRegister,
+        destinations: ['DOWNLOAD']
+      });
+
+      expect(bundle.overallReadiness).toBe('BLOCKED_INVALID_SOURCE');
+      // No defect payloads generated from unverified findings register
+      expect(bundle.defectPayloads).toHaveLength(0);
+
+      // Results report inside bundle must reflect only verified evidencePackage findingsSummary
+      const reportArtifact = bundle.artifacts.find(
+        (a) => a.artifactType === 'RESULTS_REPORT' && a.format === 'JSON'
+      );
+      expect(reportArtifact).toBeDefined();
+      const parsedReport: RenderNeutralResultsReport = JSON.parse(reportArtifact!.content);
+      expect(parsedReport.findingsSummary?.totalFindings).toBe(
+        evidencePackage.evidenceSummary?.findingsSummary?.totalFindings
+      );
+    });
+
+    it('Strategy sourceContractFingerprint mismatch blocks publication with BLOCKED_INVALID_SOURCE', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      const strategy: EngineeringArtefact = {
+        id: 'strategy-retailco-v1',
+        projectId: 'proj-retailco',
+        projectName: 'RetailCo',
+        type: 'PERFORMANCE_STRATEGY',
+        title: 'RetailCo Performance Strategy',
+        version: 'v1.0',
+        status: 'APPROVED',
+        engineeringIntent: 'REPRESENTATIVE',
+        sourceContractId: 'contract-retailco-v1',
+        sourceContractVersion: 'v1.0',
+        sourceContractFingerprint: 'fp-different-mismatched-contract',
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-09-23T00:00:00Z',
+        sections: [],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          canApprove: true,
+          status: 'APPROVED',
+          blockingReasons: [],
+          unresolvedIssuesCount: 0
+        }
+      };
+
+      // M4.1 component with authoritative sourceContractFingerprint
+      const packageWithStrategy: PerformanceEvidencePackage = {
+        ...evidencePackage,
+        components: evidencePackage.components.map((c) =>
+          c.componentType === 'PERFORMANCE_STRATEGY'
+            ? {
+                componentType: 'PERFORMANCE_STRATEGY',
+                canonicalId: strategy.id,
+                version: strategy.version,
+                sourceContractFingerprint: 'fp-authoritative-package-contract',
+                status: 'APPROVED',
+                isRequired: false,
+                presenceStatus: 'PRESENT'
+              }
+            : c
+        )
+      };
+
+      const bundle = generatePublicationBundle({
+        evidencePackage: packageWithStrategy,
+        testDefinition: testDef,
+        findingsRegister,
+        strategy,
+        destinations: ['DOWNLOAD']
+      });
+
+      expect(bundle.overallReadiness).toBe('BLOCKED_INVALID_SOURCE');
+      expect(
+        bundle.blockingReasons.some((r) =>
+          r.includes('Strategy sourceContractFingerprint fp-different-mismatched-contract does not match component sourceContractFingerprint fp-authoritative-package-contract')
+        )
+      ).toBe(true);
+    });
+
+    it('Test Plan sourceContractFingerprint mismatch blocks publication with BLOCKED_INVALID_SOURCE', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      const testPlan: EngineeringArtefact = {
+        id: 'plan-retailco-v1',
+        projectId: 'proj-retailco',
+        projectName: 'RetailCo',
+        type: 'PERFORMANCE_TEST_PLAN',
+        title: 'RetailCo Performance Test Plan',
+        version: 'v1.0',
+        status: 'APPROVED',
+        engineeringIntent: 'REPRESENTATIVE',
+        sourceContractId: 'contract-retailco-v1',
+        sourceContractVersion: 'v1.0',
+        sourceContractFingerprint: 'fp-different-mismatched-contract',
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-09-23T00:00:00Z',
+        sections: [],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          canApprove: true,
+          status: 'APPROVED',
+          blockingReasons: [],
+          unresolvedIssuesCount: 0
+        }
+      };
+
+      const packageWithTestPlan: PerformanceEvidencePackage = {
+        ...evidencePackage,
+        components: evidencePackage.components.map((c) =>
+          c.componentType === 'PERFORMANCE_TEST_PLAN'
+            ? {
+                componentType: 'PERFORMANCE_TEST_PLAN',
+                canonicalId: testPlan.id,
+                version: testPlan.version,
+                sourceContractFingerprint: 'fp-authoritative-package-contract',
+                status: 'APPROVED',
+                isRequired: false,
+                presenceStatus: 'PRESENT'
+              }
+            : c
+        )
+      };
+
+      const bundle = generatePublicationBundle({
+        evidencePackage: packageWithTestPlan,
+        testDefinition: testDef,
+        findingsRegister,
+        testPlan,
+        destinations: ['DOWNLOAD']
+      });
+
+      expect(bundle.overallReadiness).toBe('BLOCKED_INVALID_SOURCE');
+      expect(
+        bundle.blockingReasons.some((r) =>
+          r.includes('TestPlan sourceContractFingerprint fp-different-mismatched-contract does not match component sourceContractFingerprint fp-authoritative-package-contract')
+        )
+      ).toBe(true);
+    });
+
+    it('changing projectExecutionIdentity startedAt, completedAt, or evaluatedAt changes reportDigest', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      const report1 = generateResultsReport(evidencePackage, testDef, findingsRegister);
+
+      // Package with modified startedAt
+      const packageStartedAt: PerformanceEvidencePackage = {
+        ...evidencePackage,
+        evidenceSummary: {
+          ...evidencePackage.evidenceSummary,
+          execution: {
+            ...evidencePackage.evidenceSummary.execution,
+            startedAt: '2026-09-23T11:00:00Z'
+          }
+        }
+      };
+      const report2 = generateResultsReport(packageStartedAt, testDef, findingsRegister);
+      expect(report2.reportDigest).not.toBe(report1.reportDigest);
+
+      // Package with modified completedAt
+      const packageCompletedAt: PerformanceEvidencePackage = {
+        ...evidencePackage,
+        evidenceSummary: {
+          ...evidencePackage.evidenceSummary,
+          execution: {
+            ...evidencePackage.evidenceSummary.execution,
+            completedAt: '2026-09-23T12:00:00Z'
+          }
+        }
+      };
+      const report3 = generateResultsReport(packageCompletedAt, testDef, findingsRegister);
+      expect(report3.reportDigest).not.toBe(report1.reportDigest);
+
+      // Package with modified evaluatedAt
+      const packageEvaluatedAt: PerformanceEvidencePackage = {
+        ...evidencePackage,
+        evidenceSummary: {
+          ...evidencePackage.evidenceSummary,
+          acceptanceVerdict: {
+            ...evidencePackage.evidenceSummary.acceptanceVerdict!,
+            evaluatedAt: '2026-09-23T13:00:00Z'
+          }
+        }
+      };
+      const report4 = generateResultsReport(packageEvaluatedAt, testDef, findingsRegister);
+      expect(report4.reportDigest).not.toBe(report1.reportDigest);
+    });
+
+    it('top-level PublicationBundle.schemaVersion tamper is detected and fails verification', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      const bundle = generatePublicationBundle({
+        evidencePackage,
+        testDefinition: testDef,
+        findingsRegister,
+        destinations: ['DOWNLOAD']
+      });
+
+      expect(verifyPublicationBundleDigest(bundle).isValid).toBe(true);
+
+      // Tamper top-level schemaVersion only
+      const tamperedBundle: PublicationBundle = {
+        ...bundle,
+        schemaVersion: 'publication-bundle-v2' as any
+      };
+
+      const result = verifyPublicationBundleDigest(tamperedBundle);
+      expect(result.isValid).toBe(false);
+      expect(result.mismatches.some((m) => m.includes("Unsupported bundle schemaVersion: 'publication-bundle-v2'"))).toBe(true);
+    });
+
+    it('schedule missing startRate leaves startArrivalRate and startRate as null/absent instead of 0', () => {
+      const { contract, results } = createAuthoritativePackageAndFindings();
+      const baseTestDef = createAuthoritativeTestDef();
+
+      // Test definition with undefined startRate
+      const testDefWithoutStartRate: TestDefinition = {
+        ...baseTestDef,
+        scenarios: [
+          {
+            ...baseTestDef.scenarios[0],
+            workloadSchedule: {
+              ...baseTestDef.scenarios[0].workloadSchedule,
+              startRate: undefined, // explicitly omitted
+              stages: [
+                { durationSeconds: 200, targetArrivalRate: 50, description: 'ramp' },
+                { durationSeconds: 400, targetArrivalRate: 50, description: 'steady' }
+              ]
+            }
+          }
+        ]
+      };
+      (testDefWithoutStartRate as any).fingerprint = computeTestDefinitionFingerprint(testDefWithoutStartRate);
+
+      const evaluation = evaluateAcceptance({ contract, testDefinition: testDefWithoutStartRate, results });
+      const findingsRegister = generateFindings({
+        acceptanceEvaluation: evaluation,
+        results,
+        contract,
+        testDefinition: testDefWithoutStartRate
+      });
+      const evidencePackage = generatePerformanceEvidencePackage({
+        contract,
+        testDefinition: testDefWithoutStartRate,
+        results,
+        acceptanceEvaluation: evaluation,
+        findingsRegister
+      });
+
+      const report = generateResultsReport(evidencePackage, testDefWithoutStartRate, findingsRegister);
+
+      // startRate in scheduler must be null, NOT 0
+      expect(report.visualisationHook.scheduler?.startRate).toBeNull();
+
+      // First stage startArrivalRate must be null, NOT 0
+      expect(report.visualisationHook.stages[0].startArrivalRate).toBeNull();
+      expect(report.visualisationHook.stages[0].targetArrivalRate).toBe(50);
+
+      // Subsequent stage startArrivalRate uses the previous stage's targetArrivalRate (50)
+      expect(report.visualisationHook.stages[1].startArrivalRate).toBe(50);
+      expect(report.visualisationHook.stages[1].targetArrivalRate).toBe(50);
+    });
+
+    it('without verified Test Definition, Results Report does not reconstruct exact visualisation stages', () => {
+      const { evidencePackage, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      // Generate report without supplying testDefinition
+      const report = generateResultsReport(evidencePackage, undefined, findingsRegister);
+
+      // Stages and journeyDistribution must be empty arrays, NOT synthetic 3-stage load profile
+      expect(report.visualisationHook.stages).toEqual([]);
+      expect(report.visualisationHook.journeyDistribution).toEqual([]);
+
+      // Summary values are preserved from evidencePackage
+      expect(report.visualisationHook.scheduler?.peakArrivalRate).toBe(109.375);
+      expect(report.visualisationHook.scheduler?.population).toBe('JOURNEY_ITERATION');
+      expect(report.visualisationHook.scheduler?.executionModel).toBe('OPEN');
+      expect(report.scheduleTimings.rampUpSeconds).toBe(300);
+      expect(report.scheduleTimings.steadyStateSeconds).toBe(900);
+      expect(report.scheduleTimings.rampDownSeconds).toBe(120);
+      expect(report.scheduleTimings.totalDurationSeconds).toBe(1320);
+    });
+
+    it('authoritative RetailCo criteria outcomes check: Checkout p95 is 0.3906885 ms PASS, HTTP failure rate is 0 PASS', () => {
+      const { evidencePackage, testDef, findingsRegister } = createAuthoritativePackageAndFindings();
+
+      const report = generateResultsReport(evidencePackage, testDef, findingsRegister);
+
+      // Checkout p95 response time criterion
+      const checkoutOutcome = report.criterionOutcomes.find((c) => c.key.includes('checkout') || c.metric.includes('p95'));
+      expect(checkoutOutcome).toBeDefined();
+      expect(checkoutOutcome!.status).toBe('PASS');
+      expect(checkoutOutcome!.observedValue).toBeCloseTo(0.3906885, 5);
+
+      // Error rate criterion
+      const errorOutcome = report.criterionOutcomes.find((c) => c.metric.includes('error_rate') || c.key.includes('error'));
+      expect(errorOutcome).toBeDefined();
+      expect(errorOutcome!.status).toBe('PASS');
+      expect(errorOutcome!.observedValue).toBe(0);
     });
   });
 });
