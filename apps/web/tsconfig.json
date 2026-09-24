@@ -19,7 +19,8 @@
     "paths": {
       "@pecp/pe-domain": ["../../packages/pe-domain/src/index.ts"],
       "@pecp/workload-engine": ["../../packages/workload-engine/src/index.ts"],
-      "@pecp/artefact-engine": ["../../packages/artefact-engine/src/index.ts"]
+      "@pecp/artefact-engine": ["../../packages/artefact-engine/src/index.ts"],
+      "@pecp/platform-core": ["../../packages/platform-core/src/index.ts"]
     }
   },
   "include": ["src"]

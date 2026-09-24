@@ -65,6 +65,7 @@ export interface ProjectSummary {
   id: string;
   name: string;
   organisation: string;
+  organisationId?: string;
   intent: EngineeringIntent;
   description: string;
   createdDate: string;
