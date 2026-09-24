@@ -183,7 +183,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
               <p className="text-xs text-slate-300 mt-1 leading-relaxed">
                 {resultsReport.acceptanceVerdict?.reasons?.join('; ') ||
                   acceptanceEvaluation?.verdictReasons?.join('; ') ||
-                  'Evaluated by canonical Acceptance Engine against approved Performance Contract.'}
+                  'NOT_SUPPLIED'}
               </p>
             </div>
           </div>
@@ -260,7 +260,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
               <tbody className="divide-y divide-slate-800/60 text-slate-300">
                 {criteriaList.map((evalItem: any, idx: number) => (
                   <tr key={evalItem.criterionId || evalItem.key || idx} className="hover:bg-slate-800/30">
-                    <td className="p-3 font-mono text-slate-400">{evalItem.criterionId || evalItem.key || `crit-${idx}`}</td>
+                    <td className="p-3 font-mono text-slate-400">{evalItem.criterionId || evalItem.key || 'NOT_SUPPLIED'}</td>
                     <td className="p-3 font-medium text-white">{evalItem.metric || evalItem.scope || evalItem.key}</td>
                     <td className="p-3 font-mono text-amber-300">{evalItem.target || evalItem.targetExpression || 'NOT_SUPPLIED'}</td>
                     <td className="p-3 font-mono text-sky-300 font-bold">
@@ -302,7 +302,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Server className="w-4 h-4 text-emerald-400" />
-            Telemetry & Reference Lab Corroboration
+            Telemetry Corroboration
           </h3>
           <div className="space-y-2.5 text-xs">
             <div className="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-800">
@@ -321,10 +321,18 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
               </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-800">
-              <span className="text-slate-400">SUT Corroborated Orders Created:</span>
+              <span className="text-slate-400">
+                {resultsReport.workloadDemand?.businessDemandMetric
+                  ? `Observed ${resultsReport.workloadDemand.businessDemandMetric}:`
+                  : (resultsReport.workloadAttainment as any)?.metric
+                  ? `Observed ${(resultsReport.workloadAttainment as any).metric}:`
+                  : 'Business Events Observed:'}
+              </span>
               <span className="font-mono font-bold text-sky-400">
                 {executionResult?.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents != null
                   ? String(executionResult.referenceLabCorroboration.businessEventCounts.orderCreatedEvents)
+                  : executionResult?.metrics.pecpBusinessAttainmentEvents?.count != null
+                  ? String(executionResult.metrics.pecpBusinessAttainmentEvents.count)
                   : 'NOT_SUPPLIED'}
               </span>
             </div>

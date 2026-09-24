@@ -10,6 +10,7 @@ import { ResultsPage } from '../pages/project/ResultsPage';
 import { FindingsPage } from '../pages/project/FindingsPage';
 import { EvidencePage } from '../pages/project/EvidencePage';
 import { ExecutionsPage } from '../pages/project/ExecutionsPage';
+import { TestsPage } from '../pages/project/TestsPage';
 import { WorkloadProfileChart } from '../components/workload/WorkloadProfileChart';
 import { ProjectSummary } from '../types';
 import { ExecutionEvidenceState } from '../services/interfaces/IExecutionEvidenceService';
@@ -488,5 +489,205 @@ describe('M4.3.1 Section 11: WorkloadProfileChart Project-Neutrality Regressions
     ).replace(/<!-- -->/g, '');
     expect(htmlWithRelation).toContain('Population Relationship Law');
     expect(htmlWithRelation).toContain('Custom Law: 100 req/s business demand ÷ 10% API share = 1000 req/s scheduler arrival rate.');
+  });
+});
+
+describe('M4.3.1 Section 12: Zero-Invention and Project-Neutrality Regressions', () => {
+  const INCOMPLETE_STATE: ExecutionEvidenceState = {
+    projectId: 'proj-fintech-payment-switch',
+    hasExecuted: true,
+    executionResult: {
+      run: {
+        executionRunId: 'run-incomplete-99',
+        operationalStatus: 'EXECUTION_COMPLETED',
+        engine: { name: 'k6', version: '0.54.0' }
+      } as any,
+      metrics: {
+        iterations: { count: 100 },
+        metricsData: {}
+      } as any,
+      thresholdObservations: []
+    } as any,
+    acceptanceEvaluation: {
+      id: 'eval-incomplete-99'
+      // verdictReasons omitted
+    } as any,
+    findingsRegister: {
+      id: 'findings-incomplete-99'
+      // findings and defectCandidates omitted
+    } as any,
+    evidencePackage: {
+      id: 'pep-incomplete-99',
+      packageDigest: { algorithm: 'SHA-256', schemaVersion: 'v1', value: 'digest-pep-incomplete-99' },
+      packageGenerationStatus: 'INVALID_ACCEPTANCE_INTEGRITY',
+      generationIssues: ['Acceptance checksum mismatch'],
+      sourceExecutionRunId: 'run-incomplete-99',
+      sourceContract: { id: 'contract-switch-v1', version: 'v1' },
+      sourceTestDefinition: { id: 'testdef-switch-v1', version: 'v1' },
+      components: [
+        {
+          componentType: 'PERFORMANCE_CONTRACT',
+          canonicalId: 'contract-switch-v1'
+          // status and presenceStatus omitted -> must NOT default to PRESENT
+        } as any,
+        {
+          componentType: 'EXECUTION_RUN',
+          canonicalId: 'run-incomplete-99',
+          presenceStatus: 'ABSENT'
+        } as any
+      ],
+      lineage: {
+        edges: [
+          {
+            fromComponent: 'PERFORMANCE_CONTRACT',
+            fromId: 'contract-switch-v1',
+            toComponent: 'TEST_DEFINITION',
+            toId: 'testdef-switch-v1',
+            bindingType: 'SPECIFIES',
+            verified: true
+            // details omitted -> must NOT default to 'Bound'
+          } as any
+        ]
+      },
+      rawEvidenceInventory: []
+    } as any,
+    publicationBundle: {
+      id: 'bundle-incomplete-99',
+      overallReadiness: 'BLOCKED',
+      publicationReadiness: {
+        DOWNLOAD: { status: 'BLOCKED', blockingReasons: ['Missing package digest'] },
+        CONFLUENCE: { status: 'BLOCKED', blockingReasons: [] } // empty blockingReasons -> must NOT infer 'Destination unconfigured'
+      }
+    } as any,
+    rawArtifactSummary: {
+      files: [
+        { name: 'stdout.log', size: 1024, checksum: 'sha256-stdout-123', description: 'Standard output stream' }
+      ]
+    } as any,
+    resultsReport: {
+      id: 'report-incomplete-99',
+      criterionOutcomes: [
+        {
+          // criterionId and key omitted -> must NOT invent 'crit-0'
+          metric: 'Latency SLA',
+          observedValue: 12.3,
+          status: 'FAIL'
+        } as any
+      ],
+      acceptanceVerdict: {
+        verdict: 'FAIL'
+        // reasons omitted -> must NOT use fallback implying evaluation
+      }
+    } as any,
+    verifiedTestDefinition: null,
+    contract: null
+  };
+
+  it('1. EvidencePage: does not invent PRESENT status, Bound details, or unconditional integrity claims', () => {
+    const rawHtml = renderToString(
+      <ServiceProvider>
+        <EvidencePage
+          project={GENERIC_FINTECH_PROJECT}
+          initialEvidenceState={INCOMPLETE_STATE}
+        />
+      </ServiceProvider>
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    // 1. Component with missing status/presenceStatus must render NOT_SUPPLIED, not PRESENT
+    expect(html).toContain('NOT_SUPPLIED');
+    expect(html).toContain('ABSENT');
+
+    // 2. Renders required identity/binding fields
+    expect(html).toContain('pep-incomplete-99');
+    expect(html).toContain('digest-pep-incomplete-99');
+    expect(html).toContain('run-incomplete-99');
+    expect(html).toContain('contract-switch-v1 (v1)');
+    expect(html).toContain('testdef-switch-v1 (v1)');
+    expect(html).toContain('INVALID_ACCEPTANCE_INTEGRITY');
+
+    // 3. Does NOT unconditionally claim zero missing files or integrity errors
+    expect(html).not.toContain('Zero missing files or integrity errors');
+    expect(html).toContain('Acceptance checksum mismatch');
+
+    // 4. Missing findings count renders NOT_SUPPLIED, not 0
+    expect(html).toContain('NOT_SUPPLIED findings');
+    expect(html).toContain('NOT_SUPPLIED defects');
+
+    // 5. Missing lineage details renders NOT_SUPPLIED, not 'Bound'
+    expect(html).not.toContain('>Bound<');
+
+    // 6. Raw artifact file does not invent PRESENT status
+    expect(html).not.toContain('>PRESENT<');
+    expect(html).toContain('stdout.log');
+
+    // 7. Publication readiness does not invent 'Destination unconfigured' or 'Ready for export'
+    expect(html).not.toContain('Destination unconfigured');
+    expect(html).not.toContain('Ready for export');
+    expect(html).toContain('Missing package digest');
+  });
+
+  it('2. ResultsPage: eliminates RetailCo labels, synthetic crit-N, and verdict-reason fallbacks', () => {
+    const rawHtml = renderToString(
+      <ServiceProvider>
+        <ResultsPage
+          project={GENERIC_FINTECH_PROJECT}
+          initialEvidenceState={INCOMPLETE_STATE}
+        />
+      </ServiceProvider>
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    // 8. Factual telemetry corroboration label, no "Reference Lab"
+    expect(html).not.toContain('Telemetry & Reference Lab Corroboration');
+    expect(html).toContain('Telemetry Corroboration');
+
+    // 9. Generic "Business Events Observed", no "Orders Created"
+    expect(html).not.toContain('Orders Created');
+    expect(html).toContain('Business Events Observed');
+
+    // 10. No synthetic crit-0
+    expect(html).not.toContain('crit-0');
+
+    // 11. No verdict-reason fallback implying an evaluation occurred
+    expect(html).not.toContain('Evaluated by canonical Acceptance Engine against approved Performance Contract');
+  });
+
+  it('3. ExecutionsPage: does not make active runner orchestration claims', () => {
+    const rawHtml = renderToString(
+      <ServiceProvider>
+        <ExecutionsPage
+          project={GENERIC_FINTECH_PROJECT}
+          initialEvidenceState={INCOMPLETE_STATE}
+        />
+      </ServiceProvider>
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    // 12. Factual execution record wording
+    expect(html).not.toContain('Customer-Controlled Test Runner Orchestration');
+    expect(html).toContain('Governed Execution Record');
+    expect(html).not.toContain('The execution workbench orchestrates k6 runners');
+  });
+
+  it('4. TestsPage: does not contain RetailCo 8.75 orders/second example in shared copy and does not invent Execution stage description', () => {
+    const rawHtml = renderToString(
+      <ServiceProvider>
+        <TestsPage
+          project={GENERIC_FINTECH_PROJECT}
+          initialItems={[]}
+          initialTab="schedule"
+        />
+      </ServiceProvider>
+    );
+    const html = rawHtml.replace(/<!-- -->/g, '');
+
+    // Shared educational copy must NOT mention e.g. 8.75 orders/second
+    expect(html).not.toContain('e.g. 8.75');
+    expect(html).not.toContain('(e.g. 8.75 orders/second)');
+    expect(html).toContain('Workload demand is tracked as an authoritative prerequisite for test validity');
+
+    // Stages without description must render NOT_SUPPLIED rather than 'Execution stage'
+    expect(html).not.toContain('>Execution stage<');
   });
 });

@@ -38,16 +38,23 @@ import { buildVisualisationHookFromTestDefinition } from '../../components/workl
 interface TestsPageProps {
   project: ProjectSummary;
   initialItems?: IntelligenceItem[];
+  initialTab?: ActiveTab;
+  initialScenarioView?: ScenarioView;
 }
 
 type ScenarioView = 'CURRENT_PROJECT' | 'M3_REFERENCE_LAB';
 type ActiveTab = 'overview' | 'schedule' | 'journeys' | 'criteria' | 'bundle' | 'runtime';
 
-export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) => {
+export const TestsPage: React.FC<TestsPageProps> = ({
+  project,
+  initialItems,
+  initialTab = 'overview',
+  initialScenarioView = 'M3_REFERENCE_LAB'
+}) => {
   const { intelligenceService } = useServices();
   const [items, setItems] = useState<IntelligenceItem[]>(initialItems || []);
-  const [scenarioView, setScenarioView] = useState<ScenarioView>('M3_REFERENCE_LAB');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
+  const [scenarioView, setScenarioView] = useState<ScenarioView>(initialScenarioView);
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
   const [activeBundleFile, setActiveBundleFile] = useState<string>('config.json');
   const [copied, setCopied] = useState<boolean>(false);
 
@@ -516,7 +523,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                         <td className="p-3 font-mono font-bold text-sky-400">
                           {stage.targetArrivalRate} {testDef.scenarios[0]?.workloadSchedule.rateUnit ?? 'NOT_SUPPLIED'}
                         </td>
-                        <td className="p-3 text-slate-400">{stage.description ?? 'Execution stage'}</td>
+                        <td className="p-3 text-slate-400">{stage.description || 'NOT_SUPPLIED'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -543,7 +550,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
                 Constitution §10 Law: Workload Demand Separation
               </span>
               <p className="text-slate-400 leading-relaxed">
-                Workload demand (e.g. 8.75 orders/second) is tracked as an authoritative prerequisite for test validity. It is strictly distinguished from NFR acceptance criteria (latency, error rates) and will never be converted into a false PASS/FAIL threshold.
+                Workload demand is tracked as an authoritative prerequisite for test validity. It is strictly distinguished from NFR acceptance criteria (latency, error rates) and will never be converted into a false PASS/FAIL threshold.
               </p>
             </div>
           </div>

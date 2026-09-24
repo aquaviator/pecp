@@ -123,17 +123,41 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
     evidencePackage.evidenceSummary?.workloadAttainment?.status ||
     'NOT_SUPPLIED';
 
-  const findingsCount =
+  const findingsCountRaw =
     findingsRegister?.findings?.length ??
-    evidencePackage.evidenceSummary?.findingsSummary?.totalFindings ??
     evidencePackage.findingsRegister?.totalFindings ??
-    0;
+    evidencePackage.evidenceSummary?.findingsSummary?.totalFindings;
 
-  const defectCandidatesCount =
+  const defectCandidatesCountRaw =
     findingsRegister?.defectCandidates?.length ??
-    evidencePackage.evidenceSummary?.findingsSummary?.totalDefectCandidates ??
     evidencePackage.findingsRegister?.totalDefectCandidates ??
-    0;
+    evidencePackage.evidenceSummary?.findingsSummary?.totalDefectCandidates;
+
+  const findingsCountDisplay =
+    findingsCountRaw != null ? String(findingsCountRaw) : 'NOT_SUPPLIED';
+
+  const defectCandidatesCountDisplay =
+    defectCandidatesCountRaw != null ? String(defectCandidatesCountRaw) : 'NOT_SUPPLIED';
+
+  const sourceExecutionRunId =
+    evidencePackage.sourceExecutionRunId ||
+    evidencePackage.evidenceSummary?.execution?.executionRunId ||
+    evidenceState?.executionResult?.run?.executionRunId ||
+    'NOT_SUPPLIED';
+
+  const sourceContractId = evidencePackage.sourceContract?.id
+    ? `${evidencePackage.sourceContract.id}${
+        evidencePackage.sourceContract.version ? ` (${evidencePackage.sourceContract.version})` : ''
+      }`
+    : 'NOT_SUPPLIED';
+
+  const sourceTestDefId = evidencePackage.sourceTestDefinition?.id
+    ? `${evidencePackage.sourceTestDefinition.id}${
+        evidencePackage.sourceTestDefinition.version
+          ? ` (${evidencePackage.sourceTestDefinition.version})`
+          : ''
+      }`
+    : 'NOT_SUPPLIED';
 
   return (
     <div className="space-y-6">
@@ -153,10 +177,68 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-slate-950 text-slate-300 border border-slate-800">
-              ID: {evidencePackage.id}
+              ID: {evidencePackage.id || 'NOT_SUPPLIED'}
             </span>
             <span className="text-xs font-mono px-2 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
               Integrity: {evidencePackage.packageGenerationStatus || 'NOT_SUPPLIED'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Governed Package Identity & Source Binding Card (M4.3.1 §4) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
+        <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+          <Hash className="w-4 h-4 text-sky-400" />
+          Governed Package Identity & Canonical Source Provenance
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Package ID</span>
+            <span className="font-mono text-white truncate block" title={evidencePackage.id}>
+              {evidencePackage.id || 'NOT_SUPPLIED'}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Package Digest</span>
+            <span className="font-mono text-sky-400 truncate block" title={evidencePackage.packageDigest?.value}>
+              {evidencePackage.packageDigest?.value || 'NOT_SUPPLIED'}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Source Execution Run</span>
+            <span className="font-mono text-slate-300 truncate block" title={sourceExecutionRunId}>
+              {sourceExecutionRunId}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Generation Status</span>
+            <span className="font-mono text-emerald-400 font-bold block">
+              {evidencePackage.packageGenerationStatus || 'NOT_SUPPLIED'}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Source Contract</span>
+            <span className="font-mono text-slate-300 truncate block" title={sourceContractId}>
+              {sourceContractId}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Source Test Definition</span>
+            <span className="font-mono text-slate-300 truncate block" title={sourceTestDefId}>
+              {sourceTestDefId}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Acceptance Verdict</span>
+            <span className="font-mono text-amber-400 font-bold block">
+              {overallVerdict}
+            </span>
+          </div>
+          <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+            <span className="text-[11px] text-slate-500 block font-mono">Findings Summary</span>
+            <span className="font-mono text-slate-300 block">
+              {findingsCountDisplay} findings · {defectCandidatesCountDisplay} defects
             </span>
           </div>
         </div>
@@ -181,7 +263,11 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Cryptographic digests of all components verified against SHA-256 bindings. Zero missing files or integrity errors.
+            {evidencePackage.packageGenerationStatus === 'VALID'
+              ? 'Cryptographic digests of all components verified against SHA-256 bindings.'
+              : evidencePackage.generationIssues?.length
+              ? `Generation issues recorded: ${evidencePackage.generationIssues.join('; ')}`
+              : 'Audit integrity evaluation derived from canonical package component digests and lineage.'}
           </p>
         </div>
 
@@ -202,7 +288,7 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            A <strong className="text-emerald-300">VALID</strong> package proves cryptographic integrity; it does <strong className="text-rose-300">NOT</strong> mean the performance test passed. Findings: {findingsCount} total · {defectCandidatesCount} defect candidates.
+            A <strong className="text-emerald-300">VALID</strong> package proves cryptographic integrity; it does <strong className="text-rose-300">NOT</strong> mean the performance test passed. Findings: {findingsCountDisplay} total · {defectCandidatesCountDisplay} defect candidates.
           </p>
         </div>
       </div>
@@ -223,7 +309,19 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {evidencePackage.components.map((c, idx) => {
               const compName = c.componentType.replace(/_/g, ' ');
-              const isPresent = c.presenceStatus === 'PRESENT' || !c.presenceStatus;
+              const statusDisplay = c.status || c.presenceStatus || 'NOT_SUPPLIED';
+              const isPresent =
+                c.presenceStatus === 'PRESENT' ||
+                (!c.presenceStatus &&
+                  !!c.status &&
+                  c.status !== 'ABSENT' &&
+                  c.status !== 'INVALID');
+              const isAbsent =
+                c.presenceStatus === 'ABSENT' ||
+                c.presenceStatus === 'INVALID' ||
+                c.status === 'ABSENT' ||
+                c.status === 'INVALID';
+
               return (
                 <div key={idx} className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -235,10 +333,12 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
                       className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
                         isPresent
                           ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                          : 'bg-rose-950 text-rose-400 border-rose-800'
+                          : isAbsent
+                          ? 'bg-rose-950 text-rose-400 border-rose-800'
+                          : 'bg-slate-900 text-slate-400 border-slate-800'
                       }`}
                     >
-                      {c.status || c.presenceStatus || 'PRESENT'}
+                      {statusDisplay}
                     </span>
                   </div>
                   <p className="text-xs font-mono text-slate-300 truncate" title={c.canonicalId}>
@@ -312,7 +412,7 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
                         {edge.verified ? 'VERIFIED' : 'UNVERIFIED'}
                       </span>
                     </td>
-                    <td className="p-3 text-slate-400 text-[11px]">{edge.details || 'Bound'}</td>
+                    <td className="p-3 text-slate-400 text-[11px]">{edge.details || 'NOT_SUPPLIED'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -363,11 +463,11 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
                   : rawArtifactSummary?.files.map((file, idx) => (
                       <tr key={idx} className="hover:bg-slate-800/30">
                         <td className="p-3 font-mono font-medium text-white">{file.name}</td>
-                        <td className="p-3 font-mono text-[11px] text-emerald-400">PRESENT</td>
+                        <td className="p-3 font-mono text-[11px] text-slate-400">{(file as any).presenceStatus || 'NOT_SUPPLIED'}</td>
                         <td className="p-3 font-mono text-sky-400 truncate max-w-[220px]" title={file.checksum}>
-                          {file.checksum}
+                          {file.checksum || 'NOT_SUPPLIED'}
                         </td>
-                        <td className="p-3 text-slate-400 text-[11px]">{file.description}</td>
+                        <td className="p-3 text-slate-400 text-[11px]">{file.description || 'NOT_SUPPLIED'}</td>
                       </tr>
                     ))}
               </tbody>
@@ -416,10 +516,8 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
                   </span>
                   <span className="text-[10px] text-slate-500 block truncate" title={readiness.blockingReasons?.join('; ') || ''}>
                     {readiness.blockingReasons?.length
-                      ? readiness.blockingReasons[0]
-                      : isReady
-                      ? 'Ready for export'
-                      : 'Destination unconfigured'}
+                      ? readiness.blockingReasons.join('; ')
+                      : 'NOT_SUPPLIED'}
                   </span>
                 </div>
               );

@@ -70,19 +70,19 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-sky-400" />
             <h2 className="text-base font-bold text-white tracking-tight">
-              Customer-Controlled Test Runner Orchestration
+              Governed Execution Record & Ingress
             </h2>
           </div>
           <p className="text-xs text-slate-400 mt-1 max-w-3xl">
-            Constitution §10: PECP orchestrates execution rather than replacing customer CI/CD. Tests run in customer-controlled infrastructure.
+            Constitution §10: Recorded customer-controlled runner execution. Telemetry streams ingested and corroborated with target systems.
           </p>
         </div>
 
         <EmptyState
           icon={Terminal}
-          title="Execution Runner Workspace Shell"
-          description="The execution workbench orchestrates k6 runners operating inside the customer's private infrastructure (Docker, Podman, Kubernetes, or native runner) and captures telemetry streams."
-          subtext="Runner Mode: Customer-Controlled Ingress (No proprietary load-gen cloud required)"
+          title="Execution Evidence & Ingress Shell"
+          description="Recorded customer-controlled runner execution telemetry and evidence capture from customer infrastructure."
+          subtext="Runner Mode: Customer-Controlled Ingress (Recorded Telemetry)"
         />
       </div>
     );
@@ -106,7 +106,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-sky-400" />
               <h2 className="text-base font-bold text-white tracking-tight">
-                Customer-Controlled Test Runner Orchestration
+                Governed Execution Record
               </h2>
             </div>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl">
