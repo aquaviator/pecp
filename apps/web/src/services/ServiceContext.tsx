@@ -7,7 +7,12 @@ import { MockProjectService } from './mock/MockProjectService';
 import { MockIntelligenceService } from './mock/MockIntelligenceService';
 import { MockIntegrationService } from './mock/MockIntegrationService';
 import { MockExecutionEvidenceService } from './mock/MockExecutionEvidenceService';
-import { ApiProjectService } from './api/ApiProjectService';
+import {
+  ApiProjectService,
+  ApiIntelligenceService,
+  ApiUnavailableIntegrationService,
+  ApiUnavailableExecutionEvidenceService
+} from './api';
 
 export type ServiceMode = 'MOCK' | 'API';
 
@@ -39,20 +44,28 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
 
   const services = useMemo<ServiceContainer>(() => {
     let projectService = overrideServices?.projectService;
-    if (!projectService) {
-      if (effectiveMode === 'API') {
-        projectService = new ApiProjectService();
-      } else {
-        projectService = new MockProjectService();
-      }
+    let intelligenceService = overrideServices?.intelligenceService;
+    let integrationService = overrideServices?.integrationService;
+    let executionEvidenceService = overrideServices?.executionEvidenceService;
+
+    if (effectiveMode === 'API') {
+      if (!projectService) projectService = new ApiProjectService();
+      if (!intelligenceService) intelligenceService = new ApiIntelligenceService();
+      if (!integrationService) integrationService = new ApiUnavailableIntegrationService();
+      if (!executionEvidenceService) executionEvidenceService = new ApiUnavailableExecutionEvidenceService();
+    } else {
+      if (!projectService) projectService = new MockProjectService();
+      if (!intelligenceService) intelligenceService = new MockIntelligenceService();
+      if (!integrationService) integrationService = new MockIntegrationService();
+      if (!executionEvidenceService) executionEvidenceService = new MockExecutionEvidenceService();
     }
 
     return {
       serviceMode: effectiveMode,
       projectService,
-      intelligenceService: overrideServices?.intelligenceService || new MockIntelligenceService(),
-      integrationService: overrideServices?.integrationService || new MockIntegrationService(),
-      executionEvidenceService: overrideServices?.executionEvidenceService || new MockExecutionEvidenceService()
+      intelligenceService,
+      integrationService,
+      executionEvidenceService
     };
   }, [overrideServices, effectiveMode]);
 

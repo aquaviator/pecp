@@ -80,7 +80,8 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       organisationRepository: orgRepo,
       projectRepository: projectRepo,
       entityRevisionRepository: revisionRepo,
-      intelligenceRepository: intelligenceRepo
+      intelligenceRepository: intelligenceRepo,
+      unitOfWork: db
     });
   }
 

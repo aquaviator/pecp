@@ -33,7 +33,8 @@ describe('M5.0 Persistence & Repository Contracts', () => {
     service = new PlatformApplicationService({
       organisationRepository: orgRepo,
       projectRepository: projectRepo,
-      entityRevisionRepository: revisionRepo
+      entityRevisionRepository: revisionRepo,
+      unitOfWork: db
     });
   });
 

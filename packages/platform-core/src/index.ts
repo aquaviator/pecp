@@ -6,4 +6,5 @@ export * from './repositories/IOrganisationRepository';
 export * from './repositories/IProjectRepository';
 export * from './repositories/IEntityRevisionRepository';
 export * from './repositories/IIntelligenceRepository';
+export * from './transactions/IUnitOfWork';
 export * from './services/PlatformApplicationService';

@@ -6,3 +6,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# PECP Local Runtime Data and SQLite Persistence
+data/
+*.db
+*.db-wal
+*.db-shm

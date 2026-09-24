@@ -4,6 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { IUnitOfWork } from '@pecp/platform-core';
 
 export interface Migration {
   version: number;
@@ -96,10 +97,11 @@ export const MIGRATIONS: Migration[] = [
   }
 ];
 
-export class SqliteDatabase {
+export class SqliteDatabase implements IUnitOfWork {
   private db: DatabaseSync | null = null;
   private migrationsAppliedCount = 0;
   private readonly dbPath: string;
+  private transactionDepth = 0;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -164,19 +166,90 @@ export class SqliteDatabase {
     }
   }
 
-  transaction<T>(fn: () => T): T {
+  /**
+   * Database-agnostic transactional unit of work execution.
+   * Supports nested operations through SQLite savepoints.
+   */
+  async execute<T>(operation: () => Promise<T>): Promise<T> {
     if (!this.db) throw new Error('Database is not open');
-    this.db.exec('BEGIN TRANSACTION');
+
+    this.transactionDepth++;
+    const savepointName = `sp_${this.transactionDepth}`;
+
+    if (this.transactionDepth === 1) {
+      this.db.exec('BEGIN TRANSACTION;');
+    } else {
+      this.db.exec(`SAVEPOINT ${savepointName};`);
+    }
+
     try {
-      const result = fn();
-      this.db.exec('COMMIT');
+      const result = await operation();
+
+      if (this.transactionDepth === 1) {
+        this.db.exec('COMMIT;');
+      } else {
+        this.db.exec(`RELEASE SAVEPOINT ${savepointName};`);
+      }
+      this.transactionDepth--;
       return result;
     } catch (error) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        // Rollback failed if transaction was already aborted
+      if (this.transactionDepth === 1) {
+        try {
+          this.db.exec('ROLLBACK;');
+        } catch {
+          // ignore rollback error if already rolled back
+        }
+      } else {
+        try {
+          this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName};`);
+        } catch {
+          // ignore rollback error
+        }
       }
+      this.transactionDepth--;
+      throw error;
+    }
+  }
+
+  /**
+   * Synchronous transaction runner with savepoint support.
+   */
+  transaction<T>(fn: () => T): T {
+    if (!this.db) throw new Error('Database is not open');
+
+    this.transactionDepth++;
+    const savepointName = `sp_sync_${this.transactionDepth}`;
+
+    if (this.transactionDepth === 1) {
+      this.db.exec('BEGIN TRANSACTION;');
+    } else {
+      this.db.exec(`SAVEPOINT ${savepointName};`);
+    }
+
+    try {
+      const result = fn();
+      if (this.transactionDepth === 1) {
+        this.db.exec('COMMIT;');
+      } else {
+        this.db.exec(`RELEASE SAVEPOINT ${savepointName};`);
+      }
+      this.transactionDepth--;
+      return result;
+    } catch (error) {
+      if (this.transactionDepth === 1) {
+        try {
+          this.db.exec('ROLLBACK;');
+        } catch {
+          // Rollback failed if transaction was already aborted
+        }
+      } else {
+        try {
+          this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName};`);
+        } catch {
+          // Rollback failed
+        }
+      }
+      this.transactionDepth--;
       throw error;
     }
   }
