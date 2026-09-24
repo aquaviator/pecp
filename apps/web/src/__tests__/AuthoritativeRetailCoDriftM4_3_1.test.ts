@@ -11,8 +11,7 @@ import {
   generatePerformanceEvidencePackage,
   generateResultsReport,
   generatePublicationBundle,
-  computeTestDefinitionFingerprint,
-  computeContractFingerprint
+  computeTestDefinitionFingerprint
 } from '@pecp/test-engine';
 
 import {
@@ -140,16 +139,29 @@ describe('M4.3.1 Section 9: RetailCo Browser Snapshot Authority Drift Gate', () 
     );
 
     // Iterations and business event counts
-    expect(AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.iterations.count).toBe(120981);
-    expect(AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.iterations.count).toBe(
-      canonicalResults.metrics.iterations.count
-    );
+    expect(AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.iterations).toBeDefined();
+    expect(canonicalResults.metrics.iterations).toBeDefined();
+    if (AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.iterations && canonicalResults.metrics.iterations) {
+      expect(AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.iterations.count).toBe(120981);
+      expect(AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.iterations.count).toBe(
+        canonicalResults.metrics.iterations.count
+      );
+    }
     expect(
-      AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.pecpBusinessAttainmentEvents.count
-    ).toBe(9671);
-    expect(
-      AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.pecpBusinessAttainmentEvents.count
-    ).toBe(canonicalResults.metrics.pecpBusinessAttainmentEvents.count);
+      AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.pecpBusinessAttainmentEvents
+    ).toBeDefined();
+    expect(canonicalResults.metrics.pecpBusinessAttainmentEvents).toBeDefined();
+    if (
+      AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.pecpBusinessAttainmentEvents &&
+      canonicalResults.metrics.pecpBusinessAttainmentEvents
+    ) {
+      expect(
+        AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.pecpBusinessAttainmentEvents.count
+      ).toBe(9671);
+      expect(
+        AUTHORITATIVE_RETAILCO_EXECUTION_RESULT.metrics.pecpBusinessAttainmentEvents.count
+      ).toBe(canonicalResults.metrics.pecpBusinessAttainmentEvents.count);
+    }
   });
 
   it('4. Acceptance Digest, Verdict & Workload Prerequisite match canonical', () => {

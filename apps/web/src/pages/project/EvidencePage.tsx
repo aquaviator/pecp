@@ -118,7 +118,7 @@ export const EvidencePage: React.FC<EvidencePageProps> = ({ project, initialEvid
     'NOT_EVALUATED';
 
   const workloadPrerequisite =
-    acceptanceEvaluation?.workloadAttainmentStatus ||
+    acceptanceEvaluation?.workloadPrerequisite?.status ||
     resultsReport?.workloadAttainment?.status ||
     evidencePackage.evidenceSummary?.workloadAttainment?.status ||
     'NOT_SUPPLIED';

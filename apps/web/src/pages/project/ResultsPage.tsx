@@ -334,7 +334,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
                 {executionResult?.referenceLabCorroboration?.consistency.discrepancyCount != null ? (
                   <>
                     {executionResult.referenceLabCorroboration.consistency.discrepancyCount}
-                    {executionResult.referenceLabCorroboration.consistency.isConsistent && (
+                    {executionResult.referenceLabCorroboration.consistency.countsMatch && (
                       <span className="text-slate-400 font-normal ml-1">(Corroborated)</span>
                     )}
                   </>
@@ -358,7 +358,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
               <span className="text-slate-200">
                 {(executionResult as any)?.executionEnvironment?.runnerEngine ||
                   (executionResult as any)?.manifest?.runnerEngine ||
-                  rawArtifactSummary?.runnerEngine ||
+                  rawArtifactSummary?.k6Version ||
                   'NOT_SUPPLIED'}
               </span>
             </div>

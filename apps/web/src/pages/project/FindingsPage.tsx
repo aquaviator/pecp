@@ -223,7 +223,7 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ project, initialEvid
                     Defect Eligibility: <span className="font-mono text-slate-400 font-bold">{f.defectEligibility ? 'TRUE' : 'FALSE'}</span>
                   </span>
                   <span className="text-slate-500 italic">
-                    Reason: {f.ineligibilityReason || 'SUT defect tickets require a confirmed SLA failure under attained workload.'}
+                    Reason: {f.deterministicReason || 'NOT_SUPPLIED'}
                   </span>
                 </div>
               </div>

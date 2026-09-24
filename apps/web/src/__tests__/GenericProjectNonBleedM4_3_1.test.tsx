@@ -12,17 +12,20 @@ import { EvidencePage } from '../pages/project/EvidencePage';
 import { ExecutionsPage } from '../pages/project/ExecutionsPage';
 import { WorkloadProfileChart } from '../components/workload/WorkloadProfileChart';
 import { ProjectSummary } from '../types';
-import { ExecutionEvidenceState } from '../types';
+import { ExecutionEvidenceState } from '../services/interfaces/IExecutionEvidenceService';
 import { ResultsReportVisualisationHook } from '@pecp/pe-domain';
 
 const GENERIC_FINTECH_PROJECT: ProjectSummary = {
   id: 'proj-fintech-payment-switch',
   name: 'FinTech Payment Switch API',
-  organization: 'GlobalPay',
-  version: 'v2.1',
+  organisation: 'GlobalPay',
+  intent: 'CERTIFICATION',
+  description: 'Generic Fintech project for non-bleed testing',
+  createdDate: '2026-09-01T00:00:00Z',
   status: 'ACTIVE',
-  createdAt: '2026-09-01T00:00:00Z',
-  updatedAt: '2026-09-20T00:00:00Z'
+  documentsCount: 1,
+  requirementsCount: 1,
+  conflictsCount: 0
 };
 
 const GENERIC_EVIDENCE_STATE_NO_DEFAULTS: ExecutionEvidenceState = {
