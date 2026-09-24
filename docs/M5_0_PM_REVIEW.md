@@ -1,32 +1,34 @@
 # PECP M5.0 Project Manager Review
 
-## Latest Verdict
+## Final Verdict
 
-**M5.0 — HOLD / NOT CLOSED**
+**M5.0 — PASS**
 
-The first PM correction has been implemented successfully and authoritative remote CI is now green.
+**M5.0 — APPROVED FOR CLOSURE**
 
-However, the final platform audit found two material architectural/data-fidelity blockers and two smaller zero-invention persistence/API issues that should be corrected now, before M5.1 adds identity and concurrent real users.
+Independent PM audit has verified the final M5.0 implementation against authoritative remote `master`, the governing work package, both prior PM audit rounds, live source, regression coverage and GitHub Actions.
 
-Do **not** create M5.0.1.
-
-Correct M5.0 in place.
+The submitted completion report contains stale/non-GitHub run identifiers in its header. The authoritative final implementation and CI evidence are recorded below.
 
 ---
 
-## Authoritative remote state
+## Authoritative implementation
 
-Final correction implementation currently on `master`:
+Final M5.0 implementation SHA:
 
-`52cbee7798cd313a5c81edbf8f2de9488a68d46c`
+`e80a430e458860627abc813c0b98e5648f0a235a`
 
-GitHub Actions run:
+GitHub Actions workflow:
 
-`35984161067`
+`CI`
 
-Job:
+Run ID:
 
-`107582787261`
+`35986290872`
+
+Job ID:
+
+`107589620503`
 
 Conclusion:
 
@@ -36,222 +38,212 @@ Verified remotely:
 
 - deterministic `npm ci`: PASS
 - TypeScript typecheck: PASS
-- web tests: 29 files / 478 tests PASS
-- API/platform tests: 5 files / 23 tests PASS
-- RetailCo Reference Lab: 10/10 PASS
-- total automated tests: **511**
+- web tests: 29 files / **480 tests** PASS
+- API/platform tests: 5 files / **26 tests** PASS
+- RetailCo Reference Lab: **10/10** PASS
+- total automated tests: **516**
 - production web build: PASS
-- transaction rollback suite: 6/6 PASS
-- ApiIntelligenceService: 5/5 PASS
-- ApiProjectService: 4/4 PASS
-- API-mode ServiceContext boundary: 3/3 PASS
-
-The submitted report's test totals are therefore substantively correct, although the prose saying "31 test files" is inaccurate. Remote evidence is 29 web + 5 API + 1 Reference Lab = **35 test files/suites**.
+- no skipped/failed tests in the reported suites
 
 ---
 
-## Previous blockers now accepted
+# Final blocker audit
 
-The following first-audit blockers are resolved:
+## 1. Concurrent Unit-of-Work isolation
 
-1. **Deterministic lockfile** — resolved. Clean remote `npm ci` passes.
-2. **Current record + revision atomicity** — a database-agnostic `IUnitOfWork` exists and SQLite rollback tests cover injected write/revision failures.
-3. **API-mode mock fallback** — API mode now uses API/unavailable adapters rather than Mock services.
-4. **Intelligence web adapter** — `ApiIntelligenceService` exists for item reads and mutation/approval calls reject pending M5.1 identity.
-5. **Rollback tests** — 6 failure-injection tests exist.
-6. **Runtime DB source-control protection** — `data/`, `*.db`, `*.db-wal`, `*.db-shm` are ignored.
-7. **Architecture documentation** — updated for `IUnitOfWork`.
-8. **Remote CI** — green.
+**PASS**
 
-These corrections are accepted.
+`SqliteDatabase` now uses:
 
----
+- `AsyncLocalStorage<TransactionScope>` for logical transaction ownership;
+- an asynchronous top-level transaction mutex;
+- SQLite `BEGIN/COMMIT/ROLLBACK` for independent top-level units;
+- scoped SAVEPOINTs for genuine nested execution within the same async context.
 
-# Remaining blocking corrections
+Independent request chains no longer infer nesting from a single shared global depth counter.
 
-## 1. Async Unit of Work is not safe under concurrent API requests
+Failure-injection concurrency regressions use actual asynchronous barriers/delays and prove that:
 
-This is the most important remaining issue.
+- one request may remain active while another is dispatched;
+- the second request does not join the first request's SQLite transaction;
+- rollback of one request does not erase the successful request;
+- auto-created organisations belonging to a failed request are not stranded;
+- unrelated tenant state remains durable.
 
-`SqliteDatabase.execute()` keeps transaction nesting in one mutable instance field:
+The final remote API/platform suite reports 8 transaction rollback/concurrency tests passing.
 
-`transactionDepth`
+## 2. Client-invented IntelligenceReviewSummary
 
-and holds a SQLite transaction open while awaiting asynchronous repository/application operations.
+**PASS**
 
-That works for deliberately nested calls in a single logical request, but it does not distinguish:
+`ApiIntelligenceService.getIntelligenceSummary()` no longer synthesizes:
 
-- a nested transaction belonging to the same request; from
-- a second independent Fastify request arriving while the first transaction is awaiting.
+- document counts;
+- requirements counts;
+- performance requirement counts;
+- conflict/missing counts;
+- readiness sections
 
-With two concurrent requests on the same `SqliteDatabase` instance, request B can observe request A's non-zero `transactionDepth` and be treated as a nested SAVEPOINT inside request A's transaction.
+from raw `IntelligenceItem` rows.
 
-Consequences can include:
+The method explicitly reports the summary capability as unsupported in M5.0 API mode until a canonical/server-side summary exists.
 
-- one successful request being committed or rolled back as part of another request;
-- a rollback in request A affecting writes made by request B;
-- savepoint ordering/depth being controlled by interleaved request completion rather than logical transaction ownership.
+`IntelligencePage` now loads supported intelligence item state independently so summary unavailability does not suppress the read model.
 
-This is unacceptable for the persistent platform boundary, especially immediately before M5.1 introduces real users.
+The application-level conflict badge falls back to the source-backed `ProjectSummary.conflictsCount`, not a derived intelligence calculation.
 
-### Required correction
+## 3. Corrupt bootstrap metadata
 
-Make top-level Unit of Work execution exclusive per SQLite connection while preserving true same-operation nesting.
+**PASS**
 
-Acceptable design:
+Malformed `uploaded_document_names_json` is no longer silently repaired into `[]`.
 
-- serialize independent top-level `execute()` operations with an async mutex/queue;
-- identify genuine nested execution using request/async-context ownership, for example Node `AsyncLocalStorage`, or refactor the application service so internal helper calls do not recursively open a second top-level Unit of Work;
-- SAVEPOINT nesting must only apply to the same logical Unit of Work;
-- unrelated Fastify requests must never share a transaction.
+The repository throws a persistence-integrity error for malformed/non-array JSON.
 
-Do not add a heavyweight dependency merely for a mutex unless necessary.
+Regression coverage proves corruption is surfaced.
 
-### Required concurrency regression tests
+## 4. Malformed API collection envelopes
 
-Add tests that deliberately interleave two asynchronous operations against the same SQLite database connection.
+**PASS**
 
-At minimum prove:
+`ApiProjectService.getProjects()` and `ApiIntelligenceService.getIntelligenceItems()` now require a successful list response to contain an `items` array.
 
-1. two concurrent successful project creates both persist with correct revisions;
-2. request A pauses inside its transaction while request B attempts a mutation, and B does not join A's transaction;
-3. request A fails/rolls back while concurrent request B succeeds, and B's successful state remains committed;
-4. concurrent auto-organisation/project creation does not corrupt revision numbering or leave/erase unrelated tenant state.
+Source empty collection:
 
-The test must include an actual async barrier/delay so it would fail against the current shared-`transactionDepth` implementation.
+`{ items: [] }`
 
----
+remains valid.
 
-## 2. ApiIntelligenceService invents IntelligenceReviewSummary semantics in the browser
+Malformed successful responses no longer become legitimate empty state.
 
-The item read adapter is correct, but `getIntelligenceSummary()` currently calculates:
-
-- `documentsAnalysed` from the number of distinct `sourceDocument` values;
-- `requirementsFound` from total IntelligenceItem count;
-- `performanceRequirements` from REQUIREMENTS + WORKLOAD item count;
-- `conflicts` and `missingInformation` from local item-state counting;
-- `readinessSections` as an invented empty array.
-
-Those values are not equivalent to the canonical `IntelligenceReviewSummary` contract.
-
-For example, a document referenced by an intelligence item is not proof that it represents the complete count of documents analysed, and all intelligence items are not necessarily requirements.
-
-This reintroduces a client-side semantic calculation pattern that PECP has explicitly eliminated elsewhere.
-
-### Required correction
-
-For M5.0, do **not** synthesize an `IntelligenceReviewSummary` from raw items.
-
-Use one of these source-faithful approaches:
-
-**Preferred narrow M5.0 approach:**
-
-- `ApiIntelligenceService.getIntelligenceSummary()` explicitly reports the capability as unavailable until a canonical/persisted Intelligence Review Summary exists;
-- update the Intelligence page so summary unavailability does not prevent the supported item read model from rendering;
-- show a neutral governed absence/unavailable state for the summary.
-
-OR, if implementing a summary read endpoint:
-
-- persist/read the actual `IntelligenceReviewSummary` as source state;
-- do not derive fields with changed semantics merely to fill the interface.
-
-Do not start M5.2 extraction/intake logic.
-
-Update tests so they prove there is no client-side invented summary.
+Adapter regressions cover the contract failure.
 
 ---
 
-## 3. Corrupt bootstrap JSON is silently repaired into an empty document list
+# M5.0 platform audit
 
-`SqliteProjectRepository.getBootstrapMetadata()` currently catches JSON parse failure for `uploaded_document_names_json` and substitutes:
+## Platform core
 
-`[]`
+PASS.
 
-That changes corrupted persisted state into a valid-looking empty document list.
+`packages/platform-core` provides HTTP/UI-neutral:
 
-For a provenance/governance product, corrupted persistence must be surfaced rather than silently normalized.
+- organisation/project application types;
+- repository interfaces;
+- entity revision contract;
+- intelligence repository read-model contract;
+- `IUnitOfWork`;
+- `PlatformApplicationService`.
 
-### Required correction
+Server-generated UUID identities are used.
 
-- malformed persisted bootstrap JSON must throw a controlled persistence-integrity error;
-- API 500 handling may still return the safe generic external error envelope;
-- do not leak SQL/path/internal payloads;
-- add a corruption test proving malformed JSON is not returned as `[]`.
+## Persistence
+
+PASS.
+
+The SQLite embedded/reference provider implements:
+
+- deterministic migrations;
+- schema migration tracking;
+- organisations;
+- organisation-bound projects;
+- bootstrap metadata;
+- append-only entity revisions;
+- project intelligence read-model persistence;
+- foreign keys;
+- WAL where supported;
+- persistence readiness;
+- durable restart behaviour;
+- transaction rollback;
+- concurrent request isolation.
+
+Runtime database/WAL/SHM files are excluded from source control.
+
+## API
+
+PASS.
+
+The Fastify application is created through a testable app factory and exposes the M5.0 versioned organisation/project and intelligence read endpoints.
+
+HTTP handlers remain adapters around platform-core rather than owners of Performance Engineering semantics.
+
+Safe error envelopes remain in place.
+
+## Web API mode
+
+PASS.
+
+API mode uses:
+
+- `ApiProjectService`;
+- `ApiIntelligenceService`;
+- explicit unavailable integration adapter;
+- explicit unavailable execution/evidence adapter.
+
+It does not silently instantiate RetailCo/reference `Mock*Service` implementations.
+
+Unsupported intelligence approval/conflict mutation correctly remains blocked until authenticated actor identity exists in M5.1.
+
+## Zero invention
+
+PASS for the M5.0 acceptance boundary.
+
+Confirmed:
+
+- project creation does not manufacture requirements/conflicts;
+- document count reflects supplied uploaded document names only;
+- bootstrap metadata is not silently promoted into canonical engineering intelligence;
+- malformed persistence/API data is surfaced rather than converted into plausible state;
+- intelligence summary semantics are not invented in the browser;
+- M0-M4 workload/Acceptance/Findings/Evidence semantics remain untouched.
+
+## Reference scenario
+
+PASS.
+
+The synthetic Northstar platform scenario demonstrates durable organisation/project persistence without inventing new engineering workload truth.
+
+RetailCo remains the authoritative engineering reference scenario.
 
 ---
 
-## 4. API list adapters silently coerce malformed responses into empty lists
+# Non-blocking follow-up observations
 
-`ApiProjectService.getProjects()` and `ApiIntelligenceService.getIntelligenceItems()` currently use patterns equivalent to:
+These do not prevent M5.0 closure but should be carried forward deliberately:
 
-`data.items || []`
+1. When bootstrap/document ingestion becomes writable customer input in M5.2, validate every uploaded-document-name element as a string at both API and persistence boundaries, not only that the persisted JSON value is an array.
+2. The historical portal initializes `conflictsCount` to a RetailCo-era value before an active project source value is loaded. It is not durable/platform truth and is replaced once a project is active, but the UI state should be made nullable/source-driven during the next portal/API refinement to eliminate even transient reference-shaped presentation.
+3. `SqliteIntelligenceRepository.saveItems()` still uses the synchronous SQLite transaction helper. That write path is not exposed by the M5.0 API read model. Before intelligence writes are platformised in M5.2, align it with the async Unit-of-Work concurrency boundary.
 
-If a successful HTTP response is malformed and omits `items`, the browser silently turns a contract failure into a legitimate empty collection.
-
-That is a small but real zero-invention violation.
-
-### Required correction
-
-For HTTP 2xx responses:
-
-- validate the expected list envelope;
-- if `items` is absent or not an array, throw an API contract error;
-- preserve a genuine source empty array exactly.
-
-Add tests distinguishing:
-
-- `{ items: [] }` => valid empty result;
-- `{}` or malformed `items` => explicit contract error.
-
-No full schema framework is required for M5.0.
+These are backlog/hardening notes, not M5.0 Definition-of-Done failures.
 
 ---
 
-# Non-blocking observations
+# Definition of Done
 
-- The API/platform dependency direction remains correct.
-- SQLite remains appropriate as the embedded/reference persistence provider.
-- CORS/auth hardening belongs to M5.1/security and should not be pulled into this correction.
-- Production API container compilation remains M5.6; current TypeScript/runtime validation is sufficient for M5.0.
-- M0-M4 engine purity remains intact.
-- M5.1 has not started.
+M5.0 DoD is satisfied:
 
----
+1. `apps/api` is a real Fastify service;
+2. `packages/platform-core` provides application/repository boundaries;
+3. organisations/projects persist durably;
+4. migrations/readiness are implemented;
+5. versioned organisation/project API exists;
+6. web uses a real project API adapter;
+7. runtime mode is explicit with no API-mode mock fallback;
+8. repository/API/web-adapter tests pass;
+9. persistence restart is proven;
+10. normal GitHub CI validates platform plus historic M0-M4;
+11. platform/API documentation exists and reflects implementation;
+12. M5.1 scope has not leaked into M5.0;
+13. concurrent SQLite Unit-of-Work isolation is proven;
+14. malformed/corrupt state is not silently normalized into invented valid state.
 
-# Required verification before final resubmission
+## Closure Decision
 
-From clean repository state:
+**M5.0 is closed.**
 
-1. `npm ci` — PASS
-2. root TypeScript checks — PASS
-3. web tests — PASS
-4. API/platform tests — PASS
-5. RetailCo Reference Lab — PASS
-6. production web build — PASS
-7. existing rollback failure-injection tests — PASS
-8. new concurrent Unit-of-Work isolation tests — PASS
-9. API-mode no-mock-fallback tests — PASS
-10. intelligence summary zero-invention test — PASS
-11. corrupt bootstrap JSON integrity test — PASS
-12. malformed API list-envelope tests — PASS
-13. persistence restart test — PASS
-14. normal GitHub `CI` — SUCCESS
-
----
-
-# Closure condition
-
-M5.0 can close when:
-
-- unrelated concurrent requests cannot share a SQLite transaction;
-- Intelligence Review Summary is source-backed or explicitly unavailable, never client-invented;
-- corrupt persisted bootstrap metadata is surfaced rather than silently repaired;
-- malformed API list envelopes are surfaced rather than converted to empty state;
-- all existing M5.0 corrections remain intact;
-- authoritative remote CI remains green.
-
-No new product capability is required.
+M5.1 may now be planned, but has not been started by this review.
 
 ## Programme state
 
-`M4.3 ✅ → M5.0 remote CI ✅ / final concurrency + zero-invention hardening required → M5.1 NOT STARTED`
+`M0 ✅ → M1 ✅ → M2 ✅ → M3 ✅ → M4 ✅ → M5.0 ✅`
