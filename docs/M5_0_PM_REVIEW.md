@@ -1,244 +1,226 @@
 # PECP M5.0 Project Manager Review
 
-## Verdict
+## Latest Verdict
 
 **M5.0 — HOLD / NOT CLOSED**
 
-The implementation is materially substantial and directionally correct, but the submitted completion report does not match authoritative remote repository/CI state and several M5.0 platform invariants remain incomplete.
+The first PM correction has been implemented successfully and authoritative remote CI is now green.
+
+However, the final platform audit found two material architectural/data-fidelity blockers and two smaller zero-invention persistence/API issues that should be corrected now, before M5.1 adds identity and concurrent real users.
 
 Do **not** create M5.0.1.
 
-Correct M5.0 in place and return for PM audit.
+Correct M5.0 in place.
+
+---
 
 ## Authoritative remote state
 
-Implementation SHA currently on `master`:
+Final correction implementation currently on `master`:
 
-`c7d8fdfc6808fbf6301a46007548dd08c85a69ef`
+`52cbee7798cd313a5c81edbf8f2de9488a68d46c`
 
-The completion report incorrectly identifies the prior M4.3 implementation SHA as the implementation reference and cites the prior M4.3 CI run.
+GitHub Actions run:
 
-Actual M5.0 GitHub Actions run:
-
-`35981236215`
+`35984161067`
 
 Job:
 
-`107573367604`
+`107582787261`
 
 Conclusion:
 
-**FAILURE**
+**SUCCESS**
 
-Failure occurred at deterministic dependency installation:
+Verified remotely:
 
-`npm ci`
+- deterministic `npm ci`: PASS
+- TypeScript typecheck: PASS
+- web tests: 29 files / 478 tests PASS
+- API/platform tests: 5 files / 23 tests PASS
+- RetailCo Reference Lab: 10/10 PASS
+- total automated tests: **511**
+- production web build: PASS
+- transaction rollback suite: 6/6 PASS
+- ApiIntelligenceService: 5/5 PASS
+- ApiProjectService: 4/4 PASS
+- API-mode ServiceContext boundary: 3/3 PASS
 
-GitHub reports that `package.json` and `package-lock.json` are out of sync, including missing Fastify, `@fastify/cors`, `tsx`, `@pecp/api`, `@pecp/platform-core` and their transitive dependencies.
-
-TypeScript, tests and production build were therefore skipped remotely.
-
-Local test results are useful development evidence, but M5.0 cannot close until authoritative remote CI is green.
-
----
-
-## What is accepted
-
-The implementation has made the intended platform transition:
-
-- `apps/api` is now a real Fastify application;
-- `packages/platform-core` exists and is HTTP/UI neutral;
-- organisation/project repository contracts exist;
-- SQLite migrations and persistence exist;
-- organisation/project API endpoints exist;
-- server-side UUID identities are used;
-- project zero-invention counts are preserved;
-- bootstrap metadata is persisted separately from canonical intelligence;
-- `ApiProjectService` exists;
-- Northstar restart persistence coverage exists;
-- persistent intelligence repository/read endpoints exist;
-- M0-M4 deterministic engine packages were not moved into HTTP/SQL code;
-- M5.1 authentication/RBAC scope has not been started.
-
-These are the correct architectural moves.
+The submitted report's test totals are therefore substantively correct, although the prose saying "31 test files" is inaccurate. Remote evidence is 29 web + 5 API + 1 Reference Lab = **35 test files/suites**.
 
 ---
 
-# Blocking corrections
+## Previous blockers now accepted
 
-## 1. Deterministic lockfile is broken
+The following first-audit blockers are resolved:
 
-The repository added/changed workspace dependencies without committing a synchronized `package-lock.json`.
+1. **Deterministic lockfile** — resolved. Clean remote `npm ci` passes.
+2. **Current record + revision atomicity** — a database-agnostic `IUnitOfWork` exists and SQLite rollback tests cover injected write/revision failures.
+3. **API-mode mock fallback** — API mode now uses API/unavailable adapters rather than Mock services.
+4. **Intelligence web adapter** — `ApiIntelligenceService` exists for item reads and mutation/approval calls reject pending M5.1 identity.
+5. **Rollback tests** — 6 failure-injection tests exist.
+6. **Runtime DB source-control protection** — `data/`, `*.db`, `*.db-wal`, `*.db-shm` are ignored.
+7. **Architecture documentation** — updated for `IUnitOfWork`.
+8. **Remote CI** — green.
 
-This violates the established deterministic `npm ci` gate and M5.0 §8/§27.
-
-Required:
-
-- run the repository-approved npm 10.9.8 install workflow;
-- update and commit `package-lock.json`;
-- verify clean `npm ci` from the repository root;
-- push and wait for normal GitHub CI.
-
-Do not substitute `npm install` in CI.
+These corrections are accepted.
 
 ---
 
-## 2. Current-record + revision writes are not atomic
+# Remaining blocking corrections
 
-M5.0 explicitly requires organisation/project mutations that update the current record and append `entity_revisions` to be atomic.
+## 1. Async Unit of Work is not safe under concurrent API requests
 
-Current `PlatformApplicationService` does:
+This is the most important remaining issue.
 
-1. repository create/update/archive;
-2. then a separate revision repository write.
+`SqliteDatabase.execute()` keeps transaction nesting in one mutable instance field:
 
-Those are separate database operations with no transaction spanning both calls.
+`transactionDepth`
 
-If revision insertion fails, the current entity mutation remains committed.
+and holds a SQLite transaction open while awaiting asynchronous repository/application operations.
 
-The current test named "records payload snapshots atomically" only checks that revisions exist. It does not induce a revision failure and prove rollback.
+That works for deliberately nested calls in a single logical request, but it does not distinguish:
 
-This is a material governance/persistence issue.
+- a nested transaction belonging to the same request; from
+- a second independent Fastify request arriving while the first transaction is awaiting.
 
-Required:
+With two concurrent requests on the same `SqliteDatabase` instance, request B can observe request A's non-zero `transactionDepth` and be treated as a nested SAVEPOINT inside request A's transaction.
 
-- add a database-agnostic transaction/unit-of-work contract to `platform-core`, or another equally clean application boundary;
-- SQLite must implement that transaction boundary;
-- wrap organisation create/status mutation and project create/update/archive plus revision append in one atomic unit;
-- project auto-creation of a new organisation must not leave a stranded organisation if project creation fails;
-- do not move SQLite-specific transaction logic into the canonical domain.
+Consequences can include:
 
-Add failure-injection tests proving rollback.
+- one successful request being committed or rolled back as part of another request;
+- a rollback in request A affecting writes made by request B;
+- savepoint ordering/depth being controlled by interleaved request completion rather than logical transaction ownership.
+
+This is unacceptable for the persistent platform boundary, especially immediately before M5.1 introduces real users.
+
+### Required correction
+
+Make top-level Unit of Work execution exclusive per SQLite connection while preserving true same-operation nesting.
+
+Acceptable design:
+
+- serialize independent top-level `execute()` operations with an async mutex/queue;
+- identify genuine nested execution using request/async-context ownership, for example Node `AsyncLocalStorage`, or refactor the application service so internal helper calls do not recursively open a second top-level Unit of Work;
+- SAVEPOINT nesting must only apply to the same logical Unit of Work;
+- unrelated Fastify requests must never share a transaction.
+
+Do not add a heavyweight dependency merely for a mutex unless necessary.
+
+### Required concurrency regression tests
+
+Add tests that deliberately interleave two asynchronous operations against the same SQLite database connection.
 
 At minimum prove:
 
-- failed revision append rolls back project create;
-- failed revision append rolls back project update;
-- failed revision append rolls back organisation create/status mutation;
-- failed project creation after auto-created organisation does not strand that organisation.
+1. two concurrent successful project creates both persist with correct revisions;
+2. request A pauses inside its transaction while request B attempts a mutation, and B does not join A's transaction;
+3. request A fails/rolls back while concurrent request B succeeds, and B's successful state remains committed;
+4. concurrent auto-organisation/project creation does not corrupt revision numbering or leave/erase unrelated tenant state.
+
+The test must include an actual async barrier/delay so it would fail against the current shared-`transactionDepth` implementation.
 
 ---
 
-## 3. API mode still silently instantiates mock/reference services
+## 2. ApiIntelligenceService invents IntelligenceReviewSummary semantics in the browser
 
-`ServiceContext` selects `ApiProjectService` in API mode, but still constructs:
+The item read adapter is correct, but `getIntelligenceSummary()` currently calculates:
 
-- `MockIntelligenceService`;
-- `MockIntegrationService`;
-- `MockExecutionEvidenceService`.
+- `documentsAnalysed` from the number of distinct `sourceDocument` values;
+- `requirementsFound` from total IntelligenceItem count;
+- `performanceRequirements` from REQUIREMENTS + WORKLOAD item count;
+- `conflicts` and `missingInformation` from local item-state counting;
+- `readinessSections` as an invented empty array.
 
-That conflicts with the M5.0 service-mode invariant that API mode must not silently fall back to mock/reference data.
+Those values are not equivalent to the canonical `IntelligenceReviewSummary` contract.
 
-It can make a persistent project coexist with unrelated reference/mock intelligence/integration/execution state.
+For example, a document referenced by an intelligence item is not proof that it represents the complete count of documents analysed, and all intelligence items are not necessarily requirements.
 
-Required:
+This reintroduces a client-side semantic calculation pattern that PECP has explicitly eliminated elsewhere.
 
-- API mode must never silently instantiate mock/reference services;
-- because the intelligence read-model extension was implemented, add `ApiIntelligenceService` for its supported read operations;
-- mutation/approval methods that require M5.1 actor identity must fail explicitly with a clear unsupported/not-yet-available error rather than use mock authority;
-- for integration and execution/evidence services not yet platformised, use explicit unavailable/not-supported API-mode adapters or another clearly surfaced boundary;
-- MOCK mode may continue to use the deterministic reference services.
+### Required correction
 
-Add regression coverage proving API mode contains no `Mock*Service` fallback path.
+For M5.0, do **not** synthesize an `IntelligenceReviewSummary` from raw items.
 
----
+Use one of these source-faithful approaches:
 
-## 4. Claimed §7 intelligence extension is incomplete at the web boundary
+**Preferred narrow M5.0 approach:**
 
-The report says the persistent intelligence read-model stretch is complete.
+- `ApiIntelligenceService.getIntelligenceSummary()` explicitly reports the capability as unavailable until a canonical/persisted Intelligence Review Summary exists;
+- update the Intelligence page so summary unavailability does not prevent the supported item read model from rendering;
+- show a neutral governed absence/unavailable state for the summary.
 
-The repository contains:
+OR, if implementing a summary read endpoint:
 
-- SQLite intelligence persistence;
-- API read endpoints.
+- persist/read the actual `IntelligenceReviewSummary` as source state;
+- do not derive fields with changed semantics merely to fill the interface.
 
-But it does not contain the required `ApiIntelligenceService` web adapter, and API mode still uses `MockIntelligenceService`.
+Do not start M5.2 extraction/intake logic.
 
-Therefore the extension is only partially complete.
-
-Required:
-
-- implement `ApiIntelligenceService` for:
-  - list project intelligence;
-  - get intelligence item;
-- preserve exact canonical/review/provenance fields;
-- no normalization or invented approvals;
-- mutation methods must be explicit unsupported operations until M5.1 identity exists.
-
-Add adapter tests for exact mapping, 404, network/API errors and no mock fallback.
+Update tests so they prove there is no client-side invented summary.
 
 ---
 
-## 5. Transaction/rollback coverage required by the work package is missing
+## 3. Corrupt bootstrap JSON is silently repaired into an empty document list
 
-M5.0 §9 explicitly requires:
+`SqliteProjectRepository.getBootstrapMetadata()` currently catches JSON parse failure for `uploaded_document_names_json` and substitutes:
 
-- current write + revision atomicity;
-- transaction rollback coverage.
+`[]`
 
-Current repository tests verify happy-path revision numbering but do not test rollback.
+That changes corrupted persisted state into a valid-looking empty document list.
 
-Add deterministic failure-injection tests as described in blocker 2.
+For a provenance/governance product, corrupted persistence must be surfaced rather than silently normalized.
 
----
+### Required correction
 
-## 6. Default durable data directory is not gitignored
-
-The real server defaults to:
-
-`data/pecp.db`
-
-but current `.gitignore` does not ignore `data/` or PECP SQLite database/WAL/SHM files.
-
-This creates a risk of committing customer/local persistent state.
-
-Required:
-
-- add the chosen PECP runtime data directory and SQLite sidecar patterns to `.gitignore`;
-- document the location;
-- do not ignore source fixtures/reference data broadly.
+- malformed persisted bootstrap JSON must throw a controlled persistence-integrity error;
+- API 500 handling may still return the safe generic external error envelope;
+- do not leak SQL/path/internal payloads;
+- add a corruption test proving malformed JSON is not returned as `[]`.
 
 ---
 
-## 7. Documentation overstates atomicity
+## 4. API list adapters silently coerce malformed responses into empty lists
 
-`docs/platform/M5_0_PLATFORM_ARCHITECTURE.md` currently states that every organisation/project mutation atomically writes its revision.
+`ApiProjectService.getProjects()` and `ApiIntelligenceService.getIntelligenceItems()` currently use patterns equivalent to:
 
-That is not true in the current implementation.
+`data.items || []`
 
-After implementing the transaction correction, retain the statement and document the actual unit-of-work boundary.
+If a successful HTTP response is malformed and omits `items`, the browser silently turns a contract failure into a legitimate empty collection.
 
-If architecture changes, update the document to match real code.
+That is a small but real zero-invention violation.
 
-Documentation must describe implemented behaviour only.
+### Required correction
 
----
+For HTTP 2xx responses:
 
-## 8. Completion-report identity and CI references must be corrected
+- validate the expected list envelope;
+- if `items` is absent or not an array, throw an API contract error;
+- preserve a genuine source empty array exactly.
 
-The next completion report must cite:
+Add tests distinguishing:
 
-- the actual final M5.0 implementation SHA;
-- the actual M5.0 GitHub Actions run and job;
-- remote CI conclusion;
-- test counts from that remote run.
+- `{ items: [] }` => valid empty result;
+- `{}` or malformed `items` => explicit contract error.
 
-Do not cite the M4.3 run as M5.0 evidence.
-
----
-
-# PM notes, non-blocking
-
-- `apps/api/src/server.ts` correctly uses durable `data/pecp.db` by default, while test/app-factory paths can use isolated/in-memory databases.
-- Fastify route validation is intentionally lightweight for M5.0 and can be hardened later.
-- Authentication/CORS hardening belongs primarily to M5.1/security work. Do not expand this correction into M5.1.
-- SQLite remains an embedded provider behind repository contracts, which is appropriate for this milestone.
+No full schema framework is required for M5.0.
 
 ---
 
-# Required verification before resubmission
+# Non-blocking observations
 
-From a clean repository state:
+- The API/platform dependency direction remains correct.
+- SQLite remains appropriate as the embedded/reference persistence provider.
+- CORS/auth hardening belongs to M5.1/security and should not be pulled into this correction.
+- Production API container compilation remains M5.6; current TypeScript/runtime validation is sufficient for M5.0.
+- M0-M4 engine purity remains intact.
+- M5.1 has not started.
+
+---
+
+# Required verification before final resubmission
+
+From clean repository state:
 
 1. `npm ci` — PASS
 2. root TypeScript checks — PASS
@@ -246,10 +228,14 @@ From a clean repository state:
 4. API/platform tests — PASS
 5. RetailCo Reference Lab — PASS
 6. production web build — PASS
-7. transaction failure/rollback tests — PASS
-8. API-mode no-mock-fallback tests — PASS
-9. persistence restart test — PASS
-10. normal GitHub `CI` — SUCCESS
+7. existing rollback failure-injection tests — PASS
+8. new concurrent Unit-of-Work isolation tests — PASS
+9. API-mode no-mock-fallback tests — PASS
+10. intelligence summary zero-invention test — PASS
+11. corrupt bootstrap JSON integrity test — PASS
+12. malformed API list-envelope tests — PASS
+13. persistence restart test — PASS
+14. normal GitHub `CI` — SUCCESS
 
 ---
 
@@ -257,17 +243,15 @@ From a clean repository state:
 
 M5.0 can close when:
 
-- deterministic install is restored;
-- persistence/revision operations are genuinely atomic;
-- API mode contains no silent mock/reference fallbacks;
-- the claimed intelligence read model is wired through the API web adapter;
-- rollback/no-fallback regressions exist;
-- runtime data is gitignored;
-- documentation matches implementation;
-- authoritative remote CI is green.
+- unrelated concurrent requests cannot share a SQLite transaction;
+- Intelligence Review Summary is source-backed or explicitly unavailable, never client-invented;
+- corrupt persisted bootstrap metadata is surfaced rather than silently repaired;
+- malformed API list envelopes are surfaced rather than converted to empty state;
+- all existing M5.0 corrections remain intact;
+- authoritative remote CI remains green.
 
-No new product scope is required.
+No new product capability is required.
 
 ## Programme state
 
-`M4.3 ✅ → M5.0 implementation substantial but HOLD on deterministic CI + transaction/service-mode fidelity → M5.1 NOT STARTED`
+`M4.3 ✅ → M5.0 remote CI ✅ / final concurrency + zero-invention hardening required → M5.1 NOT STARTED`
