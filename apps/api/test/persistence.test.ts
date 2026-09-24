@@ -222,4 +222,25 @@ describe('M5.0 Persistence & Repository Contracts', () => {
 
     db2.close();
   });
+
+  it('8. Bootstrap Metadata: corrupt uploaded_document_names_json must fail rather than become []', async () => {
+    const p = await service.createProject({
+      name: 'Corrupt Bootstrap Project',
+      organisation: 'Corrupt Test Org',
+      intent: 'FORECAST',
+      description: 'Testing corruption failure',
+      creationMethod: 'BRIEF',
+      uploadedDocumentNames: ['initial.pdf']
+    });
+
+    const raw = db.getRawDatabase();
+
+    // 1. Injected corrupt JSON syntax
+    raw.prepare(`UPDATE projects SET uploaded_document_names_json = '{invalid_json[' WHERE id = ?`).run(p.id);
+    await expect(projectRepo.getBootstrapMetadata(p.id)).rejects.toThrow(/corrupt JSON/);
+
+    // 2. Injected non-array JSON (e.g. object instead of array)
+    raw.prepare(`UPDATE projects SET uploaded_document_names_json = '{"notAnArray": true}' WHERE id = ?`).run(p.id);
+    await expect(projectRepo.getBootstrapMetadata(p.id)).rejects.toThrow(/must be a JSON array of strings/);
+  });
 });

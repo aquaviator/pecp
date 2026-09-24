@@ -46,14 +46,18 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
 
   const loadData = async () => {
     try {
-      const [sum, itms] = await Promise.all([
-        intelligenceService.getIntelligenceSummary(project.id),
-        intelligenceService.getIntelligenceItems(project.id)
-      ]);
-      setSummary(sum);
+      const itms = await intelligenceService.getIntelligenceItems(project.id);
       setItems(itms);
     } catch (err) {
-      console.error('Failed to load intelligence data:', err);
+      console.error('Failed to load intelligence items:', err);
+    }
+
+    try {
+      const sum = await intelligenceService.getIntelligenceSummary(project.id);
+      setSummary(sum);
+    } catch {
+      // In API mode, review summary is not platformised in M5.0; client-invented summary is forbidden
+      setSummary(null);
     }
   };
 

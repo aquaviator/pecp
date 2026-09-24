@@ -52,12 +52,18 @@ const AppContent: React.FC = () => {
     }
   };
 
-  // Sync conflict count from intelligence summary
+  // Sync conflict count from intelligence summary or project record
   useEffect(() => {
     if (activeProject) {
-      intelligenceService.getIntelligenceSummary(activeProject.id).then((sum) => {
-        setConflictsCount(sum.conflicts);
-      }).catch(console.error);
+      intelligenceService
+        .getIntelligenceSummary(activeProject.id)
+        .then((sum) => {
+          setConflictsCount(sum.conflicts);
+        })
+        .catch(() => {
+          // In API mode, review summary is unsupported; use authoritative project record field
+          setConflictsCount(activeProject.conflictsCount ?? 0);
+        });
     }
   }, [activeProject, intelligenceService]);
 

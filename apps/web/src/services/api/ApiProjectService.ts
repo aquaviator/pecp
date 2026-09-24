@@ -39,7 +39,12 @@ export class ApiProjectService implements IProjectService {
     }
 
     const data = await response.json();
-    return data.items || [];
+    if (!data || !Array.isArray(data.items)) {
+      throw new Error(
+        `ApiProjectService: Malformed API response from ${url}: expected '{ items: [...] }' envelope`
+      );
+    }
+    return data.items;
   }
 
   async getProjectById(id: string): Promise<ProjectSummary | null> {

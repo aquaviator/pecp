@@ -154,4 +154,28 @@ describe('M5.0 ApiProjectService Web Adapter', () => {
       /An unexpected internal error occurred/
     );
   });
+
+  it('5. malformed successful API list envelopes fail rather than becoming empty collections', async () => {
+    // Missing items property
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({})
+    });
+
+    await expect(service.getProjects()).rejects.toThrow(
+      /Malformed API response .* expected '{ items: \[\.\.\.\] }' envelope/
+    );
+
+    // items is null or not an array
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: null })
+    });
+
+    await expect(service.getProjects()).rejects.toThrow(
+      /Malformed API response .* expected '{ items: \[\.\.\.\] }' envelope/
+    );
+  });
 });

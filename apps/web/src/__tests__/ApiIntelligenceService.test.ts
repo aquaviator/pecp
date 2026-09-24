@@ -97,19 +97,10 @@ describe('M5.0 ApiIntelligenceService Web Adapter', () => {
     expect(missing).toBeNull();
   });
 
-  it('3. calculates getIntelligenceSummary strictly from real items with zero invention', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ items: sampleItems })
-    });
-
-    const summary = await service.getIntelligenceSummary('proj-123');
-    expect(summary.documentsAnalysed).toBe(2);
-    expect(summary.requirementsFound).toBe(2);
-    expect(summary.performanceRequirements).toBe(2);
-    expect(summary.conflicts).toBe(1);
-    expect(summary.missingInformation).toBe(0);
+  it('3. getIntelligenceSummary explicitly rejects to prevent client-invented summary semantics', async () => {
+    await expect(service.getIntelligenceSummary('proj-123')).rejects.toThrow(
+      /ApiIntelligenceService: getIntelligenceSummary is not supported in API mode in M5.0. Server-side intelligence review summary is not platformised, and client-side summary invention is forbidden./
+    );
   });
 
   it('4. preserves real API and network errors without falling back to mock fixtures', async () => {
@@ -140,5 +131,29 @@ describe('M5.0 ApiIntelligenceService Web Adapter', () => {
     await expect(
       service.approveIntelligenceItem('proj-123', 'item-2', 'Lead Architect')
     ).rejects.toThrow(/requires authenticated actor identity \(deferred to M5.1\)/);
+  });
+
+  it('6. malformed successful API list envelopes fail rather than becoming empty collections', async () => {
+    // Missing items property in envelope
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({})
+    });
+
+    await expect(service.getIntelligenceItems('proj-123')).rejects.toThrow(
+      /ApiIntelligenceService: Malformed API response .* expected '{ items: \[\.\.\.\] }' envelope/
+    );
+
+    // items is null or not an array
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: null })
+    });
+
+    await expect(service.getIntelligenceItems('proj-123')).rejects.toThrow(
+      /ApiIntelligenceService: Malformed API response .* expected '{ items: \[\.\.\.\] }' envelope/
+    );
   });
 });

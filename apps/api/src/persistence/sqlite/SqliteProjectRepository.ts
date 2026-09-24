@@ -98,9 +98,15 @@ export class SqliteProjectRepository implements IProjectRepository {
     let uploadedDocs: string[] | undefined = undefined;
     if (row.uploaded_document_names_json) {
       try {
-        uploadedDocs = JSON.parse(row.uploaded_document_names_json);
-      } catch {
-        uploadedDocs = [];
+        const parsed = JSON.parse(row.uploaded_document_names_json);
+        if (!Array.isArray(parsed)) {
+          throw new Error('uploaded_document_names_json must be a JSON array of strings');
+        }
+        uploadedDocs = parsed;
+      } catch (err: any) {
+        throw new Error(
+          `Failed to parse bootstrap metadata for project '${projectId}': corrupt JSON (${err.message})`
+        );
       }
     }
 

@@ -40,7 +40,12 @@ export class ApiIntelligenceService implements IIntelligenceService {
     }
 
     const data = await response.json();
-    return data.items || [];
+    if (!data || !Array.isArray(data.items)) {
+      throw new Error(
+        `ApiIntelligenceService: Malformed API response from ${url}: expected '{ items: [...] }' envelope`
+      );
+    }
+    return data.items;
   }
 
   async getIntelligenceItemById(projectId: string, itemId: string): Promise<IntelligenceItem | null> {
@@ -75,36 +80,10 @@ export class ApiIntelligenceService implements IIntelligenceService {
     return response.json();
   }
 
-  async getIntelligenceSummary(projectId: string): Promise<IntelligenceReviewSummary> {
-    const items = await this.getIntelligenceItems(projectId);
-
-    const documentsSet = new Set<string>();
-    for (const item of items) {
-      if (item.sourceDocument) {
-        documentsSet.add(item.sourceDocument);
-      }
-    }
-
-    const performanceRequirements = items.filter(
-      (i) => i.category === 'REQUIREMENTS' || i.category === 'WORKLOAD'
-    ).length;
-
-    const conflicts = items.filter(
-      (i) => i.reviewStatus === 'CONFLICTING' || i.canonicalState === 'CONFLICTING'
-    ).length;
-
-    const missingInformation = items.filter(
-      (i) => i.reviewStatus === 'MISSING' || i.canonicalState === 'MISSING'
-    ).length;
-
-    return {
-      documentsAnalysed: documentsSet.size,
-      requirementsFound: items.length,
-      performanceRequirements,
-      conflicts,
-      missingInformation,
-      readinessSections: []
-    };
+  async getIntelligenceSummary(_projectId: string): Promise<IntelligenceReviewSummary> {
+    throw new Error(
+      'ApiIntelligenceService: getIntelligenceSummary is not supported in API mode in M5.0. Server-side intelligence review summary is not platformised, and client-side summary invention is forbidden.'
+    );
   }
 
   async resolveIntelligenceConflict(

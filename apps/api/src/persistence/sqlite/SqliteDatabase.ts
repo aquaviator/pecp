@@ -4,7 +4,43 @@
 import { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { IUnitOfWork } from '@pecp/platform-core';
+
+interface TransactionScope {
+  id: string;
+  depth: number;
+}
+
+class AsyncTransactionMutex {
+  private queue: Array<() => void> = [];
+  private locked = false;
+
+  async acquire(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const run = () => {
+        this.locked = true;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          this.locked = false;
+          const next = this.queue.shift();
+          if (next) {
+            next();
+          }
+        });
+      };
+
+      if (!this.locked) {
+        run();
+      } else {
+        this.queue.push(run);
+      }
+    });
+  }
+}
 
 export interface Migration {
   version: number;
@@ -101,7 +137,9 @@ export class SqliteDatabase implements IUnitOfWork {
   private db: DatabaseSync | null = null;
   private migrationsAppliedCount = 0;
   private readonly dbPath: string;
-  private transactionDepth = 0;
+  private txMutex = new AsyncTransactionMutex();
+  private txScopeStorage = new AsyncLocalStorage<TransactionScope>();
+  private syncTransactionDepth = 0;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -168,47 +206,70 @@ export class SqliteDatabase implements IUnitOfWork {
 
   /**
    * Database-agnostic transactional unit of work execution.
-   * Supports nested operations through SQLite savepoints.
+   * Isolates concurrent requests so independent transactions never share a transaction.
+   * Supports nested operations within the same request flow through SQLite savepoints.
    */
   async execute<T>(operation: () => Promise<T>): Promise<T> {
     if (!this.db) throw new Error('Database is not open');
 
-    this.transactionDepth++;
-    const savepointName = `sp_${this.transactionDepth}`;
+    const currentScope = this.txScopeStorage.getStore();
 
-    if (this.transactionDepth === 1) {
-      this.db.exec('BEGIN TRANSACTION;');
-    } else {
+    if (currentScope) {
+      // Nested transaction within the same async request flow -> use SAVEPOINT
+      currentScope.depth++;
+      const savepointName = `sp_${currentScope.id.replace(/-/g, '_')}_${currentScope.depth}`;
       this.db.exec(`SAVEPOINT ${savepointName};`);
-    }
 
-    try {
-      const result = await operation();
-
-      if (this.transactionDepth === 1) {
-        this.db.exec('COMMIT;');
-      } else {
-        this.db.exec(`RELEASE SAVEPOINT ${savepointName};`);
-      }
-      this.transactionDepth--;
-      return result;
-    } catch (error) {
-      if (this.transactionDepth === 1) {
+      try {
+        const result = await operation();
         try {
-          this.db.exec('ROLLBACK;');
+          this.db.exec(`RELEASE SAVEPOINT ${savepointName};`);
         } catch {
-          // ignore rollback error if already rolled back
+          // ignore if already released
         }
-      } else {
+        currentScope.depth--;
+        return result;
+      } catch (error) {
         try {
           this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName};`);
         } catch {
           // ignore rollback error
         }
+        currentScope.depth--;
+        throw error;
       }
-      this.transactionDepth--;
-      throw error;
     }
+
+    // Top-level unit-of-work -> acquire transaction mutex to ensure isolated SQLite transaction
+    const releaseLock = await this.txMutex.acquire();
+    const newScope: TransactionScope = {
+      id: randomUUID(),
+      depth: 1
+    };
+
+    return this.txScopeStorage.run(newScope, async () => {
+      if (!this.db) {
+        releaseLock();
+        throw new Error('Database is not open');
+      }
+
+      this.db.exec('BEGIN TRANSACTION;');
+
+      try {
+        const result = await operation();
+        this.db.exec('COMMIT;');
+        return result;
+      } catch (error) {
+        try {
+          this.db.exec('ROLLBACK;');
+        } catch {
+          // ignore rollback error if already rolled back
+        }
+        throw error;
+      } finally {
+        releaseLock();
+      }
+    });
   }
 
   /**
@@ -217,10 +278,10 @@ export class SqliteDatabase implements IUnitOfWork {
   transaction<T>(fn: () => T): T {
     if (!this.db) throw new Error('Database is not open');
 
-    this.transactionDepth++;
-    const savepointName = `sp_sync_${this.transactionDepth}`;
+    this.syncTransactionDepth++;
+    const savepointName = `sp_sync_${this.syncTransactionDepth}`;
 
-    if (this.transactionDepth === 1) {
+    if (this.syncTransactionDepth === 1) {
       this.db.exec('BEGIN TRANSACTION;');
     } else {
       this.db.exec(`SAVEPOINT ${savepointName};`);
@@ -228,15 +289,15 @@ export class SqliteDatabase implements IUnitOfWork {
 
     try {
       const result = fn();
-      if (this.transactionDepth === 1) {
+      if (this.syncTransactionDepth === 1) {
         this.db.exec('COMMIT;');
       } else {
         this.db.exec(`RELEASE SAVEPOINT ${savepointName};`);
       }
-      this.transactionDepth--;
+      this.syncTransactionDepth--;
       return result;
     } catch (error) {
-      if (this.transactionDepth === 1) {
+      if (this.syncTransactionDepth === 1) {
         try {
           this.db.exec('ROLLBACK;');
         } catch {
@@ -249,7 +310,7 @@ export class SqliteDatabase implements IUnitOfWork {
           // Rollback failed
         }
       }
-      this.transactionDepth--;
+      this.syncTransactionDepth--;
       throw error;
     }
   }

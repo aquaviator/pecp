@@ -233,4 +233,154 @@ describe('M5.0 Persistence Atomicity & Transaction Rollback Under Failure Inject
     const rawProjs = db.getRawDatabase().prepare('SELECT * FROM projects').all();
     expect(rawProjs.length).toBe(0);
   });
+
+  it('7. Concurrent Unit-of-Work Isolation: two independent requests cannot share one SQLite transaction under async delays/barriers, and rollback of one does not affect the other', async () => {
+    function createBarrier() {
+      let resolve: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return {
+        wait: () => promise,
+        release: () => resolve()
+      };
+    }
+
+    const request1InTx = createBarrier();
+    const request2Dispatched = createBarrier();
+
+    const originalProjectCreate = projectRepo.create.bind(projectRepo);
+    vi.spyOn(projectRepo, 'create').mockImplementation(async (project, meta) => {
+      if (project.name === 'Concurrent Project Fail') {
+        request1InTx.release();
+        // Wait until Request 2 has been dispatched concurrently
+        await request2Dispatched.wait();
+        // Real async delay while inside transaction
+        await new Promise((r) => setTimeout(r, 40));
+        // Inject failure to trigger rollback of Request 1
+        throw new Error('INJECTED_CONCURRENT_ROLLBACK');
+      }
+      return originalProjectCreate(project, meta);
+    });
+
+    // Start Request 1 (which will encounter injected error and roll back)
+    const request1Promise = service.createProject({
+      name: 'Concurrent Project Fail',
+      organisation: 'Failing Tenant',
+      intent: 'FORECAST',
+      description: 'Will be rolled back',
+      creationMethod: 'BRIEF'
+    });
+
+    // Wait until Request 1 is actively inside its unit of work
+    await request1InTx.wait();
+
+    // Dispatch Request 2 concurrently while Request 1 is still inside its transaction
+    const request2Promise = service.createProject({
+      name: 'Concurrent Project Success',
+      organisation: 'Succeeding Tenant',
+      intent: 'CERTIFICATION',
+      description: 'Will succeed',
+      creationMethod: 'BRIEF'
+    });
+
+    // Notify that Request 2 has been dispatched
+    request2Dispatched.release();
+
+    const [result1, result2] = await Promise.allSettled([request1Promise, request2Promise]);
+
+    // Request 1 must fail and roll back
+    expect(result1.status).toBe('rejected');
+    expect((result1 as PromiseRejectedResult).reason.message).toContain('INJECTED_CONCURRENT_ROLLBACK');
+
+    // Request 2 must succeed and commit independently
+    expect(result2.status).toBe('fulfilled');
+    const createdProject2 = (result2 as PromiseFulfilledResult<any>).value;
+    expect(createdProject2.name).toBe('Concurrent Project Success');
+
+    // Invariant: Database contains Request 2's project and organisation
+    const project2 = await projectRepo.getById(createdProject2.id);
+    expect(project2).not.toBeNull();
+    expect(project2?.name).toBe('Concurrent Project Success');
+
+    const org2 = await orgRepo.getByName('Succeeding Tenant');
+    expect(org2).not.toBeNull();
+
+    // Invariant: Database DOES NOT contain Request 1's project or organisation (rolled back completely)
+    const rawFailingProjects = db
+      .getRawDatabase()
+      .prepare('SELECT * FROM projects WHERE name = ?')
+      .all('Concurrent Project Fail');
+    expect(rawFailingProjects.length).toBe(0);
+
+    const rawFailingOrgs = db
+      .getRawDatabase()
+      .prepare('SELECT * FROM organisations WHERE normalized_name = ?')
+      .all('failing tenant');
+    expect(rawFailingOrgs.length).toBe(0);
+  });
+
+  it('8. Concurrent Unit-of-Work Isolation: succeeding request commits properly and is not polluted when a concurrent request with async delays rolls back', async () => {
+    function createBarrier() {
+      let resolve: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return {
+        wait: () => promise,
+        release: () => resolve()
+      };
+    }
+
+    const barrierSuccessActive = createBarrier();
+    const barrierFailureDispatched = createBarrier();
+
+    const originalRevisionRecord = revisionRepo.recordRevision.bind(revisionRepo);
+    vi.spyOn(revisionRepo, 'recordRevision').mockImplementation(async (rev) => {
+      // For the succeeding project, delay inside transaction
+      if (rev.entityType === 'PROJECT' && (rev as any).payloadJson?.includes('Succeeding Concurrency Alpha')) {
+        barrierSuccessActive.release();
+        await barrierFailureDispatched.wait();
+        await new Promise((r) => setTimeout(r, 30));
+      }
+      // For the failing project, throw error
+      if (rev.entityType === 'PROJECT' && (rev as any).payloadJson?.includes('Failing Concurrency Beta')) {
+        throw new Error('INJECTED_CONCURRENT_BETA_FAIL');
+      }
+      return originalRevisionRecord(rev);
+    });
+
+    const successPromise = service.createProject({
+      name: 'Succeeding Concurrency Alpha',
+      organisation: 'Tenant Alpha',
+      intent: 'DISCOVERY',
+      description: 'Alpha description',
+      creationMethod: 'BRIEF'
+    });
+
+    await barrierSuccessActive.wait();
+
+    const failPromise = service.createProject({
+      name: 'Failing Concurrency Beta',
+      organisation: 'Tenant Beta',
+      intent: 'FORECAST',
+      description: 'Beta description',
+      creationMethod: 'BRIEF'
+    });
+
+    barrierFailureDispatched.release();
+
+    const [resAlpha, resBeta] = await Promise.allSettled([successPromise, failPromise]);
+
+    expect(resAlpha.status).toBe('fulfilled');
+    expect(resBeta.status).toBe('rejected');
+
+    // Alpha exists
+    const alphaOrg = await orgRepo.getByName('Tenant Alpha');
+    expect(alphaOrg).not.toBeNull();
+
+    // Beta was rolled back
+    const betaOrg = await orgRepo.getByName('Tenant Beta');
+    expect(betaOrg).toBeNull();
+  });
 });
