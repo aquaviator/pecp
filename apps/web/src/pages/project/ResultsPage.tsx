@@ -95,12 +95,21 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
   const { resultsReport, acceptanceEvaluation, executionResult, rawArtifactSummary } = evidenceState;
   const identity = resultsReport.projectExecutionIdentity;
   const attainment = resultsReport.workloadAttainment;
-  const overallVerdict = acceptanceEvaluation?.overallVerdict ?? 'INCONCLUSIVE';
+  const overallVerdict = acceptanceEvaluation?.overallVerdict ?? 'NOT_EVALUATED';
 
   const criteriaList =
     resultsReport.criterionOutcomes ||
     acceptanceEvaluation?.criterionEvaluations ||
     [];
+
+  const iterationCount = executionResult?.metrics.iterations?.count;
+  const durationSeconds =
+    (executionResult as any)?.timestamps?.durationSeconds ||
+    (identity as any)?.durationSeconds;
+  const iterPerSec =
+    iterationCount != null && durationSeconds && durationSeconds > 0
+      ? (iterationCount / durationSeconds).toFixed(2)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -120,10 +129,10 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-slate-950 text-slate-300 border border-slate-800">
-              Run: {identity.executionRunId}
+              Run: {identity?.executionRunId || executionResult?.run?.executionRunId || 'NOT_SUPPLIED'}
             </span>
             <span className="text-xs font-mono px-2 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-              {identity.operationalStatus || 'COMPLETED'}
+              {identity?.operationalStatus || executionResult?.run?.operationalStatus || 'NOT_SUPPLIED'}
             </span>
           </div>
         </div>
@@ -136,7 +145,9 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
             ? 'bg-emerald-950/20 border-emerald-800/80'
             : overallVerdict === 'FAIL'
             ? 'bg-rose-950/20 border-rose-800/80'
-            : 'bg-amber-950/20 border-amber-800/80'
+            : overallVerdict === 'INCONCLUSIVE'
+            ? 'bg-amber-950/20 border-amber-800/80'
+            : 'bg-slate-950/40 border-slate-800'
         }`}
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -145,8 +156,10 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
               <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
             ) : overallVerdict === 'FAIL' ? (
               <ShieldAlert className="w-6 h-6 text-rose-400 shrink-0 mt-0.5" />
-            ) : (
+            ) : overallVerdict === 'INCONCLUSIVE' ? (
               <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
+            ) : (
+              <Info className="w-6 h-6 text-slate-400 shrink-0 mt-0.5" />
             )}
             <div>
               <div className="flex items-center gap-2.5">
@@ -159,7 +172,9 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
                       ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
                       : overallVerdict === 'FAIL'
                       ? 'bg-rose-950 text-rose-300 border-rose-700'
-                      : 'bg-amber-950 text-amber-300 border-amber-700'
+                      : overallVerdict === 'INCONCLUSIVE'
+                      ? 'bg-amber-950 text-amber-300 border-amber-700'
+                      : 'bg-slate-900 text-slate-300 border-slate-700'
                   }`}
                 >
                   {overallVerdict}
@@ -185,10 +200,10 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
                   : 'bg-amber-950 text-amber-400 border-amber-800'
               }`}
             >
-              {attainment?.status || 'UNRESOLVED'}
+              {attainment?.status || 'NOT_SUPPLIED'}
             </span>
             <span className="text-[10px] text-slate-500 block font-mono">
-              {attainment?.derivationStatus || 'UNRESOLVED_INSUFFICIENT_TIME_SERIES'}
+              {attainment?.derivationStatus || 'NOT_SUPPLIED'}
             </span>
           </div>
         </div>
@@ -201,7 +216,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
               Governance Invariant: Workload Prerequisite Law (Constitution §10, §13)
             </p>
             <p className="text-slate-400 text-[11px] leading-relaxed">
-              A performance test cannot PASS if steady-state workload attainment is unresolved. Even though all response-time and error-rate thresholds observed PASS status, the run remains <strong className="text-amber-300">INCONCLUSIVE</strong> because steady-state order throughput telemetry was not captured.
+              A performance test cannot achieve an overall PASS status if steady-state workload attainment is unresolved. If steady-state demand attainment telemetry is not confirmed, the execution cannot be signed off regardless of whether individual response-time and error-rate criteria pass.
             </p>
           </div>
         </div>
@@ -243,13 +258,13 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                {criteriaList.map((evalItem: any) => (
-                  <tr key={evalItem.criterionId} className="hover:bg-slate-800/30">
-                    <td className="p-3 font-mono text-slate-400">{evalItem.criterionId}</td>
+                {criteriaList.map((evalItem: any, idx: number) => (
+                  <tr key={evalItem.criterionId || evalItem.key || idx} className="hover:bg-slate-800/30">
+                    <td className="p-3 font-mono text-slate-400">{evalItem.criterionId || evalItem.key || `crit-${idx}`}</td>
                     <td className="p-3 font-medium text-white">{evalItem.metric || evalItem.scope || evalItem.key}</td>
-                    <td className="p-3 font-mono text-amber-300">{evalItem.target || evalItem.targetExpression}</td>
+                    <td className="p-3 font-mono text-amber-300">{evalItem.target || evalItem.targetExpression || 'NOT_SUPPLIED'}</td>
                     <td className="p-3 font-mono text-sky-300 font-bold">
-                      {evalItem.observedValue} {evalItem.observedUnit || 'ms'}
+                      {evalItem.observedValue != null ? `${evalItem.observedValue} ${evalItem.observedUnit || 'NOT_SUPPLIED'}` : 'NOT_SUPPLIED'}
                     </td>
                     <td className="p-3">
                       <span
@@ -293,25 +308,39 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
             <div className="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-800">
               <span className="text-slate-400">Total k6 Iterations:</span>
               <span className="font-mono font-bold text-white">
-                {executionResult?.metrics.iterations?.count?.toLocaleString() || '120,981'} (91.59 iter/s)
+                {iterationCount != null ? iterationCount.toLocaleString() : 'NOT_SUPPLIED'}
+                {iterPerSec != null && ` (${iterPerSec} iter/s)`}
               </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-800">
               <span className="text-slate-400">Dropped Iterations:</span>
               <span className="font-mono font-bold text-emerald-400">
-                {executionResult?.metrics.droppedIterations?.count ?? 8}
+                {executionResult?.metrics.droppedIterations?.count != null
+                  ? String(executionResult.metrics.droppedIterations.count)
+                  : 'NOT_SUPPLIED'}
               </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-800">
               <span className="text-slate-400">SUT Corroborated Orders Created:</span>
               <span className="font-mono font-bold text-sky-400">
-                {executionResult?.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents ?? 9671}
+                {executionResult?.referenceLabCorroboration?.businessEventCounts.orderCreatedEvents != null
+                  ? String(executionResult.referenceLabCorroboration.businessEventCounts.orderCreatedEvents)
+                  : 'NOT_SUPPLIED'}
               </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2.5 rounded border border-slate-800">
               <span className="text-slate-400">Counter Discrepancy:</span>
               <span className="font-mono font-bold text-emerald-400">
-                {executionResult?.referenceLabCorroboration?.consistency.discrepancyCount ?? 0} (100% Corroborated)
+                {executionResult?.referenceLabCorroboration?.consistency.discrepancyCount != null ? (
+                  <>
+                    {executionResult.referenceLabCorroboration.consistency.discrepancyCount}
+                    {executionResult.referenceLabCorroboration.consistency.isConsistent && (
+                      <span className="text-slate-400 font-normal ml-1">(Corroborated)</span>
+                    )}
+                  </>
+                ) : (
+                  'NOT_SUPPLIED'
+                )}
               </span>
             </div>
           </div>
@@ -326,16 +355,23 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ project, initialEviden
           <div className="space-y-2 text-xs">
             <div className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800 font-mono">
               <span className="text-slate-400">Runner Engine:</span>
-              <span className="text-slate-200">k6 v0.54.0</span>
+              <span className="text-slate-200">
+                {(executionResult as any)?.executionEnvironment?.runnerEngine ||
+                  (executionResult as any)?.manifest?.runnerEngine ||
+                  rawArtifactSummary?.runnerEngine ||
+                  'NOT_SUPPLIED'}
+              </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800 font-mono">
               <span className="text-slate-400">Workflow Run ID:</span>
-              <span className="text-slate-200">{(identity as any).workflowRunId || rawArtifactSummary?.workflowRunId || '35577599469'}</span>
+              <span className="text-slate-200">
+                {(identity as any)?.workflowRunId || rawArtifactSummary?.workflowRunId || 'NOT_SUPPLIED'}
+              </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800 font-mono">
               <span className="text-slate-400">Repository Commit:</span>
-              <span className="text-sky-400 truncate max-w-[200px]" title={(identity as any).commitSha || ''}>
-                {(identity as any).commitSha || rawArtifactSummary?.commitSha || '76c2dfd7d829d3152aa2c4f6a98d9cd08e7efd82'}
+              <span className="text-sky-400 truncate max-w-[200px]" title={(identity as any)?.commitSha || rawArtifactSummary?.commitSha || ''}>
+                {(identity as any)?.commitSha || rawArtifactSummary?.commitSha || 'NOT_SUPPLIED'}
               </span>
             </div>
             <div className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800 font-mono">

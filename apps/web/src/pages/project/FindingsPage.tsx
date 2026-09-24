@@ -112,7 +112,7 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ project, initialEvid
               Register: {findingsRegister.id}
             </span>
             <span className="text-xs font-mono px-2 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-              Status: {findingsRegister.generationStatus || 'VALID'}
+              Status: {findingsRegister.generationStatus || 'NOT_SUPPLIED'}
             </span>
           </div>
         </div>
@@ -143,17 +143,17 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ project, initialEvid
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <span className="text-xs text-slate-400 block">Source Acceptance Verdict</span>
           <span className="text-base font-bold text-amber-400 font-mono mt-1.5 block">
-            {acceptanceEvaluation?.overallVerdict || 'INCONCLUSIVE'}
+            {acceptanceEvaluation?.overallVerdict || 'NOT_EVALUATED'}
           </span>
           <span className="text-[11px] text-slate-500 mt-0.5 block">
-            Workload unresolved
+            {acceptanceEvaluation?.overallVerdict ? `Verdict: ${acceptanceEvaluation.overallVerdict}` : 'Not evaluated'}
           </span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <span className="text-xs text-slate-400 block">Cryptographic Digest</span>
           <span className="text-xs font-mono text-emerald-400 truncate max-w-[180px] mt-2 block" title={findingsRegister.registerDigest?.value}>
-            {findingsRegister.registerDigest?.value || 'VALID'}
+            {findingsRegister.registerDigest?.value || 'NOT_SUPPLIED'}
           </span>
           <span className="text-[11px] text-slate-500 mt-0.5 block">
             SHA-256 bound
@@ -185,7 +185,7 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ project, initialEvid
                   <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
                     <span>ID: {f.id}</span>
                     <span className="text-slate-600">•</span>
-                    <span>Class: {f.classification || 'GOVERNANCE'}</span>
+                    <span>Class: {f.classification || 'NOT_SUPPLIED'}</span>
                   </div>
                 </div>
 
@@ -223,7 +223,7 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ project, initialEvid
                     Defect Eligibility: <span className="font-mono text-slate-400 font-bold">{f.defectEligibility ? 'TRUE' : 'FALSE'}</span>
                   </span>
                   <span className="text-slate-500 italic">
-                    Reason: SUT defect tickets are not created for governance/workload-attainment findings.
+                    Reason: {f.ineligibilityReason || 'SUT defect tickets require a confirmed SLA failure under attained workload.'}
                   </span>
                 </div>
               </div>
@@ -255,7 +255,7 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ project, initialEvid
               0 Defect Candidates Eligible for Publication
             </p>
             <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
-              Under Constitution §13 (Defect Eligibility Law), a performance test with an <strong className="text-amber-400">INCONCLUSIVE</strong> verdict or unresolved workload attainment cannot emit SUT defect candidates. SUT defect tickets require a verified failing performance criterion under proven workload attainment.
+              Under Constitution §13 (Defect Eligibility Law), SUT defect tickets require a verified failing performance criterion under proven workload attainment. Tests without attained workload or without failed criteria cannot emit defect candidates.
             </p>
           </div>
         ) : (

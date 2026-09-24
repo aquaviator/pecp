@@ -33,6 +33,7 @@ import {
   RETAILCO_M3_EXECUTION_INTELLIGENCE
 } from '../../fixtures/retailco/m3ExecutionFixture';
 import { WorkloadProfileChart } from '../../components/workload/WorkloadProfileChart';
+import { buildVisualisationHookFromTestDefinition } from '../../components/workload/workloadVisualisationAdapter';
 
 interface TestsPageProps {
   project: ProjectSummary;
@@ -91,43 +92,7 @@ export const TestsPage: React.FC<TestsPageProps> = ({ project, initialItems }) =
   const testDef = isReferenceLab ? referenceTestDef : currentTestDef;
   const bundle = isReferenceLab ? referenceBundle : currentBundle;
 
-  const scheduleVisualisationHook = {
-    scheduler: {
-      executionModel: testDef.scenarios[0]?.workloadSchedule.executionModel ?? null,
-      population: testDef.scenarios[0]?.workloadSchedule.arrivalPopulation ?? null,
-      rateUnit: testDef.scenarios[0]?.workloadSchedule.rateUnit ?? null,
-      startRate: testDef.scenarios[0]?.workloadSchedule.startRate ?? null,
-      peakArrivalRate: testDef.scenarios[0]?.workloadSchedule.peakArrivalRate ?? null
-    },
-    businessTarget: testDef.workloadAttainment
-      ? {
-          metric: testDef.workloadAttainment.metric ?? null,
-          targetValue: testDef.workloadAttainment.targetValue ?? null,
-          unit: testDef.workloadAttainment.unit ?? null,
-          timeBasis: (testDef.workloadAttainment as any).timeBasis ?? null
-        }
-      : null,
-    stages: (testDef.scenarios[0]?.workloadSchedule.stages || []).map((stage, idx, all) => {
-      const prevEnd = idx === 0 ? 0 : all.slice(0, idx).reduce((sum, s) => sum + s.durationSeconds, 0);
-      return {
-        stageIndex: idx + 1,
-        name: stage.description ?? null,
-        durationSeconds: stage.durationSeconds,
-        startTimeSeconds: prevEnd,
-        endTimeSeconds: prevEnd + stage.durationSeconds,
-        startArrivalRate: (stage as any).startArrivalRate ?? (idx === 0 ? testDef.scenarios[0]?.workloadSchedule.startRate ?? null : all[idx - 1].targetArrivalRate),
-        targetArrivalRate: stage.targetArrivalRate
-      };
-    }),
-    journeyDistribution: (testDef.journeys || []).map((j) => ({
-      journeyId: j.id,
-      journeyKey: j.key,
-      name: j.name,
-      percentage: j.percentage ?? null,
-      weight: j.weight ?? null,
-      description: j.description ?? null
-    }))
-  };
+  const scheduleVisualisationHook = buildVisualisationHookFromTestDefinition(testDef);
 
   const currentFileContent =
     bundle.files.find((f) => f.filename === activeBundleFile)?.content ||

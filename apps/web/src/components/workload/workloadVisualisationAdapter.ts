@@ -5,7 +5,8 @@
 import {
   ResultsReportVisualisationHook,
   ResultsReportVisualisationStage,
-  ResultsReportJourneyDistributionItem
+  ResultsReportJourneyDistributionItem,
+  TestDefinition
 } from '@pecp/pe-domain';
 
 export interface SchedulerDataPoint {
@@ -43,6 +44,7 @@ export interface WorkloadVisualisationSummary {
     unit: string | null;
     timeBasis: string | null;
   } | null;
+  populationRelationshipText: string | null;
   journeySumPercentage: number | null;
   isDistributionComplete: boolean;
 }
@@ -97,6 +99,7 @@ export function buildWorkloadVisualisationSeries(
         peakArrivalRate: null,
         totalDurationSeconds: null,
         businessTarget: null,
+        populationRelationshipText: null,
         journeySumPercentage: null,
         isDistributionComplete: false
       }
@@ -118,6 +121,12 @@ export function buildWorkloadVisualisationSeries(
         timeBasis: hook.businessTarget.timeBasis ?? null
       }
     : null;
+
+  const populationRelationshipText: string | null =
+    (hook as any).populationRelationship?.description ||
+    (hook as any).populationRelationshipText ||
+    (hook as any).relationshipText ||
+    null;
 
   // Inspect journey percentages / weights without normalizing
   let sumPercentage = 0;
@@ -229,8 +238,90 @@ export function buildWorkloadVisualisationSeries(
       peakArrivalRate: peakRate,
       totalDurationSeconds,
       businessTarget,
+      populationRelationshipText,
       journeySumPercentage: hasValidPercentages ? sumPercentage : null,
       isDistributionComplete
     }
   };
 }
+
+/**
+ * Deterministically constructs a ResultsReportVisualisationHook from a TestDefinition.
+ * Pure presentation helper: no wall clock, no mutation, no invented rates or units.
+ * Preserves exact stage order, computes cumulative start/end times,
+ * preserves startRate, targetArrivalRate, and exact journey weights/percentages.
+ */
+export function buildVisualisationHookFromTestDefinition(
+  testDef: TestDefinition | null | undefined
+): ResultsReportVisualisationHook | null {
+  if (!testDef) return null;
+
+  const scenario = testDef.scenarios?.[0];
+  const schedule = scenario?.workloadSchedule;
+  const attainment =
+    scenario?.attainmentRequirement || (testDef as any).workloadAttainment;
+
+  const stages: ResultsReportVisualisationStage[] = (schedule?.stages || []).map(
+    (stage, idx, all) => {
+      const prevEnd =
+        idx === 0
+          ? 0
+          : all.slice(0, idx).reduce((sum, s) => sum + s.durationSeconds, 0);
+      const startArrivalRate =
+        (stage as any).startArrivalRate !== undefined
+          ? (stage as any).startArrivalRate
+          : idx === 0
+          ? schedule?.startRate ?? null
+          : all[idx - 1].targetArrivalRate;
+
+      return {
+        stageIndex: idx + 1,
+        name: stage.description ?? null,
+        durationSeconds: stage.durationSeconds,
+        startTimeSeconds: prevEnd,
+        endTimeSeconds: prevEnd + stage.durationSeconds,
+        startArrivalRate,
+        targetArrivalRate: stage.targetArrivalRate
+      };
+    }
+  );
+
+  const journeys = testDef.journeys || scenario?.journeyDistribution || [];
+  const journeyDistribution: ResultsReportJourneyDistributionItem[] = journeys.map(
+    (j) => ({
+      journeyId: j.id,
+      journeyKey: (j as any).key || (j as any).journeyKey,
+      name: j.name,
+      percentage: j.percentage ?? null,
+      weight: j.weight ?? null,
+      description: (j as any).description ?? null
+    })
+  );
+
+  const relationship =
+    scenario?.populationRelationship || (testDef as any).populationRelationship;
+
+  return {
+    scheduler: schedule
+      ? {
+          executionModel: schedule.executionModel ?? null,
+          population: schedule.arrivalPopulation ?? null,
+          rateUnit: schedule.rateUnit ?? null,
+          startRate: schedule.startRate ?? null,
+          peakArrivalRate: schedule.peakArrivalRate ?? null
+        }
+      : null,
+    businessTarget: attainment
+      ? {
+          metric: attainment.metric ?? null,
+          targetValue: attainment.targetValue ?? null,
+          unit: attainment.unit ?? null,
+          timeBasis: (attainment as any).timeBasis ?? null
+        }
+      : null,
+    stages,
+    journeyDistribution,
+    ...(relationship ? { populationRelationship: relationship } : {})
+  } as ResultsReportVisualisationHook;
+}
+

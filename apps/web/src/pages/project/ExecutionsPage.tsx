@@ -91,6 +91,12 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
   const { executionResult, rawArtifactSummary, verifiedTestDefinition } = evidenceState;
   const run = executionResult.run;
 
+  const formatSec = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -112,7 +118,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
               Run: {run.executionRunId}
             </span>
             <span className="text-xs font-mono px-2 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-              {run.operationalStatus}
+              {run.operationalStatus || 'NOT_SUPPLIED'}
             </span>
           </div>
         </div>
@@ -127,10 +133,10 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-slate-950 text-sky-400 border border-slate-800">
-              Engine: {run.engine.name} v{run.engine.version}
+              Engine: {run.engine?.name || 'NOT_SUPPLIED'}{run.engine?.version ? ` v${run.engine.version}` : ''}
             </span>
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-              Exit Code: {run.engineExitCode}
+              Exit Code: {run.engineExitCode != null ? String(run.engineExitCode) : 'NOT_SUPPLIED'}
             </span>
           </div>
         </div>
@@ -139,25 +145,29 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
             <span className="text-slate-400 block">Workflow Run ID</span>
             <span className="font-mono font-bold text-white mt-1 block">
-              {run.workflowRunId}
+              {run.workflowRunId || 'NOT_SUPPLIED'}
             </span>
           </div>
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
             <span className="text-slate-400 block">Execution Duration</span>
             <span className="font-mono font-bold text-white mt-1 block">
-              {run.timestamps.durationSeconds}s (22m 1s)
+              {run.timestamps?.durationSeconds != null
+                ? `${run.timestamps.durationSeconds}s (${formatSec(run.timestamps.durationSeconds)})`
+                : (run as any)?.durationSeconds != null
+                  ? `${(run as any).durationSeconds}s (${formatSec((run as any).durationSeconds)})`
+                  : 'NOT_SUPPLIED'}
             </span>
           </div>
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
             <span className="text-slate-400 block">Completed Iterations</span>
             <span className="font-mono font-bold text-sky-400 mt-1 block">
-              {executionResult.metrics.iterations?.count?.toLocaleString() || '120,981'}
+              {executionResult.metrics.iterations?.count?.toLocaleString() || 'NOT_SUPPLIED'}
             </span>
           </div>
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
             <span className="text-slate-400 block">Business Events Observed</span>
             <span className="font-mono font-bold text-amber-400 mt-1 block">
-              {executionResult.metrics.pecpBusinessAttainmentEvents?.count?.toLocaleString() || '9,671'}
+              {executionResult.metrics.pecpBusinessAttainmentEvents?.count?.toLocaleString() || 'NOT_SUPPLIED'}
             </span>
           </div>
         </div>
@@ -165,17 +175,17 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ project, initial
         <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-1 font-mono text-xs">
           <div className="flex justify-between items-center text-slate-400">
             <span>Repository Commit SHA:</span>
-            <span className="text-sky-400 truncate max-w-[280px]" title={run.repositoryCommitSha}>
-              {run.repositoryCommitSha}
+            <span className="text-sky-400 truncate max-w-[280px]" title={run.repositoryCommitSha || ''}>
+              {run.repositoryCommitSha || 'NOT_SUPPLIED'}
             </span>
           </div>
           <div className="flex justify-between items-center text-slate-400">
             <span>Evidence Artifact ID:</span>
-            <span className="text-slate-200">{run.executionArtifact?.id || rawArtifactSummary?.artifactId}</span>
+            <span className="text-slate-200">{run.executionArtifact?.id || rawArtifactSummary?.artifactId || 'NOT_SUPPLIED'}</span>
           </div>
           <div className="flex justify-between items-center text-slate-400">
             <span>Source Test Definition:</span>
-            <span className="text-slate-200">{verifiedTestDefinition?.id || 'test-def-proj-retailco-bf2026-v1.0'}</span>
+            <span className="text-slate-200">{verifiedTestDefinition?.id || (run as any)?.testDefinitionId || 'NOT_SUPPLIED'}</span>
           </div>
         </div>
       </div>

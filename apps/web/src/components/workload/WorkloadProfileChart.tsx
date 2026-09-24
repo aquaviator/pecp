@@ -34,6 +34,8 @@ export interface WorkloadProfileChartProps {
   visualisationHook?: ResultsReportVisualisationHook | null;
   showBusinessDemandKpi?: boolean;
   className?: string;
+  populationRelationshipText?: string | null;
+  initialView?: VisualisationView;
 }
 
 type VisualisationView = 'SCHEDULER' | 'JOURNEY_STACKED' | 'TABLE';
@@ -48,9 +50,11 @@ function formatDuration(seconds: number): string {
 export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
   visualisationHook,
   showBusinessDemandKpi = true,
-  className = ''
+  className = '',
+  populationRelationshipText = null,
+  initialView = 'SCHEDULER'
 }) => {
-  const [activeView, setActiveView] = useState<VisualisationView>('SCHEDULER');
+  const [activeView, setActiveView] = useState<VisualisationView>(initialView);
   const data: WorkloadVisualisationData = buildWorkloadVisualisationSeries(visualisationHook);
 
   if (!data.hasData) {
@@ -68,7 +72,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
   }
 
   const { summary, journeyMetadata, schedulerPoints, journeySeriesPoints, validationIssues } = data;
-  const rateUnit = summary.rateUnit || 'units/s';
+  const rateUnit = summary.rateUnit || null;
 
   return (
     <div className={`bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-5 ${className}`}>
@@ -148,7 +152,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
             </span>
             <span className="text-base font-bold text-amber-400 font-mono mt-0.5 block">
               {summary.businessTarget?.targetValue != null
-                ? `${summary.businessTarget.targetValue} ${summary.businessTarget.unit || 'orders/second'}`
+                ? `${summary.businessTarget.targetValue} ${summary.businessTarget.unit || 'NOT_SUPPLIED'}`
                 : 'NOT_SUPPLIED'}
             </span>
             <span className="text-[11px] text-slate-500 mt-0.5 block">
@@ -162,7 +166,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
             </span>
             <span className="text-base font-bold text-sky-400 font-mono mt-0.5 block">
               {summary.peakArrivalRate != null
-                ? `${summary.peakArrivalRate} ${summary.rateUnit || 'journey_iterations/second'}`
+                ? `${summary.peakArrivalRate} ${rateUnit || 'NOT_SUPPLIED'}`
                 : 'NOT_SUPPLIED'}
             </span>
             <span className="text-[11px] text-slate-500 mt-0.5 block">
@@ -178,7 +182,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
               {summary.population || 'NOT_SUPPLIED'} · {summary.executionModel || 'NOT_SUPPLIED'}
             </span>
             <span className="text-[11px] text-slate-500 mt-0.5 block">
-              Start Rate: {summary.startRate != null ? `${summary.startRate} ${rateUnit}` : 'absent'}
+              Start Rate: {summary.startRate != null ? `${summary.startRate} ${rateUnit || 'NOT_SUPPLIED'}` : 'absent'}
             </span>
           </div>
 
@@ -199,7 +203,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
       )}
 
       {/* Governed Population Relationship Lineage Callout */}
-      {summary.businessTarget?.targetValue != null && summary.peakArrivalRate != null && (
+      {(populationRelationshipText || summary.populationRelationshipText) && (
         <div className="bg-sky-950/20 border border-sky-900/40 rounded-lg p-3 flex items-start gap-2.5 text-xs text-slate-300">
           <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
           <div className="space-y-0.5 leading-relaxed">
@@ -207,9 +211,9 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
               Population Relationship Law (Constitution §10, M3.0.3):
             </span>
             <p className="text-slate-400">
-              8.75 orders/second business demand ÷ 8% checkout journey share = 109.375 mixed journey iterations/second.
+              {populationRelationshipText || summary.populationRelationshipText}
               <span className="text-slate-300 ml-1">
-                Scheduler checkout arrivals do not automatically prove successful order creation. Business demand attainment must be proven through steady-state telemetry.
+                Scheduler arrivals do not automatically prove business event creation. Attainment must be proven through steady-state telemetry.
               </span>
             </p>
           </div>
@@ -241,7 +245,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                   fontSize={11}
                   domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
                   label={{
-                    value: `Scheduler Rate (${rateUnit})`,
+                    value: rateUnit ? `Scheduler Rate (${rateUnit})` : 'Scheduler Rate',
                     angle: -90,
                     position: 'insideLeft',
                     fill: '#94a3b8',
@@ -257,7 +261,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                         <div className="bg-slate-950 border border-slate-800 p-2.5 rounded-lg shadow-xl text-xs space-y-1">
                           <p className="font-mono text-slate-400">Elapsed Time: <span className="text-white font-bold">{label}s</span> ({formatDuration(Number(label))})</p>
                           <p className="font-mono text-sky-400 font-bold">
-                            Arrival Rate: {pt.rate != null ? `${pt.rate} ${rateUnit}` : 'absent'}
+                            Arrival Rate: {pt.rate != null ? `${pt.rate}${rateUnit ? ` ${rateUnit}` : ''}` : 'absent'}
                           </p>
                           {pt.label && <p className="text-[11px] text-slate-500">{pt.label}</p>}
                         </div>
@@ -279,9 +283,9 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
             </ResponsiveContainer>
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 font-mono">
-            <span>t=0s {summary.startRate != null ? `(${summary.startRate} ${rateUnit})` : ''}</span>
-            <span>Steady Peak: {summary.peakArrivalRate} {rateUnit}</span>
-            <span>Total: {summary.totalDurationSeconds}s</span>
+            <span>t=0s {summary.startRate != null ? `(${summary.startRate} ${rateUnit || 'NOT_SUPPLIED'})` : ''}</span>
+            <span>Steady Peak: {summary.peakArrivalRate != null ? `${summary.peakArrivalRate} ${rateUnit || 'NOT_SUPPLIED'}` : 'NOT_SUPPLIED'}</span>
+            <span>Total: {summary.totalDurationSeconds != null ? `${summary.totalDurationSeconds}s` : 'absent'}</span>
           </div>
         </div>
       )}
@@ -304,7 +308,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                   fontSize={11}
                   domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]}
                   label={{
-                    value: `Stacked Journey Rates (${rateUnit})`,
+                    value: rateUnit ? `Stacked Journey Rates (${rateUnit})` : 'Stacked Journey Rates',
                     angle: -90,
                     position: 'insideLeft',
                     fill: '#94a3b8',
@@ -322,7 +326,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                             Elapsed: <span className="text-white font-bold">{label}s</span> ({formatDuration(Number(label))})
                           </p>
                           <p className="font-mono text-white text-[11px]">
-                            Total Arrival: <span className="font-bold text-sky-400">{pt.totalSchedulerRate} {rateUnit}</span>
+                            Total Arrival: <span className="font-bold text-sky-400">{pt.totalSchedulerRate != null ? `${pt.totalSchedulerRate}${rateUnit ? ` ${rateUnit}` : ''}` : 'absent'}</span>
                           </p>
                           <div className="space-y-1 pt-1">
                             {journeyMetadata.map((meta) => {
@@ -334,7 +338,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                                     {meta.name} ({meta.percentage}%):
                                   </span>
                                   <span className="font-mono font-medium text-slate-200">
-                                    {val != null ? `${val} /s` : 'absent'}
+                                    {val != null ? `${val}${rateUnit ? ` ${rateUnit}` : ''}` : 'absent'}
                                   </span>
                                 </div>
                               );
@@ -373,7 +377,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                 </div>
                 <div className="flex items-baseline justify-between">
                   <span className="text-sm font-bold text-white font-mono">{meta.percentage}%</span>
-                  <span className="text-[11px] font-mono text-sky-400">{meta.peakRate != null ? `${meta.peakRate}/s` : 'absent'}</span>
+                  <span className="text-[11px] font-mono text-sky-400">{meta.peakRate != null ? `${meta.peakRate}${rateUnit ? ` ${rateUnit}` : ''}` : 'absent'}</span>
                 </div>
                 <span className="text-[10px] text-slate-500 block font-mono">weight: {meta.weight}</span>
               </div>
@@ -381,7 +385,12 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
           </div>
 
           <div className="text-[11px] text-slate-400 font-mono text-right bg-slate-950/60 p-2 rounded border border-slate-800/60">
-            Sum of Journey Peak Rates: <span className="text-emerald-400 font-bold">{summary.peakArrivalRate} {rateUnit}</span> (100% corroborated)
+            Journey distribution total: <span className="text-emerald-400 font-bold">{summary.journeySumPercentage != null ? `${summary.journeySumPercentage}%` : 'absent'}</span>
+            {summary.peakArrivalRate != null && (
+              <span className="ml-2 text-slate-500">
+                (Peak arrival rate: <span className="text-sky-300 font-bold">{summary.peakArrivalRate}{rateUnit ? ` ${rateUnit}` : ''}</span>)
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -395,7 +404,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                 <tr>
                   <th className="p-3">Timeline Event</th>
                   <th className="p-3">Elapsed Time</th>
-                  <th className="p-3">Target Rate ({rateUnit})</th>
+                  <th className="p-3">Target Rate{rateUnit ? ` (${rateUnit})` : ''}</th>
                   <th className="p-3">Stage Meaning</th>
                 </tr>
               </thead>
@@ -409,7 +418,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                       {formatDuration(pt.elapsedSeconds)}
                     </td>
                     <td className="p-3 font-mono font-bold text-sky-400">
-                      {pt.rate != null ? `${pt.rate} ${rateUnit}` : 'absent'}
+                      {pt.rate != null ? `${pt.rate}${rateUnit ? ` ${rateUnit}` : ''}` : 'absent'}
                     </td>
                     <td className="p-3 text-slate-400">{pt.label || 'Governed stage'}</td>
                   </tr>
@@ -441,7 +450,7 @@ export const WorkloadProfileChart: React.FC<WorkloadProfileChartProps> = ({
                       <td className="p-3 font-mono text-slate-400">{j.key}</td>
                       <td className="p-3 font-mono font-bold text-amber-400">{j.percentage}%</td>
                       <td className="p-3 font-mono text-slate-300">{j.weight}</td>
-                      <td className="p-3 font-mono font-bold text-sky-400">{j.peakRate != null ? `${j.peakRate} ${rateUnit}` : 'absent'}</td>
+                      <td className="p-3 font-mono font-bold text-sky-400">{j.peakRate != null ? `${j.peakRate}${rateUnit ? ` ${rateUnit}` : ''}` : 'absent'}</td>
                     </tr>
                   ))}
                 </tbody>
