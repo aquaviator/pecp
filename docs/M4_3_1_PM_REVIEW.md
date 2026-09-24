@@ -1,290 +1,168 @@
 # PECP M4.3.1 Project Manager Review
 
-## Latest Verdict
+## Final Verdict
 
-**M4.3.1 — HOLD / NOT CLOSED**
+**M4.3.1 — PASS**
 
-The remote CI/type-contract correction has succeeded, but the independent semantic audit found residual zero-invention and project-neutrality violations in the live portal.
+**M4.3 — APPROVED FOR CLOSURE**
 
-Do **not** create M4.3.2. Correct M4.3.1 in place.
+Independent PM audit has verified the correction against authoritative remote `master`, the M4.3.1 work package, the original M4.3 work package, the live portal source, regression suites, and GitHub Actions.
 
-## Authoritative implementation and CI
+The implementation report supplied the previous SHA, but the actual authoritative implementation containing the final semantic corrections is:
 
-Current implementation SHA:
+`8f44962826f07fce99ec975f39c1e6248a04e796`
 
-`d2897184654e005ba1f4f7600ed42e3071406d57`
+## Authoritative CI Evidence
 
-GitHub Actions workflow:
-
-`CI`
+Workflow: `CI`
 
 Run ID:
 
-`35976316162`
+`35978004170`
 
 Job ID:
 
-`107557549784`
+`107562949326`
 
 Conclusion:
 
 **SUCCESS**
 
-Verified from remote GitHub Actions:
+Verified remotely:
 
-- deterministic `npm ci`: PASS
+- deterministic dependency install: PASS
 - TypeScript typecheck: PASS
-- 26 Vitest files: PASS
-- 462 Vitest tests: PASS
-- M4.3.1 RetailCo authority-drift: 9/9 PASS
-- M4.3.1 generic/non-bleed suite: 7/7 PASS
-- M4.3 web integration: 8/8 PASS
-- workload visualisation adapter: 9/9 PASS
-- RetailCo Reference Lab: 10/10 PASS
+- unit tests: PASS
 - production build: PASS
+- 26 Vitest files passed
+- 466 Vitest tests passed
+- RetailCo Reference Lab: 10/10 passed
+- combined automated tests: **476**
+- M4.3.1 RetailCo authority-drift gate: 9/9 passed
+- M4.3.1 generic/non-bleed and semantic fidelity suite: 11/11 passed
+- M4.3 web integration suite: 8/8 passed
+- workload visualisation adapter: 9/9 passed
 
-The previous eight TypeScript blockers are resolved.
+## Final Semantic Audit
 
-## Accepted corrections
+### Results
 
-The second implementation correctly fixes:
+PASS.
 
-- unsupported `computeContractFingerprint` import;
-- optional metric assertion access;
-- `ExecutionEvidenceState` import source;
-- canonical `organisation` spelling;
-- Acceptance workload prerequisite field;
-- canonical Finding `deterministicReason`;
-- corroboration `countsMatch`;
-- raw artifact `k6Version`.
+Verified:
 
-The following M4.3.1 capabilities are also confirmed:
+- no RetailCo fallback metrics, run IDs, commit SHAs or units;
+- missing verdict renders governed absence rather than INCONCLUSIVE;
+- missing workload prerequisite does not become UNRESOLVED;
+- criterion identity no longer invents `crit-N`;
+- verdict reasons do not imply an evaluation when absent;
+- telemetry labels are project-neutral;
+- business events are presented generically when no source metric label exists;
+- Acceptance remains a read-only projection of canonical state;
+- RetailCo still renders the authoritative INCONCLUSIVE / UNRESOLVED distinction.
 
-- RetailCo authority-drift protection exists and runs through the deterministic engine chain;
-- generic non-RetailCo regressions exist;
-- WorkloadProfileChart no longer contains the RetailCo 8.75 / 8% / 109.375 relationship sentence;
-- unit fallbacks are removed from the shared chart;
-- TestDefinition schedule projection is outside React in a pure adapter;
-- Evidence component/lineage/readiness collections are dynamically iterated rather than hardcoded.
+### Findings
 
-## Remaining semantic blockers
+PASS.
 
-### 1. EvidencePage still invents component presence
+Verified:
 
-The work package requires each component to display only fields actually present and explicitly forbids invented statuses.
+- no default generation status, classification or verdict;
+- deterministic reason comes from canonical Finding data;
+- no invented root cause, assignee, severity, priority or ticket metadata;
+- zero-defect state is explained generically;
+- RetailCo remains exactly one `WORKLOAD_ATTAINMENT_UNRESOLVED` Finding and zero Defect Candidates.
 
-Current code:
+### Evidence
 
-`const isPresent = c.presenceStatus === 'PRESENT' || !c.presenceStatus;`
+PASS.
 
-and:
+Verified:
 
-`c.status || c.presenceStatus || 'PRESENT'`
+- package identity, digest, source execution, source Contract and source Test Definition are visible;
+- package generation status is source-driven;
+- components are dynamically projected;
+- absent component status does not become PRESENT;
+- lineage edges are dynamically projected;
+- missing lineage detail does not become `Bound`;
+- raw evidence inventory does not manufacture canonical presence states;
+- findings/defect counts preserve governed absence;
+- publication readiness is rendered from `publicationBundle.publicationReadiness`;
+- no destination or blocking reason is invented;
+- package VALID remains explicitly distinct from Acceptance INCONCLUSIVE;
+- RetailCo retains six verified lineage edges and DOWNLOAD/API readiness.
 
-This silently turns an absent `presenceStatus` into `PRESENT`.
+### Executions
 
-Required:
+PASS.
 
-- if `status` exists, render it;
-- if `presenceStatus` exists, render it;
-- if neither exists, render `NOT_SUPPLIED`;
-- do not style an absent state as present/verified.
+Verified:
 
-### 2. EvidencePage does not render all required package identity/binding fields
+- UI no longer claims active runner orchestration;
+- page is a factual governed execution record / ingress view;
+- no RetailCo metric or Test Definition fallback is injected;
+- duration is rendered from supplied execution state.
 
-M4.3.1 §4 explicitly requires exact rendering of:
+### Workload Visualisation
 
-- package id;
-- packageGenerationStatus;
-- package digest;
-- source execution run id;
-- source Contract;
-- source Test Definition;
-- Acceptance verdict;
-- Findings summary.
+PASS.
 
-Current EvidencePage does not render the package digest, source execution run id, source Contract identity or source Test Definition identity.
+Verified:
 
-Add these from the actual canonical package/state. No fallback IDs.
+- reusable chart is project-neutral;
+- no hardcoded RetailCo population relationship exists in shared chart code;
+- relationship text appears only when supplied;
+- missing units remain absent/NOT_SUPPLIED;
+- journey distribution is not normalised;
+- 100% distribution is described neutrally rather than as corroboration;
+- exact RetailCo scheduler points remain 0/300/1200/1320 at 0/109.375/109.375/0;
+- exact 55/20/15/8/2 journey distribution remains;
+- generic/custom schedules remain supported.
 
-### 3. EvidencePage contains unconditional integrity claims
+### Tests Page
 
-Current copy states:
+PASS.
 
-`Cryptographic digests of all components verified against SHA-256 bindings. Zero missing files or integrity errors.`
+Verified:
 
-That statement is rendered regardless of the package's actual status/components/issues.
+- TestDefinition-to-visualisation conversion is outside React in the pure presentation adapter;
+- shared schedule copy no longer contains the RetailCo 8.75 orders/second example;
+- missing stage description renders governed absence rather than an invented `Execution stage` description;
+- touched execution-model/population/rate fields preserve absence.
 
-This is an audit-facing invented conclusion.
+### Authority Drift Protection
 
-Required:
+PASS.
 
-- either derive the statement from canonical package evidence;
-- or replace it with neutral explanatory text that does not assert current-package validity.
+The browser-safe RetailCo reference snapshot is protected by a deterministic rebuild regression using the canonical engine path:
 
-The separate educational statement explaining what a VALID package means may remain, provided it is clearly general and the actual package status is source-driven.
+Contract → Test Definition → raw evidence ingestion → Acceptance → Findings → Evidence Package → Results Report → Publication Bundle.
 
-### 4. Evidence findings counts default missing evidence to zero
+The gate verifies exact reference identities, digests, workload values, stage timing, journey mix, criterion results, Findings, lineage and publication readiness.
 
-Current code ultimately falls back to:
+## Non-Blocking Observations
 
-- total findings = `0`;
-- defect candidates = `0`.
+A few UI strings remain explanatory rather than canonical data fields, for example general descriptions of cryptographic package semantics. These do not substitute engineering state and are not closure blockers.
 
-For an incomplete/audit-only package, missing summary data is not the same as a canonical count of zero.
+Historical/product wording elsewhere in the portal should continue to be audited as later productisation work replaces the mock/reference service layer, but no remaining issue in the M4.3 touched surface warrants another correction gate.
 
-Required:
+## Closure Decision
 
-- preserve exact zero where a source collection/count is present and empty/zero;
-- render `NOT_SUPPLIED` when the source count is absent.
+All M4.3.1 Definition of Done conditions are satisfied:
 
-### 5. Evidence lineage details invent `Bound`
+1. touched portal pages contain no fallback engineering facts;
+2. Evidence dynamically projects canonical components, lineage and readiness;
+3. shared workload chart is project-neutral;
+4. Test Definition schedule projection is outside React;
+5. RetailCo browser snapshot is authority-drift protected;
+6. generic non-RetailCo regressions prove no reference bleed;
+7. authoritative RetailCo UI semantics remain exact;
+8. normal GitHub CI is green.
 
-Current lineage table uses:
+**M4.3.1 is closed.**
 
-`edge.details || 'Bound'`
+**M4.3 is approved for formal closure.**
 
-M4.3.1 requires rendering the exact lineage edge fields. A missing detail field must not become a new semantic statement.
+Programme state:
 
-Use exact details if present, otherwise `NOT_SUPPLIED` or omit the column content.
-
-### 6. Evidence raw-artifact fallback invents `PRESENT`
-
-When projecting `rawArtifactSummary.files`, EvidencePage prints `PRESENT` even though `RawEvidenceFileItem` does not carry a canonical presence status.
-
-The existence of a summary record may be displayed as a recorded file, but do not manufacture a canonical `PRESENT` status.
-
-Use neutral UI wording or governed absence.
-
-### 7. Publication readiness invents blocking explanations
-
-The destination cards correctly iterate `publicationBundle.publicationReadiness`, but when `blockingReasons` is empty the UI fabricates:
-
-- `Ready for export`; or
-- `Destination unconfigured`.
-
-M4.3.1 §5 requires exact status and exact blocking reasons.
-
-Required:
-
-- render the canonical readiness status;
-- render supplied blocking reasons only;
-- if no blocking reason exists, omit it or show `NOT_SUPPLIED`;
-- never infer that an arbitrary non-READY destination is unconfigured.
-
-### 8. ExecutionsPage still overclaims runner orchestration
-
-M4.3.1 §6 explicitly requires this copy to be corrected.
-
-Current page still says:
-
-- `Customer-Controlled Test Runner Orchestration`;
-- `PECP orchestrates execution...`;
-- `The execution workbench orchestrates k6 runners...`.
-
-Live runner orchestration/control is not implemented in M4.3.
-
-Required:
-
-Use factual wording such as:
-
-- `Governed Execution Record`;
-- `Execution Evidence & Ingress`;
-- `Recorded customer-controlled runner execution`.
-
-Do not claim active Docker/Podman/Kubernetes/native runner orchestration.
-
-### 9. ResultsPage still contains RetailCo-specific presentation language
-
-The page is intended to be project-neutral, but the shared Results view currently contains:
-
-- `Telemetry & Reference Lab Corroboration`;
-- `SUT Corroborated Orders Created`.
-
-These labels are RetailCo/reference-domain semantics and appear even for a generic project.
-
-Required:
-
-- use generic labels sourced from canonical metric metadata where available;
-- otherwise use neutral labels such as `Business Events Observed` and `Telemetry Corroboration`.
-
-### 10. ResultsPage invents a criterion identifier when absent
-
-Current code displays:
-
-`evalItem.criterionId || evalItem.key || \`crit-${idx}\``
-
-The synthetic `crit-N` identifier is an invented engineering identity.
-
-Required:
-
-- use canonical criterion id/key when present;
-- otherwise render `NOT_SUPPLIED`.
-
-React list keys may use the local array index internally, but the displayed engineering identity must not be invented.
-
-### 11. ResultsPage contains a verdict-reason fallback that can imply evaluation
-
-If no verdict reasons are supplied, the UI currently says:
-
-`Evaluated by canonical Acceptance Engine against approved Performance Contract.`
-
-For an incomplete/audit-only state this can assert an evaluation/approval relationship that is not actually present.
-
-Required:
-
-- render supplied verdict reasons;
-- otherwise show neutral governed absence such as `No verdict reason supplied` / `NOT_SUPPLIED`.
-
-### 12. TestsPage still contains RetailCo-specific semantic bleed
-
-The shared Tests page currently states:
-
-`Workload demand (e.g. 8.75 orders/second)...`
-
-That RetailCo value is displayed as generic educational copy on any project.
-
-M4.3.1 exists specifically to ensure touched views are faithful for any project rather than RetailCo-shaped screens.
-
-Required:
-
-- remove the RetailCo numeric example from shared project UI;
-- use a generic statement without a project-specific value.
-
-The page also still uses:
-
-`stage.description ?? 'Execution stage'`
-
-The original M4.3 work package explicitly identified invented generic stage descriptions as a fallback to remove.
-
-Use exact description or `NOT_SUPPLIED`.
-
-## Regression coverage required
-
-Extend the generic M4.3.1 suite so it proves:
-
-1. a component with absent status/presenceStatus does not render `PRESENT`;
-2. missing package findings summary does not become canonical zero;
-3. absent lineage details do not become `Bound`;
-4. publication readiness with no blockingReasons does not invent `Destination unconfigured`;
-5. generic Results does not render `Orders Created` or `Reference Lab`;
-6. missing criterion ID/key does not render a synthetic `crit-N`;
-7. generic Tests view contains no RetailCo `8.75 orders/second` example;
-8. Executions copy does not claim active runner orchestration.
-
-Preserve all existing RetailCo exact-value and drift tests.
-
-## Closure condition
-
-M4.3.1 and M4.3 may close when:
-
-- the semantic blockers above are removed;
-- the expanded zero-invention regressions pass;
-- authoritative RetailCo remains exact;
-- normal GitHub CI is SUCCESS.
-
-No new product scope is required.
-
-## Programme state
-
-`M4.2 ✅ → M4.3 core implemented → M4.3.1 remote CI ✅ / semantic fidelity correction required → M4.3 NOT CLOSED`
+`M4.2 ✅ → M4.3 ✅`
