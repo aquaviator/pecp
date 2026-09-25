@@ -142,7 +142,8 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     credentialRepo,
     membershipRepo,
     sessionRepo,
-    auditService
+    auditService,
+    db
   );
 
   let service: PlatformApplicationService;
@@ -213,7 +214,11 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     if (rawToken) {
       const valid = await sessionService.validateSession(rawToken);
       if (valid) {
-        const principal = await localAuthProvider.buildPrincipal(valid.user.id, valid.session.id);
+        const principal = await localAuthProvider.buildPrincipal(
+          valid.user.id,
+          valid.session.id,
+          valid.session.authenticatedAt
+        );
         if (principal) {
           request.principal = principal;
         }
@@ -336,6 +341,7 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     });
 
     authResult.principal.sessionId = sessionResult.session.id;
+    authResult.principal.authenticatedAt = sessionResult.session.authenticatedAt;
 
     await auditService.record({
       actor: authResult.principal,
@@ -410,25 +416,23 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     try {
       await identityAdminService.changePassword(principal, body.currentPassword, body.newPassword);
-      // Re-issue a session for the current actor so they don't get kicked out immediately
-      const newSession = await sessionService.createSession(principal.userId);
-      const csrfToken = SessionService.generateCsrfToken();
-
-      reply.setCookie(SESSION_COOKIE_NAME, newSession.rawToken, {
+      // Forced reauthentication: revoke all sessions, clear cookies, force explicit login
+      reply.clearCookie(SESSION_COOKIE_NAME, {
         path: '/',
         httpOnly: true,
         sameSite: 'lax',
         secure: secureCookie
       });
-
-      reply.setCookie(CSRF_COOKIE_NAME, csrfToken, {
+      reply.clearCookie(CSRF_COOKIE_NAME, {
         path: '/',
         httpOnly: false,
         sameSite: 'lax',
         secure: secureCookie
       });
-
-      return { success: true, csrfToken };
+      return {
+        success: true,
+        message: 'Password changed successfully. Please log in again.'
+      };
     } catch (err: any) {
       reply.status(400).send({
         error: {
@@ -459,6 +463,14 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
   app.post('/api/v1/admin/users', async (request, reply) => {
     const principal = request.principal!;
     if (principal.platformRole !== 'PLATFORM_ADMIN') {
+      await auditService.record({
+        actor: principal,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'USER',
+        outcome: 'DENIED',
+        reason: 'PLATFORM_ADMIN role required',
+        metadata: { attemptedAction: 'USER_CREATE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -531,6 +543,15 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     const body = request.body as any;
 
     if (principal.platformRole !== 'PLATFORM_ADMIN') {
+      await auditService.record({
+        actor: principal,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'USER',
+        targetId: userId,
+        outcome: 'DENIED',
+        reason: 'PLATFORM_ADMIN role required',
+        metadata: { attemptedAction: 'USER_STATUS_CHANGE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -570,6 +591,15 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     const body = request.body as any;
 
     if (principal.platformRole !== 'PLATFORM_ADMIN') {
+      await auditService.record({
+        actor: principal,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'USER',
+        targetId: userId,
+        outcome: 'DENIED',
+        reason: 'PLATFORM_ADMIN role required',
+        metadata: { attemptedAction: 'PASSWORD_RESET' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -609,12 +639,12 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     const principal = request.principal!;
     const { organisationId } = request.params as { organisationId: string };
 
-    const hasRead = AuthorizationPolicy.hasPermission(principal, 'ORGANISATION_READ', organisationId);
-    if (!hasRead) {
+    const canManage = AuthorizationPolicy.hasPermission(principal, 'ORGANISATION_MANAGE_MEMBERS', organisationId);
+    if (!canManage) {
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
-          message: 'Access denied to organisation memberships'
+          message: 'ORGANISATION_MANAGE_MEMBERS permission required to view organisation memberships'
         }
       });
       return;
@@ -631,6 +661,15 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     const canManage = AuthorizationPolicy.hasPermission(principal, 'ORGANISATION_MANAGE_MEMBERS', organisationId);
     if (!canManage) {
+      await auditService.record({
+        actor: principal,
+        organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'MEMBERSHIP',
+        outcome: 'DENIED',
+        reason: 'ORGANISATION_MANAGE_MEMBERS permission required',
+        metadata: { attemptedAction: 'MEMBERSHIP_CREATE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -675,6 +714,16 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     const canManage = AuthorizationPolicy.hasPermission(principal, 'ORGANISATION_MANAGE_MEMBERS', organisationId);
     if (!canManage) {
+      await auditService.record({
+        actor: principal,
+        organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${userId}`,
+        outcome: 'DENIED',
+        reason: 'ORGANISATION_MANAGE_MEMBERS permission required',
+        metadata: { attemptedAction: 'MEMBERSHIP_ROLE_CHANGE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -718,6 +767,16 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     const canManage = AuthorizationPolicy.hasPermission(principal, 'ORGANISATION_MANAGE_MEMBERS', organisationId);
     if (!canManage) {
+      await auditService.record({
+        actor: principal,
+        organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${userId}`,
+        outcome: 'DENIED',
+        reason: 'ORGANISATION_MANAGE_MEMBERS permission required',
+        metadata: { attemptedAction: 'MEMBERSHIP_REVOKE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -897,6 +956,16 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       AuthorizationPolicy.hasPermission(principal, 'ORGANISATION_MANAGE_MEMBERS', organisationId);
 
     if (!canManage) {
+      await auditService.record({
+        actor: principal,
+        organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'ORGANISATION',
+        targetId: organisationId,
+        outcome: 'DENIED',
+        reason: 'Admin authority required to update organisation status',
+        metadata: { attemptedAction: 'ORGANISATION_STATUS_CHANGE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -1027,6 +1096,15 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     if (targetOrg) {
       const canCreate = AuthorizationPolicy.hasPermission(principal, 'PROJECT_CREATE', targetOrg.id);
       if (!canCreate) {
+        await auditService.record({
+          actor: principal,
+          organisationId: targetOrg.id,
+          action: 'AUTHORIZATION_DENIED',
+          targetType: 'PROJECT',
+          outcome: 'DENIED',
+          reason: 'PROJECT_CREATE permission required in target organisation',
+          metadata: { attemptedAction: 'PROJECT_CREATE' }
+        });
         reply.status(403).send({
           error: {
             code: 'FORBIDDEN',
@@ -1038,6 +1116,14 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     } else {
       // Auto-creating an organisation requires PLATFORM_ADMIN
       if (principal.platformRole !== 'PLATFORM_ADMIN') {
+        await auditService.record({
+          actor: principal,
+          action: 'AUTHORIZATION_DENIED',
+          targetType: 'ORGANISATION',
+          outcome: 'DENIED',
+          reason: `Organisation '${body.organisation.trim()}' does not exist and only PLATFORM_ADMIN may create organisations`,
+          metadata: { attemptedAction: 'ORGANISATION_CREATE' }
+        });
         reply.status(403).send({
           error: {
             code: 'FORBIDDEN',
@@ -1122,6 +1208,17 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     const canUpdate = AuthorizationPolicy.hasPermission(principal, 'PROJECT_UPDATE', project.organisationId);
     if (!canUpdate) {
+      await auditService.record({
+        actor: principal,
+        projectId,
+        organisationId: project.organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'PROJECT',
+        targetId: projectId,
+        outcome: 'DENIED',
+        reason: 'PROJECT_UPDATE permission required',
+        metadata: { attemptedAction: 'PROJECT_UPDATE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -1189,6 +1286,17 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     const canArchive = AuthorizationPolicy.hasPermission(principal, 'PROJECT_ARCHIVE', project.organisationId);
     if (!canArchive) {
+      await auditService.record({
+        actor: principal,
+        projectId,
+        organisationId: project.organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'PROJECT',
+        targetId: projectId,
+        outcome: 'DENIED',
+        reason: 'PROJECT_ARCHIVE permission required',
+        metadata: { attemptedAction: 'PROJECT_ARCHIVE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -1324,6 +1432,17 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     const canApprove = AuthorizationPolicy.hasPermission(principal, 'INTELLIGENCE_APPROVE', project.organisationId);
 
     if (!canResolve || !canApprove) {
+      await auditService.record({
+        actor: principal,
+        projectId,
+        organisationId: project.organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'INTELLIGENCE_ITEM',
+        targetId: itemId,
+        outcome: 'DENIED',
+        reason: 'Both INTELLIGENCE_RESOLVE and INTELLIGENCE_APPROVE permissions are required',
+        metadata: { attemptedAction: 'INTELLIGENCE_CONFLICT_RESOLVE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
@@ -1381,6 +1500,17 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
 
     const canApprove = AuthorizationPolicy.hasPermission(principal, 'INTELLIGENCE_APPROVE', project.organisationId);
     if (!canApprove) {
+      await auditService.record({
+        actor: principal,
+        projectId,
+        organisationId: project.organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'INTELLIGENCE_ITEM',
+        targetId: itemId,
+        outcome: 'DENIED',
+        reason: 'INTELLIGENCE_APPROVE permission required',
+        metadata: { attemptedAction: 'INTELLIGENCE_APPROVE' }
+      });
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',

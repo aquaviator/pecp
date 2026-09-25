@@ -1,113 +1,66 @@
 // ApiProjectService
-// Defined according to M5.0 Work Package §6
+// Defined according to M5.0 Work Package §6 & M5.1 PM Review Blocker 3
 // Production-shaped Web API adapter for project operations.
-// Invariant: Network/API errors are preserved as real errors and NEVER silently fall back to mocks.
+// Refactored to use authenticated ApiClient with credentialed cookies, CSRF injection, and zero mock fallback.
 
 import { ProjectSummary } from '../../types';
 import { IProjectService, CreateProjectRequest } from '../interfaces/IProjectService';
+import { ApiClient, defaultApiClient } from './apiClient';
 
 export class ApiProjectService implements IProjectService {
-  private readonly baseUrl: string;
+  private readonly client: ApiClient;
 
-  constructor(baseUrl?: string) {
-    this.baseUrl = (baseUrl || (import.meta as any).env?.VITE_PECP_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+  constructor(clientOrBaseUrl?: ApiClient | string) {
+    if (clientOrBaseUrl instanceof ApiClient) {
+      this.client = clientOrBaseUrl;
+    } else if (typeof clientOrBaseUrl === 'string') {
+      this.client = new ApiClient(clientOrBaseUrl);
+    } else {
+      this.client = defaultApiClient;
+    }
   }
 
   async getProjects(): Promise<ProjectSummary[]> {
-    const url = `${this.baseUrl}/api/v1/projects`;
-    let response: Response;
+    let data: any;
     try {
-      response = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiProjectService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // use default message
+      data = await this.client.get<any>('/api/v1/projects');
+    } catch (err: any) {
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiProjectService: ${err.message}`);
       }
-      throw new Error(errorMsg);
+      throw err;
     }
 
-    const data = await response.json();
     if (!data || !Array.isArray(data.items)) {
       throw new Error(
-        `ApiProjectService: Malformed API response from ${url}: expected '{ items: [...] }' envelope`
+        `ApiProjectService: Malformed API response from ${this.client.baseUrl}/api/v1/projects: expected '{ items: [...] }' envelope`
       );
     }
     return data.items;
   }
 
   async getProjectById(id: string): Promise<ProjectSummary | null> {
-    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(id)}`;
-    let response: Response;
     try {
-      response = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiProjectService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // use default message
+      return await this.client.get<ProjectSummary>(`/api/v1/projects/${encodeURIComponent(id)}`);
+    } catch (err: any) {
+      if (err.status === 404) {
+        return null;
       }
-      throw new Error(errorMsg);
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiProjectService: ${err.message}`);
+      }
+      throw err;
     }
-
-    return response.json();
   }
 
   async createProject(request: CreateProjectRequest): Promise<ProjectSummary> {
-    const url = `${this.baseUrl}/api/v1/projects`;
-    let response: Response;
     try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(request)
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiProjectService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // use default message
+      return await this.client.post<ProjectSummary>('/api/v1/projects', request);
+    } catch (err: any) {
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiProjectService: ${err.message}`);
       }
-      throw new Error(errorMsg);
+      throw err;
     }
-
-    return response.json();
   }
 }

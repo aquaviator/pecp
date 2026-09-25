@@ -35,15 +35,15 @@ export type ProjectTab =
 interface ProjectSubnavProps {
   activeTab: ProjectTab;
   onSelectTab: (tab: ProjectTab) => void;
-  conflictsCount?: number;
+  conflictsCount?: number | null;
 }
 
 export const ProjectSubnav: React.FC<ProjectSubnavProps> = ({
   activeTab,
   onSelectTab,
-  conflictsCount = 0
+  conflictsCount = null
 }) => {
-  const tabs: { id: ProjectTab; label: string; icon: React.FC<{ className?: string }>; badge?: number }[] = [
+  const tabs: { id: ProjectTab; label: string; icon: React.FC<{ className?: string }>; badge?: number | null }[] = [
     { id: 'OVERVIEW', label: 'Overview', icon: Activity },
     { id: 'INTELLIGENCE', label: 'Intelligence', icon: FileSearch, badge: conflictsCount },
     { id: 'ARCHITECTURE', label: 'Architecture', icon: Network },
@@ -80,7 +80,7 @@ export const ProjectSubnav: React.FC<ProjectSubnavProps> = ({
               >
                 <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-sky-400' : 'text-slate-500'}`} />
                 <span>{tab.label}</span>
-                {tab.badge !== undefined && tab.badge > 0 && (
+                {tab.badge !== undefined && tab.badge !== null && tab.badge > 0 && (
                   <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-purple-950 text-purple-300 border border-purple-800">
                     {tab.badge}
                   </span>

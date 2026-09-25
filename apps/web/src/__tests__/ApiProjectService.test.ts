@@ -46,7 +46,8 @@ describe('M5.0 ApiProjectService Web Adapter', () => {
     expect(projects).toEqual(mockProjects);
     expect(global.fetch).toHaveBeenCalledWith('http://localhost:3001/api/v1/projects', {
       method: 'GET',
-      headers: { Accept: 'application/json' }
+      headers: { Accept: 'application/json' },
+      credentials: 'include'
     });
   });
 
@@ -126,6 +127,7 @@ describe('M5.0 ApiProjectService Web Adapter', () => {
         'Content-Type': 'application/json',
         Accept: 'application/json'
       },
+      credentials: 'include',
       body: JSON.stringify(request)
     });
   });
@@ -176,6 +178,37 @@ describe('M5.0 ApiProjectService Web Adapter', () => {
 
     await expect(service.getProjects()).rejects.toThrow(
       /Malformed API response .* expected '{ items: \[\.\.\.\] }' envelope/
+    );
+  });
+
+  it('6. injects X-PECP-CSRF token on mutation when pecp_csrf cookie is present', async () => {
+    vi.stubGlobal('document', {
+      cookie: 'pecp_csrf=project-csrf-token-xyz'
+    });
+
+    const request: CreateProjectRequest = {
+      name: 'CSRF Project',
+      organisation: 'Acme',
+      intent: 'DISCOVERY',
+      description: 'CSRF test',
+      creationMethod: 'BRIEF'
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'proj-csrf', ...request, createdDate: '2026-09-24T00:00:00.000Z', status: 'ACTIVE' })
+    });
+
+    await service.createProject(request);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:3001/api/v1/projects',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-PECP-CSRF': 'project-csrf-token-xyz'
+        })
+      })
     );
   });
 });

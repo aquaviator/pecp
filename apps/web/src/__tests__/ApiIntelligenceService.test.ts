@@ -64,7 +64,8 @@ describe('M5.0 ApiIntelligenceService Web Adapter', () => {
     expect(items).toEqual(sampleItems);
     expect(global.fetch).toHaveBeenCalledWith('http://localhost:3001/api/v1/projects/proj-123/intelligence', {
       method: 'GET',
-      headers: { Accept: 'application/json' }
+      headers: { Accept: 'application/json' },
+      credentials: 'include'
     });
 
     // Check exact provenance fields
@@ -181,6 +182,29 @@ describe('M5.0 ApiIntelligenceService Web Adapter', () => {
 
     await expect(service.getIntelligenceItems('proj-123')).rejects.toThrow(
       /ApiIntelligenceService: Malformed API response .* expected '{ items: \[\.\.\.\] }' envelope/
+    );
+  });
+
+  it('7. injects X-PECP-CSRF token on mutation when pecp_csrf cookie is present', async () => {
+    vi.stubGlobal('document', {
+      cookie: 'pecp_csrf=test-csrf-token-123'
+    });
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => sampleItems[0]
+    });
+
+    await service.resolveIntelligenceConflict('proj-123', 'item-1', 'cand-1');
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:3001/api/v1/projects/proj-123/intelligence/item-1/resolve',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-PECP-CSRF': 'test-csrf-token-123'
+        })
+      })
     );
   });
 });

@@ -65,12 +65,17 @@ export interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{
+  children: React.ReactNode;
+  initialValue?: Partial<AuthContextValue>;
+}> = ({ children, initialValue }) => {
   const { authService, mode } = useServices();
-  const [user, setUser] = useState<UserSummary | null>(null);
-  const [principal, setPrincipal] = useState<AuthenticatedPrincipal | null>(null);
-  const [permissions, setPermissions] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<UserSummary | null>(initialValue?.user ?? null);
+  const [principal, setPrincipal] = useState<AuthenticatedPrincipal | null>(initialValue?.principal ?? null);
+  const [permissions, setPermissions] = useState<string[]>(initialValue?.permissions ?? []);
+  const [isLoading, setIsLoading] = useState<boolean>(
+    initialValue?.isLoading !== undefined ? initialValue.isLoading : mode === 'API'
+  );
 
   const refreshUser = useCallback(async () => {
     try {

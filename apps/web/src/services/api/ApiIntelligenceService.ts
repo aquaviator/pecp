@@ -1,83 +1,58 @@
 // ApiIntelligenceService
-// Defined according to M5.0 Work Package §7 and PM Review Blockers 3 & 4
+// Defined according to M5.0 Work Package §7 & M5.1 PM Review Blocker 3
 // Production-shaped Web API adapter for persistent project intelligence.
-// Invariant: Network/API errors are preserved as real errors and NEVER silently fall back to mocks.
-// Mutation/approval methods explicitly reject because authenticated actor identity is deferred to M5.1.
+// Refactored to use authenticated ApiClient with credentialed cookies, CSRF injection, and zero mock fallback.
 
 import { IntelligenceItem, IntelligenceReviewSummary } from '../../types';
 import { IIntelligenceService } from '../interfaces/IIntelligenceService';
+import { ApiClient, defaultApiClient } from './apiClient';
 
 export class ApiIntelligenceService implements IIntelligenceService {
-  private readonly baseUrl: string;
+  private readonly client: ApiClient;
 
-  constructor(baseUrl?: string) {
-    this.baseUrl = (baseUrl || (import.meta as any).env?.VITE_PECP_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+  constructor(clientOrBaseUrl?: ApiClient | string) {
+    if (clientOrBaseUrl instanceof ApiClient) {
+      this.client = clientOrBaseUrl;
+    } else if (typeof clientOrBaseUrl === 'string') {
+      this.client = new ApiClient(clientOrBaseUrl);
+    } else {
+      this.client = defaultApiClient;
+    }
   }
 
   async getIntelligenceItems(projectId: string): Promise<IntelligenceItem[]> {
-    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/intelligence`;
-    let response: Response;
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/intelligence`;
+    let data: any;
     try {
-      response = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiIntelligenceService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // use default status message
+      data = await this.client.get<any>(path);
+    } catch (err: any) {
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiIntelligenceService: ${err.message}`);
       }
-      throw new Error(errorMsg);
+      throw err;
     }
 
-    const data = await response.json();
     if (!data || !Array.isArray(data.items)) {
       throw new Error(
-        `ApiIntelligenceService: Malformed API response from ${url}: expected '{ items: [...] }' envelope`
+        `ApiIntelligenceService: Malformed API response from ${this.client.baseUrl}${path}: expected '{ items: [...] }' envelope`
       );
     }
     return data.items;
   }
 
   async getIntelligenceItemById(projectId: string, itemId: string): Promise<IntelligenceItem | null> {
-    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}`;
-    let response: Response;
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}`;
     try {
-      response = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiIntelligenceService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // use default status message
+      return await this.client.get<IntelligenceItem>(path);
+    } catch (err: any) {
+      if (err.status === 404) {
+        return null;
       }
-      throw new Error(errorMsg);
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiIntelligenceService: ${err.message}`);
+      }
+      throw err;
     }
-
-    return response.json();
   }
 
   async getIntelligenceSummary(_projectId: string): Promise<IntelligenceReviewSummary> {
@@ -92,45 +67,15 @@ export class ApiIntelligenceService implements IIntelligenceService {
     chosenCandidateId: string,
     rationale?: string
   ): Promise<IntelligenceItem> {
-    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}/resolve`;
-    const csrfToken = typeof document !== 'undefined'
-      ? (document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/) ? decodeURIComponent(document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/)![1]) : undefined)
-      : undefined;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-    if (csrfToken) {
-      headers['X-PECP-CSRF'] = csrfToken;
-    }
-
-    let response: Response;
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}/resolve`;
     try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({ chosenCandidateId, rationale })
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiIntelligenceService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // default message
+      return await this.client.post<IntelligenceItem>(path, { chosenCandidateId, rationale });
+    } catch (err: any) {
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiIntelligenceService: ${err.message}`);
       }
-      throw new Error(errorMsg);
+      throw err;
     }
-
-    return response.json();
   }
 
   async approveIntelligenceItem(
@@ -138,44 +83,14 @@ export class ApiIntelligenceService implements IIntelligenceService {
     itemId: string,
     _approverName?: string
   ): Promise<IntelligenceItem> {
-    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}/approve`;
-    const csrfToken = typeof document !== 'undefined'
-      ? (document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/) ? decodeURIComponent(document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/)![1]) : undefined)
-      : undefined;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-    if (csrfToken) {
-      headers['X-PECP-CSRF'] = csrfToken;
-    }
-
-    let response: Response;
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}/approve`;
     try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({})
-      });
-    } catch (networkError: any) {
-      throw new Error(`ApiIntelligenceService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
-    }
-
-    if (!response.ok) {
-      let errorMsg = `PECP API error: HTTP ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        // default message
+      return await this.client.post<IntelligenceItem>(path, {});
+    } catch (err: any) {
+      if (err.message && err.message.startsWith('Failed to connect to PECP API')) {
+        throw new Error(`ApiIntelligenceService: ${err.message}`);
       }
-      throw new Error(errorMsg);
+      throw err;
     }
-
-    return response.json();
   }
 }

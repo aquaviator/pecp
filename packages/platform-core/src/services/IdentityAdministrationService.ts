@@ -1,6 +1,5 @@
 // IdentityAdministrationService - User, Credential, and Membership Governance
 // Defined according to M5.1 Work Package §8, §12, §13 & §19
-
 import * as crypto from 'node:crypto';
 import { IUserRepository } from '../repositories/IUserRepository.js';
 import { ILocalCredentialRepository } from '../repositories/ILocalCredentialRepository.js';
@@ -8,6 +7,7 @@ import { IOrganisationMembershipRepository } from '../repositories/IOrganisation
 import { ISessionRepository } from '../repositories/ISessionRepository.js';
 import { AuditService } from './AuditService.js';
 import { PasswordHasher } from './PasswordHasher.js';
+import { IUnitOfWork } from '../transactions/IUnitOfWork.js';
 import {
   User,
   UserStatus,
@@ -24,8 +24,16 @@ export class IdentityAdministrationService {
     private credentialRepo: ILocalCredentialRepository,
     private membershipRepo: IOrganisationMembershipRepository,
     private sessionRepo: ISessionRepository,
-    private auditService: AuditService
+    private auditService: AuditService,
+    private unitOfWork?: IUnitOfWork
   ) {}
+
+  private async withTransaction<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.unitOfWork) {
+      return this.unitOfWork.execute(operation);
+    }
+    return operation();
+  }
 
   async createUser(
     actor: AuthenticatedPrincipal,
@@ -64,34 +72,36 @@ export class IdentityAdministrationService {
       updatedAt: now
     };
 
-    const created = await this.userRepo.create(user);
+    return this.withTransaction(async () => {
+      const created = await this.userRepo.create(user);
 
-    if (input.password) {
-      const hashResult = await PasswordHasher.hash(input.password);
-      await this.credentialRepo.save({
-        userId: created.id,
-        algorithm: hashResult.algorithm,
-        salt: hashResult.salt,
-        passwordHash: hashResult.passwordHash,
-        paramsJson: hashResult.paramsJson,
-        updatedAt: now
-      });
-    }
-
-    await this.auditService.record({
-      actor,
-      action: 'USER_CREATE',
-      targetType: 'USER',
-      targetId: created.id,
-      outcome: 'SUCCESS',
-      metadata: {
-        email: created.email,
-        displayName: created.displayName,
-        platformRole: created.platformRole
+      if (input.password) {
+        const hashResult = await PasswordHasher.hash(input.password);
+        await this.credentialRepo.save({
+          userId: created.id,
+          algorithm: hashResult.algorithm,
+          salt: hashResult.salt,
+          passwordHash: hashResult.passwordHash,
+          paramsJson: hashResult.paramsJson,
+          updatedAt: now
+        });
       }
-    });
 
-    return created;
+      await this.auditService.record({
+        actor,
+        action: 'USER_CREATE',
+        targetType: 'USER',
+        targetId: created.id,
+        outcome: 'SUCCESS',
+        metadata: {
+          email: created.email,
+          displayName: created.displayName,
+          platformRole: created.platformRole
+        }
+      });
+
+      return created;
+    });
   }
 
   async updateUserStatus(
@@ -116,35 +126,37 @@ export class IdentityAdministrationService {
       throw new Error('User not found');
     }
 
-    if (status === 'DISABLED') {
-      if (targetUser.platformRole === 'PLATFORM_ADMIN') {
-        const activeAdmins = await this.userRepo.countActivePlatformAdmins();
-        if (activeAdmins <= 1) {
-          throw new Error('Cannot disable the only remaining active PLATFORM_ADMIN');
+    return this.withTransaction(async () => {
+      if (status === 'DISABLED') {
+        if (targetUser.platformRole === 'PLATFORM_ADMIN') {
+          const activeAdmins = await this.userRepo.countActivePlatformAdmins();
+          if (activeAdmins <= 1) {
+            throw new Error('Cannot disable the only remaining active PLATFORM_ADMIN');
+          }
         }
+        // Revoke all sessions for disabled user
+        await this.sessionRepo.revokeAllForUser(userId, new Date().toISOString());
       }
-      // Revoke all sessions for disabled user
-      await this.sessionRepo.revokeAllForUser(userId, new Date().toISOString());
-    }
 
-    const updatedUser: User = {
-      ...targetUser,
-      status,
-      updatedAt: new Date().toISOString()
-    };
+      const updatedUser: User = {
+        ...targetUser,
+        status,
+        updatedAt: new Date().toISOString()
+      };
 
-    const saved = await this.userRepo.update(updatedUser);
+      const saved = await this.userRepo.update(updatedUser);
 
-    await this.auditService.record({
-      actor,
-      action: status === 'DISABLED' ? 'USER_DISABLE' : 'USER_ENABLE',
-      targetType: 'USER',
-      targetId: userId,
-      outcome: 'SUCCESS',
-      metadata: { previousStatus: targetUser.status, newStatus: status }
+      await this.auditService.record({
+        actor,
+        action: status === 'DISABLED' ? 'USER_DISABLE' : 'USER_ENABLE',
+        targetType: 'USER',
+        targetId: userId,
+        outcome: 'SUCCESS',
+        metadata: { previousStatus: targetUser.status, newStatus: status }
+      });
+
+      return saved;
     });
-
-    return saved;
   }
 
   async resetPassword(
@@ -173,24 +185,26 @@ export class IdentityAdministrationService {
     const hashResult = await PasswordHasher.hash(newPassword);
     const now = new Date().toISOString();
 
-    await this.credentialRepo.save({
-      userId,
-      algorithm: hashResult.algorithm,
-      salt: hashResult.salt,
-      passwordHash: hashResult.passwordHash,
-      paramsJson: hashResult.paramsJson,
-      updatedAt: now
-    });
+    await this.withTransaction(async () => {
+      await this.credentialRepo.save({
+        userId,
+        algorithm: hashResult.algorithm,
+        salt: hashResult.salt,
+        passwordHash: hashResult.passwordHash,
+        paramsJson: hashResult.paramsJson,
+        updatedAt: now
+      });
 
-    // Invalidate existing sessions
-    await this.sessionRepo.revokeAllForUser(userId, now);
+      // Invalidate existing sessions
+      await this.sessionRepo.revokeAllForUser(userId, now);
 
-    await this.auditService.record({
-      actor,
-      action: 'PASSWORD_RESET',
-      targetType: 'USER',
-      targetId: userId,
-      outcome: 'SUCCESS'
+      await this.auditService.record({
+        actor,
+        action: 'PASSWORD_RESET',
+        targetType: 'USER',
+        targetId: userId,
+        outcome: 'SUCCESS'
+      });
     });
   }
 
@@ -228,24 +242,26 @@ export class IdentityAdministrationService {
     const hashResult = await PasswordHasher.hash(newPassword);
     const now = new Date().toISOString();
 
-    await this.credentialRepo.save({
-      userId,
-      algorithm: hashResult.algorithm,
-      salt: hashResult.salt,
-      passwordHash: hashResult.passwordHash,
-      paramsJson: hashResult.paramsJson,
-      updatedAt: now
-    });
+    await this.withTransaction(async () => {
+      await this.credentialRepo.save({
+        userId,
+        algorithm: hashResult.algorithm,
+        salt: hashResult.salt,
+        passwordHash: hashResult.passwordHash,
+        paramsJson: hashResult.paramsJson,
+        updatedAt: now
+      });
 
-    // Revoke all active sessions
-    await this.sessionRepo.revokeAllForUser(userId, now);
+      // Revoke all active sessions
+      await this.sessionRepo.revokeAllForUser(userId, now);
 
-    await this.auditService.record({
-      actor,
-      action: 'PASSWORD_CHANGE',
-      targetType: 'USER',
-      targetId: userId,
-      outcome: 'SUCCESS'
+      await this.auditService.record({
+        actor,
+        action: 'PASSWORD_CHANGE',
+        targetType: 'USER',
+        targetId: userId,
+        outcome: 'SUCCESS'
+      });
     });
   }
 
@@ -302,19 +318,21 @@ export class IdentityAdministrationService {
       createdByUserId: actor.userId
     };
 
-    await this.membershipRepo.save(membership);
+    return this.withTransaction(async () => {
+      await this.membershipRepo.save(membership);
 
-    await this.auditService.record({
-      actor,
-      organisationId,
-      action: 'MEMBERSHIP_CREATE',
-      targetType: 'MEMBERSHIP',
-      targetId: `${organisationId}:${targetUserId}`,
-      outcome: 'SUCCESS',
-      metadata: { targetUserId, role }
+      await this.auditService.record({
+        actor,
+        organisationId,
+        action: 'MEMBERSHIP_CREATE',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${targetUserId}`,
+        outcome: 'SUCCESS',
+        metadata: { targetUserId, role }
+      });
+
+      return membership;
     });
-
-    return membership;
   }
 
   async updateMembershipRole(
@@ -339,30 +357,32 @@ export class IdentityAdministrationService {
 
     if (current.role === 'ORG_ADMIN' && newRole !== 'ORG_ADMIN') {
       const adminCount = await this.membershipRepo.countActiveAdmins(organisationId);
-      if (adminCount <= 1 && !isPlatformAdmin) {
+      if (adminCount <= 1) {
         throw new Error('Cannot demote the last ORG_ADMIN for this organisation');
       }
     }
 
-    const updated: OrganisationMembership = {
-      ...current,
-      role: newRole,
-      updatedAt: new Date().toISOString()
-    };
+    return this.withTransaction(async () => {
+      const updated: OrganisationMembership = {
+        ...current,
+        role: newRole,
+        updatedAt: new Date().toISOString()
+      };
 
-    await this.membershipRepo.save(updated);
+      await this.membershipRepo.save(updated);
 
-    await this.auditService.record({
-      actor,
-      organisationId,
-      action: 'MEMBERSHIP_ROLE_CHANGE',
-      targetType: 'MEMBERSHIP',
-      targetId: `${organisationId}:${targetUserId}`,
-      outcome: 'SUCCESS',
-      metadata: { targetUserId, previousRole: current.role, newRole }
+      await this.auditService.record({
+        actor,
+        organisationId,
+        action: 'MEMBERSHIP_ROLE_CHANGE',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${targetUserId}`,
+        outcome: 'SUCCESS',
+        metadata: { targetUserId, previousRole: current.role, newRole }
+      });
+
+      return updated;
     });
-
-    return updated;
   }
 
   async revokeMembership(
@@ -386,27 +406,29 @@ export class IdentityAdministrationService {
 
     if (current.role === 'ORG_ADMIN') {
       const adminCount = await this.membershipRepo.countActiveAdmins(organisationId);
-      if (adminCount <= 1 && !isPlatformAdmin) {
+      if (adminCount <= 1) {
         throw new Error('Cannot revoke the last ORG_ADMIN for this organisation');
       }
     }
 
-    const updated: OrganisationMembership = {
-      ...current,
-      status: 'REVOKED',
-      updatedAt: new Date().toISOString()
-    };
+    await this.withTransaction(async () => {
+      const updated: OrganisationMembership = {
+        ...current,
+        status: 'REVOKED',
+        updatedAt: new Date().toISOString()
+      };
 
-    await this.membershipRepo.save(updated);
+      await this.membershipRepo.save(updated);
 
-    await this.auditService.record({
-      actor,
-      organisationId,
-      action: 'MEMBERSHIP_REVOKE',
-      targetType: 'MEMBERSHIP',
-      targetId: `${organisationId}:${targetUserId}`,
-      outcome: 'SUCCESS',
-      metadata: { targetUserId, revokedRole: current.role }
+      await this.auditService.record({
+        actor,
+        organisationId,
+        action: 'MEMBERSHIP_REVOKE',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${targetUserId}`,
+        outcome: 'SUCCESS',
+        metadata: { targetUserId, revokedRole: current.role }
+      });
     });
   }
 
@@ -415,9 +437,11 @@ export class IdentityAdministrationService {
     organisationId: string
   ): Promise<OrganisationMembership[]> {
     const isPlatformAdmin = actor.platformRole === 'PLATFORM_ADMIN';
-    const hasAccess = actor.memberships.some((m) => m.organisationId === organisationId);
+    const isOrgAdmin = actor.memberships.some(
+      (m) => m.organisationId === organisationId && m.role === 'ORG_ADMIN'
+    );
 
-    if (!isPlatformAdmin && !hasAccess) {
+    if (!isPlatformAdmin && !isOrgAdmin) {
       throw new Error('Forbidden: Access denied to organisation memberships');
     }
 

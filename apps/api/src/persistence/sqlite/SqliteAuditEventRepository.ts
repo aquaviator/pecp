@@ -119,4 +119,12 @@ export class SqliteAuditEventRepository implements IAuditRepository {
     const rows = raw.prepare(queryStr).all(...params) as unknown as AuditRow[];
     return rows.map((r) => this.mapRow(r));
   }
+
+  async listByOrganisation(organisationId: string): Promise<AuditEvent[]> {
+    return this.query({ organisationId, limit: 1000 });
+  }
+
+  async listAll(): Promise<AuditEvent[]> {
+    return this.query({ limit: 1000 });
+  }
 }

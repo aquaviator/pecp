@@ -1,6 +1,5 @@
 // LocalAuthenticationProvider - Embedded Local Scrypt Identity Provider
 // Defined according to M5.1 Work Package §5 & §6
-
 import { IAuthenticationProvider, AuthenticationResult } from './IAuthenticationProvider.js';
 import { IUserRepository } from '../repositories/IUserRepository.js';
 import { ILocalCredentialRepository } from '../repositories/ILocalCredentialRepository.js';
@@ -19,7 +18,6 @@ export class LocalAuthenticationProvider implements IAuthenticationProvider {
 
   async authenticate(credentials: Record<string, any>): Promise<AuthenticationResult> {
     const { email, password } = credentials;
-
     if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
       return { success: false, errorMessage: 'Invalid email or password' };
     }
@@ -40,7 +38,6 @@ export class LocalAuthenticationProvider implements IAuthenticationProvider {
       credential.passwordHash,
       credential.paramsJson
     );
-
     if (!isValid) {
       return { success: false, errorMessage: 'Invalid email or password' };
     }
@@ -67,7 +64,11 @@ export class LocalAuthenticationProvider implements IAuthenticationProvider {
     };
   }
 
-  async buildPrincipal(userId: string, sessionId: string): Promise<AuthenticatedPrincipal | null> {
+  async buildPrincipal(
+    userId: string,
+    sessionId: string,
+    authenticatedAt?: string
+  ): Promise<AuthenticatedPrincipal | null> {
     const user = await this.userRepo.getById(userId);
     if (!user || user.status === 'DISABLED') {
       return null;
@@ -85,7 +86,7 @@ export class LocalAuthenticationProvider implements IAuthenticationProvider {
       platformRole: user.platformRole,
       memberships: activeMemberships,
       sessionId,
-      authenticatedAt: new Date().toISOString()
+      authenticatedAt: authenticatedAt ?? new Date().toISOString()
     };
   }
 }

@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import { ProjectSummary } from './types';
 import { ServiceProvider, useServices } from './services/ServiceContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginPage } from './components/auth/LoginPage';
 import { AppHeader, MainNavSection } from './components/layout/AppHeader';
 import { ProjectHeader } from './components/layout/ProjectHeader';
 import { ProjectSubnav, ProjectTab } from './components/layout/ProjectSubnav';
@@ -26,6 +29,7 @@ import { ConstitutionModal } from './components/ConstitutionModal';
 
 const AppContent: React.FC = () => {
   const { projectService, intelligenceService } = useServices();
+  const { isAuthenticated } = useAuth();
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectSummary | null>(null);
@@ -33,12 +37,14 @@ const AppContent: React.FC = () => {
   const [projectTab, setProjectTab] = useState<ProjectTab>('INTELLIGENCE');
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isConstitutionOpen, setIsConstitutionOpen] = useState(false);
-  const [conflictsCount, setConflictsCount] = useState(3);
+  const [conflictsCount, setConflictsCount] = useState<number | null>(null);
 
-  // Load projects from service on startup
+  // Load projects from service when authenticated
   useEffect(() => {
-    loadProjects();
-  }, []);
+    if (isAuthenticated) {
+      loadProjects();
+    }
+  }, [isAuthenticated]);
 
   const loadProjects = async () => {
     try {
@@ -64,6 +70,8 @@ const AppContent: React.FC = () => {
           // In API mode, review summary is unsupported; use authoritative project record field
           setConflictsCount(activeProject.conflictsCount ?? 0);
         });
+    } else {
+      setConflictsCount(null);
     }
   }, [activeProject, intelligenceService]);
 
@@ -205,10 +213,46 @@ const AppContent: React.FC = () => {
   );
 };
 
+export const AuthenticatedAppBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { mode } = useServices();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  // In MOCK mode: deterministic mock/reference operation bypasses real login,
+  // but AuthContext provides the valid mock admin principal.
+  if (mode === 'MOCK') {
+    return <>{children}</>;
+  }
+
+  // In API mode:
+  // 1. While restoring session, render neutral loading indicator
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4">
+        <div className="flex items-center gap-3 text-slate-400 text-xs font-mono">
+          <Loader2 className="w-5 h-5 animate-spin text-sky-400" />
+          <span>Restoring platform authority session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated -> LoginPage
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  // 3. Authenticated -> portal
+  return <>{children}</>;
+};
+
 export const App: React.FC = () => {
   return (
     <ServiceProvider>
-      <AppContent />
+      <AuthProvider>
+        <AuthenticatedAppBoundary>
+          <AppContent />
+        </AuthenticatedAppBoundary>
+      </AuthProvider>
     </ServiceProvider>
   );
 };
