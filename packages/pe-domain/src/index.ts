@@ -110,6 +110,7 @@ export interface IntelligenceItem {
   capturedDate?: string;
   approvalState?: 'UNREVIEWED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
   approvedBy?: string;
+  approvedById?: string;
   approvalDate?: string;
   ambiguityReason?: string;
   candidates?: IntelligenceCandidate[]; // For conflicting items

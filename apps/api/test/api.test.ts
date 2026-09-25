@@ -8,18 +8,23 @@ import * as os from 'node:os';
 import { FastifyInstance } from 'fastify';
 import { buildApiApp } from '../src/app';
 import { SqliteDatabase } from '../src/persistence/sqlite/SqliteDatabase';
+import { createPlatformAdmin } from './test-auth-helper';
 
 describe('M5.0 Fastify API & Endpoints', () => {
   let tempDir: string;
   let dbPath: string;
   let db: SqliteDatabase;
   let app: FastifyInstance;
+  let authHeaders: { authorization: string };
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pecp-api-test-'));
     dbPath = path.join(tempDir, 'pecp-api.db');
     db = new SqliteDatabase(dbPath);
     db.open();
+
+    const admin = await createPlatformAdmin(db);
+    authHeaders = admin.authHeaders;
 
     app = buildApiApp({ database: db });
     await app.ready();
@@ -61,6 +66,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/v1/organisations',
+      headers: authHeaders,
       payload: { name: 'FinTech Hub' }
     });
     expect(createRes.statusCode).toBe(201);
@@ -73,6 +79,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const dupRes = await app.inject({
       method: 'POST',
       url: '/api/v1/organisations',
+      headers: authHeaders,
       payload: { name: '  fintech hub  ' }
     });
     expect(dupRes.statusCode).toBe(409);
@@ -81,7 +88,8 @@ describe('M5.0 Fastify API & Endpoints', () => {
     // List
     const listRes = await app.inject({
       method: 'GET',
-      url: '/api/v1/organisations'
+      url: '/api/v1/organisations',
+      headers: authHeaders
     });
     expect(listRes.statusCode).toBe(200);
     expect(listRes.json().items.length).toBe(1);
@@ -89,7 +97,8 @@ describe('M5.0 Fastify API & Endpoints', () => {
     // Get by id
     const getRes = await app.inject({
       method: 'GET',
-      url: `/api/v1/organisations/${org.id}`
+      url: `/api/v1/organisations/${org.id}`,
+      headers: authHeaders
     });
     expect(getRes.statusCode).toBe(200);
     expect(getRes.json().id).toBe(org.id);
@@ -98,6 +107,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const patchRes = await app.inject({
       method: 'PATCH',
       url: `/api/v1/organisations/${org.id}/status`,
+      headers: authHeaders,
       payload: { status: 'ARCHIVED' }
     });
     expect(patchRes.statusCode).toBe(200);
@@ -108,6 +118,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/projects',
+      headers: authHeaders,
       payload: {
         name: 'OmniChannel Checkout Test',
         organisation: 'Retail World',
@@ -135,7 +146,8 @@ describe('M5.0 Fastify API & Endpoints', () => {
     // Verify auto-created organisation exists
     const orgRes = await app.inject({
       method: 'GET',
-      url: `/api/v1/organisations/${project.organisationId}`
+      url: `/api/v1/organisations/${project.organisationId}`,
+      headers: authHeaders
     });
     expect(orgRes.statusCode).toBe(200);
     expect(orgRes.json().name).toBe('Retail World');
@@ -145,6 +157,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/projects',
+      headers: authHeaders,
       payload: {
         name: 'Invalid Project',
         organisation: 'Test Org',
@@ -162,7 +175,8 @@ describe('M5.0 Fastify API & Endpoints', () => {
   it('6. Validation: returns 404 for unknown resources', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/api/v1/projects/non-existent-proj-id'
+      url: '/api/v1/projects/non-existent-proj-id',
+      headers: authHeaders
     });
 
     expect(res.statusCode).toBe(404);
@@ -177,7 +191,10 @@ describe('M5.0 Fastify API & Endpoints', () => {
       method: 'POST',
       url: '/api/v1/projects',
       payload: 'not-a-json-object',
-      headers: { 'Content-Type': 'application/json' }
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders
+      }
     });
 
     expect(res.statusCode).toBe(400);
@@ -192,6 +209,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/v1/projects',
+      headers: authHeaders,
       payload: {
         name: 'Project to Update',
         organisation: 'Update Org',
@@ -205,6 +223,7 @@ describe('M5.0 Fastify API & Endpoints', () => {
     const patchRes = await app.inject({
       method: 'PATCH',
       url: `/api/v1/projects/${proj.id}`,
+      headers: authHeaders,
       payload: {
         name: 'Project After Update',
         description: 'Updated successfully'
@@ -217,7 +236,8 @@ describe('M5.0 Fastify API & Endpoints', () => {
     // Archive
     const archiveRes = await app.inject({
       method: 'POST',
-      url: `/api/v1/projects/${proj.id}/archive`
+      url: `/api/v1/projects/${proj.id}/archive`,
+      headers: authHeaders
     });
     expect(archiveRes.statusCode).toBe(200);
     expect(archiveRes.json().status).toBe('ARCHIVED');

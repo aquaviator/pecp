@@ -21,6 +21,7 @@ import {
   IntelligenceCandidate
 } from '../../types';
 import { useServices } from '../../services/ServiceContext';
+import { useAuth } from '../../context/AuthContext';
 import { CanonicalStateBadge, ReviewStatusBadge } from '../../components/common/StateBadge';
 
 interface IntelligencePageProps {
@@ -29,6 +30,12 @@ interface IntelligencePageProps {
 
 export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) => {
   const { intelligenceService } = useServices();
+  const { user, hasPermission } = useAuth();
+
+  const canResolve =
+    hasPermission('INTELLIGENCE_RESOLVE', project.organisationId) &&
+    hasPermission('INTELLIGENCE_APPROVE', project.organisationId);
+  const canApprove = hasPermission('INTELLIGENCE_APPROVE', project.organisationId);
 
   const [summary, setSummary] = useState<IntelligenceReviewSummary | null>(null);
   const [items, setItems] = useState<IntelligenceItem[]>([]);
@@ -37,7 +44,7 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
   const [searchQuery, setSearchQuery] = useState('');
   const [resolutionRationale, setResolutionRationale] = useState('');
   const [isResolving, setIsResolving] = useState(false);
-  const [approvalName, setApprovalName] = useState('Lead Performance Architect');
+  const approvalName = user?.displayName || 'Lead Performance Architect';
 
   // Load intelligence data on mount or project change
   useEffect(() => {
@@ -430,7 +437,8 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
                         </div>
 
                         <button
-                          disabled={isResolving}
+                          disabled={isResolving || !canResolve}
+                          title={!canResolve ? 'Requires INTELLIGENCE_RESOLVE and INTELLIGENCE_APPROVE permissions' : undefined}
                           onClick={() => handleSelectCandidate(cand)}
                           className="w-full py-2 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
                         >
@@ -544,16 +552,15 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
                 <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400 text-xs">Approver:</span>
-                    <input
-                      type="text"
-                      value={approvalName}
-                      onChange={(e) => setApprovalName(e.target.value)}
-                      className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white focus:outline-none"
-                    />
+                    <span className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white font-mono">
+                      {approvalName}
+                    </span>
                   </div>
                   <button
+                    disabled={!canApprove}
+                    title={!canApprove ? 'Requires INTELLIGENCE_APPROVE permission' : undefined}
                     onClick={handleApproveItem}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition-colors"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Approve as Canonical</span>

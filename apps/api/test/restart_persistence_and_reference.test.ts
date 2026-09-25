@@ -9,6 +9,10 @@ import { FastifyInstance } from 'fastify';
 import { buildApiApp } from '../src/app';
 import { SqliteDatabase } from '../src/persistence/sqlite/SqliteDatabase';
 import { SqliteEntityRevisionRepository } from '../src/persistence/sqlite/SqliteEntityRevisionRepository';
+import { SqliteUserRepository } from '../src/persistence/sqlite/SqliteUserRepository';
+import { SqliteSessionRepository } from '../src/persistence/sqlite/SqliteSessionRepository';
+import { SessionService } from '@pecp/platform-core';
+import { createPlatformAdmin } from './test-auth-helper';
 
 describe('M5.0 Persistence Restart & Reference Scenario (Northstar Retail)', () => {
   let tempDir: string;
@@ -27,12 +31,14 @@ describe('M5.0 Persistence Restart & Reference Scenario (Northstar Retail)', () 
     // 1. First Server Lifetime: Start app, create Northstar Retail project
     let db1 = new SqliteDatabase(dbPath);
     db1.open();
+    const admin1 = await createPlatformAdmin(db1);
     let app1: FastifyInstance = buildApiApp({ database: db1 });
     await app1.ready();
 
     const createRes = await app1.inject({
       method: 'POST',
       url: '/api/v1/projects',
+      headers: admin1.authHeaders,
       payload: {
         name: 'Holiday Peak 2027',
         organisation: 'Northstar Retail',
@@ -64,13 +70,20 @@ describe('M5.0 Persistence Restart & Reference Scenario (Northstar Retail)', () 
     // 2. Second Server Lifetime (Restart): New database instance and app instance pointing to the same database file
     const db2 = new SqliteDatabase(dbPath);
     db2.open();
+    const userRepo2 = new SqliteUserRepository(db2);
+    const sessionRepo2 = new SqliteSessionRepository(db2);
+    const sessionService2 = new SessionService(sessionRepo2, userRepo2, 12);
+    const session2 = await sessionService2.createSession(admin1.user.id);
+    const authHeaders2 = { authorization: `Bearer ${session2.rawToken}` };
+
     const app2: FastifyInstance = buildApiApp({ database: db2 });
     await app2.ready();
 
     // Fetch the project created in the previous process lifetime
     const getRes = await app2.inject({
       method: 'GET',
-      url: `/api/v1/projects/${createdProject.id}`
+      url: `/api/v1/projects/${createdProject.id}`,
+      headers: authHeaders2
     });
 
     expect(getRes.statusCode).toBe(200);
@@ -82,7 +95,8 @@ describe('M5.0 Persistence Restart & Reference Scenario (Northstar Retail)', () 
     // Verify organization persisted across restart
     const getOrgRes = await app2.inject({
       method: 'GET',
-      url: `/api/v1/organisations/${createdProject.organisationId}`
+      url: `/api/v1/organisations/${createdProject.organisationId}`,
+      headers: authHeaders2
     });
     expect(getOrgRes.statusCode).toBe(200);
     const reloadedOrg = getOrgRes.json();

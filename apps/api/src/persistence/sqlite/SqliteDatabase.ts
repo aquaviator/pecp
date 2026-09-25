@@ -130,6 +130,83 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_intelligence_project ON project_intelligence_items(project_id);
       `);
     }
+  },
+  {
+    version: 3,
+    name: '003_identity_rbac_audit',
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL,
+          normalized_email TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('ACTIVE', 'DISABLED')),
+          platform_role TEXT NOT NULL CHECK(platform_role IN ('PLATFORM_ADMIN', 'NONE')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS local_credentials (
+          user_id TEXT PRIMARY KEY,
+          algorithm TEXT NOT NULL,
+          salt TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          params_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS organisation_memberships (
+          organisation_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('ORG_ADMIN', 'PERFORMANCE_LEAD', 'PERFORMANCE_ENGINEER', 'REVIEWER', 'VIEWER')),
+          status TEXT NOT NULL CHECK(status IN ('ACTIVE', 'REVOKED')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by_user_id TEXT NOT NULL,
+          PRIMARY KEY (organisation_id, user_id),
+          FOREIGN KEY (organisation_id) REFERENCES organisations(id),
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          revoked_at TEXT,
+          authenticated_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_events (
+          id TEXT PRIMARY KEY,
+          occurred_at TEXT NOT NULL,
+          actor_user_id TEXT,
+          actor_display_name TEXT,
+          organisation_id TEXT,
+          project_id TEXT,
+          action TEXT NOT NULL,
+          target_type TEXT NOT NULL,
+          target_id TEXT,
+          outcome TEXT NOT NULL CHECK(outcome IN ('SUCCESS', 'DENIED', 'FAILURE')),
+          reason TEXT,
+          metadata_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_users_normalized_email ON users(normalized_email);
+        CREATE INDEX IF NOT EXISTS idx_org_memberships_user ON organisation_memberships(user_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_org ON audit_events(organisation_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_events(project_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_events(actor_user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_events(action);
+        CREATE INDEX IF NOT EXISTS idx_audit_occurred_at ON audit_events(occurred_at);
+      `);
+    }
   }
 ];
 
@@ -278,10 +355,11 @@ export class SqliteDatabase implements IUnitOfWork {
   transaction<T>(fn: () => T): T {
     if (!this.db) throw new Error('Database is not open');
 
+    const inAsyncTx = !!this.txScopeStorage.getStore();
     this.syncTransactionDepth++;
     const savepointName = `sp_sync_${this.syncTransactionDepth}`;
 
-    if (this.syncTransactionDepth === 1) {
+    if (this.syncTransactionDepth === 1 && !inAsyncTx) {
       this.db.exec('BEGIN TRANSACTION;');
     } else {
       this.db.exec(`SAVEPOINT ${savepointName};`);
@@ -289,7 +367,7 @@ export class SqliteDatabase implements IUnitOfWork {
 
     try {
       const result = fn();
-      if (this.syncTransactionDepth === 1) {
+      if (this.syncTransactionDepth === 1 && !inAsyncTx) {
         this.db.exec('COMMIT;');
       } else {
         this.db.exec(`RELEASE SAVEPOINT ${savepointName};`);
@@ -297,7 +375,7 @@ export class SqliteDatabase implements IUnitOfWork {
       this.syncTransactionDepth--;
       return result;
     } catch (error) {
-      if (this.syncTransactionDepth === 1) {
+      if (this.syncTransactionDepth === 1 && !inAsyncTx) {
         try {
           this.db.exec('ROLLBACK;');
         } catch {

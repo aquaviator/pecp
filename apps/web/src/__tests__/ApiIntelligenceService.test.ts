@@ -123,14 +123,41 @@ describe('M5.0 ApiIntelligenceService Web Adapter', () => {
     await expect(service.getIntelligenceItems('proj-123')).rejects.toThrow(/Failed to connect to PECP API/);
   });
 
-  it('5. mutation/approval methods explicitly reject because authenticated actor identity is deferred to M5.1', async () => {
-    await expect(
-      service.resolveIntelligenceConflict('proj-123', 'item-2', 'cand-1', 'agreed target')
-    ).rejects.toThrow(/requires authenticated actor identity \(deferred to M5.1\)/);
+  it('5. mutation/approval methods send POST requests to resolve and approve endpoints with credentials', async () => {
+    const mockResolved: IntelligenceItem = {
+      ...sampleItems[1],
+      canonicalState: 'APPROVED',
+      reviewStatus: 'FOUND',
+      approvalState: 'APPROVED',
+      approvedBy: 'Lead Performance Architect'
+    };
 
-    await expect(
-      service.approveIntelligenceItem('proj-123', 'item-2', 'Lead Architect')
-    ).rejects.toThrow(/requires authenticated actor identity \(deferred to M5.1\)/);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockResolved
+    });
+
+    const resolved = await service.resolveIntelligenceConflict('proj-123', 'item-2', 'cand-1', 'agreed target');
+    expect(resolved).toEqual(mockResolved);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:3001/api/v1/projects/proj-123/intelligence/item-2/resolve',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ chosenCandidateId: 'cand-1', rationale: 'agreed target' })
+      })
+    );
+
+    const approved = await service.approveIntelligenceItem('proj-123', 'item-2', 'Lead Architect');
+    expect(approved).toEqual(mockResolved);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:3001/api/v1/projects/proj-123/intelligence/item-2/approve',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include'
+      })
+    );
   });
 
   it('6. malformed successful API list envelopes fail rather than becoming empty collections', async () => {

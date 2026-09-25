@@ -18,10 +18,12 @@
     "api:dev": "npm --workspace=apps/api run dev",
     "api:start": "npm --workspace=apps/api run start",
     "api:test": "npm --workspace=apps/api run test",
+    "api:bootstrap-admin": "tsx apps/api/src/cli/bootstrap-admin.ts",
     "exec:reference": "vite-node --config apps/web/vite.config.ts scripts/run-governed-reference-execution.ts -- --mode=canonical",
     "exec:reference:smoke": "vite-node --config apps/web/vite.config.ts scripts/run-governed-reference-execution.ts -- --mode=smoke_diagnostic"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "clsx": "^2.1.1",
     "fastify": "^5.12.5",

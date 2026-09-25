@@ -10,6 +10,7 @@ import { buildApiApp } from '../src/app';
 import { SqliteDatabase } from '../src/persistence/sqlite/SqliteDatabase';
 import { SqliteIntelligenceRepository } from '../src/persistence/sqlite/SqliteIntelligenceRepository';
 import { IntelligenceItem } from '@pecp/pe-domain';
+import { createPlatformAdmin } from './test-auth-helper';
 
 describe('M5.0 §7 Persistent Intelligence Read Model', () => {
   let tempDir: string;
@@ -17,12 +18,16 @@ describe('M5.0 §7 Persistent Intelligence Read Model', () => {
   let db: SqliteDatabase;
   let intelligenceRepo: SqliteIntelligenceRepository;
   let app: FastifyInstance;
+  let authHeaders: { authorization: string };
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pecp-intel-test-'));
     dbPath = path.join(tempDir, 'pecp-intel.db');
     db = new SqliteDatabase(dbPath);
     db.open();
+
+    const admin = await createPlatformAdmin(db);
+    authHeaders = admin.authHeaders;
 
     intelligenceRepo = new SqliteIntelligenceRepository(db);
 
@@ -40,6 +45,7 @@ describe('M5.0 §7 Persistent Intelligence Read Model', () => {
     const projRes = await app.inject({
       method: 'POST',
       url: '/api/v1/projects',
+      headers: authHeaders,
       payload: {
         name: 'Intelligence Project',
         organisation: 'Intel Org',
@@ -47,6 +53,7 @@ describe('M5.0 §7 Persistent Intelligence Read Model', () => {
         description: 'Testing intelligence storage'
       }
     });
+    expect(projRes.statusCode).toBe(201);
     const project = projRes.json();
 
     // 2. Seed intelligence items
@@ -89,7 +96,8 @@ describe('M5.0 §7 Persistent Intelligence Read Model', () => {
     // 3. List items via GET /api/v1/projects/:projectId/intelligence
     const listRes = await app.inject({
       method: 'GET',
-      url: `/api/v1/projects/${project.id}/intelligence`
+      url: `/api/v1/projects/${project.id}/intelligence`,
+      headers: authHeaders
     });
 
     expect(listRes.statusCode).toBe(200);
@@ -100,7 +108,8 @@ describe('M5.0 §7 Persistent Intelligence Read Model', () => {
     // 4. Get individual item via GET /api/v1/projects/:projectId/intelligence/:itemId
     const getRes = await app.inject({
       method: 'GET',
-      url: `/api/v1/projects/${project.id}/intelligence/intel-item-1`
+      url: `/api/v1/projects/${project.id}/intelligence/intel-item-1`,
+      headers: authHeaders
     });
 
     expect(getRes.statusCode).toBe(200);
@@ -115,7 +124,8 @@ describe('M5.0 §7 Persistent Intelligence Read Model', () => {
     // 5. 404 for unknown item
     const notFoundRes = await app.inject({
       method: 'GET',
-      url: `/api/v1/projects/${project.id}/intelligence/non-existent`
+      url: `/api/v1/projects/${project.id}/intelligence/non-existent`,
+      headers: authHeaders
     });
     expect(notFoundRes.statusCode).toBe(404);
   });

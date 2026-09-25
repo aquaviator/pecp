@@ -87,23 +87,95 @@ export class ApiIntelligenceService implements IIntelligenceService {
   }
 
   async resolveIntelligenceConflict(
-    _projectId: string,
-    _itemId: string,
-    _chosenCandidateId: string,
-    _rationale?: string
+    projectId: string,
+    itemId: string,
+    chosenCandidateId: string,
+    rationale?: string
   ): Promise<IntelligenceItem> {
-    throw new Error(
-      'ApiIntelligenceService: Intelligence conflict resolution requires authenticated actor identity (deferred to M5.1). Not supported in M5.0 API mode.'
-    );
+    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}/resolve`;
+    const csrfToken = typeof document !== 'undefined'
+      ? (document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/) ? decodeURIComponent(document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/)![1]) : undefined)
+      : undefined;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+    if (csrfToken) {
+      headers['X-PECP-CSRF'] = csrfToken;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ chosenCandidateId, rationale })
+      });
+    } catch (networkError: any) {
+      throw new Error(`ApiIntelligenceService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
+    }
+
+    if (!response.ok) {
+      let errorMsg = `PECP API error: HTTP ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson?.error?.message) {
+          errorMsg = errJson.error.message;
+        }
+      } catch {
+        // default message
+      }
+      throw new Error(errorMsg);
+    }
+
+    return response.json();
   }
 
   async approveIntelligenceItem(
-    _projectId: string,
-    _itemId: string,
-    _approverName: string
+    projectId: string,
+    itemId: string,
+    _approverName?: string
   ): Promise<IntelligenceItem> {
-    throw new Error(
-      'ApiIntelligenceService: Intelligence item approval requires authenticated actor identity (deferred to M5.1). Not supported in M5.0 API mode.'
-    );
+    const url = `${this.baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/intelligence/${encodeURIComponent(itemId)}/approve`;
+    const csrfToken = typeof document !== 'undefined'
+      ? (document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/) ? decodeURIComponent(document.cookie.match(/(?:^|;\s*)pecp_csrf=([^;]*)/)![1]) : undefined)
+      : undefined;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+    if (csrfToken) {
+      headers['X-PECP-CSRF'] = csrfToken;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({})
+      });
+    } catch (networkError: any) {
+      throw new Error(`ApiIntelligenceService: Failed to connect to PECP API at ${url}: ${networkError?.message || networkError}`);
+    }
+
+    if (!response.ok) {
+      let errorMsg = `PECP API error: HTTP ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson?.error?.message) {
+          errorMsg = errJson.error.message;
+        }
+      } catch {
+        // default message
+      }
+      throw new Error(errorMsg);
+    }
+
+    return response.json();
   }
 }

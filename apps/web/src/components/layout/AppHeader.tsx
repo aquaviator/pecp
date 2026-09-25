@@ -6,9 +6,13 @@ import {
   Plus,
   BookOpen,
   Building2,
-  ShieldCheck
+  ShieldCheck,
+  User as UserIcon,
+  LogOut
 } from 'lucide-react';
 import { ProjectSummary } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import { useServices } from '../../services/ServiceContext';
 
 export type MainNavSection = 'DASHBOARD' | 'PROJECTS' | 'ADMINISTRATION';
 
@@ -31,6 +35,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onOpenNewProjectModal,
   onOpenConstitution
 }) => {
+  const { user, principal, logout, hasPermission } = useAuth();
+  const { mode } = useServices();
+
+  const canCreateProject = hasPermission('PROJECT_CREATE', activeProject?.organisationId);
+
   return (
     <header className="bg-slate-950 border-b border-slate-800 sticky top-0 z-40">
       {/* Top Application Bar */}
@@ -46,7 +55,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-sm text-white tracking-tight">PECP</span>
                   <span className="text-[10px] font-mono uppercase bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded border border-slate-700">
-                    M0 Portal
+                    M5.1
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-400 -mt-0.5 hidden sm:inline">
@@ -114,14 +123,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             )}
 
             {/* New Performance Project Button */}
-            <button
-              id="new-project-header-btn"
-              onClick={onOpenNewProjectModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-sm transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Project</span>
-            </button>
+            {canCreateProject && (
+              <button
+                id="new-project-header-btn"
+                onClick={onOpenNewProjectModal}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-sm transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Project</span>
+              </button>
+            )}
 
             {/* Product Constitution Link */}
             <button
@@ -132,6 +143,30 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               <BookOpen className="w-3.5 h-3.5 text-amber-400" />
               <span className="hidden lg:inline">Constitution</span>
             </button>
+
+            {/* User Profile & Sign Out */}
+            {user && (
+              <div className="flex items-center gap-2 border-l border-slate-800 pl-3">
+                <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1">
+                  <UserIcon className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="font-medium max-w-[120px] truncate">{user.displayName}</span>
+                  {principal?.platformRole === 'PLATFORM_ADMIN' && (
+                    <span className="text-[9px] font-mono font-bold bg-purple-950 text-purple-300 px-1 rounded border border-purple-800">
+                      ADMIN
+                    </span>
+                  )}
+                </div>
+                {mode === 'API' && (
+                  <button
+                    onClick={() => logout()}
+                    title="Sign Out"
+                    className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800 transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
