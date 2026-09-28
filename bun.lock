@@ -33,6 +33,7 @@
       "name": "@pecp/api",
       "version": "1.0.0",
       "dependencies": {
+        "@fastify/cookie": "^11.1.2",
         "@fastify/cors": "^10.0.2",
         "@pecp/pe-domain": "*",
         "@pecp/platform-core": "*",

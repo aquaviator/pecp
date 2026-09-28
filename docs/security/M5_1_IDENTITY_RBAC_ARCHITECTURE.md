@@ -21,7 +21,7 @@ The identity and security architecture enforces strict one-way dependency bounda
 │                      Web Portal                        │
 │ (React SPA, AuthProvider, AuthenticatedAppBoundary)   │
 └───────────────────────────┬────────────────────────────┘
-                            │ HTTP Cookies (Session & CSRF)
+                            │ HTTP Cookies (Session & CSRF) or Bearer Token
                             ▼
 ┌────────────────────────────────────────────────────────┐
 │                   Fastify API Gateway                  │
@@ -53,7 +53,7 @@ Represents an individual platform user:
 - `id`: Globally unique identifier (`usr_...` or UUID format).
 - `email`: Normalized lowercase lookup key (`normalizedEmail`) and original casing preserved for display.
 - `displayName`: Human-readable name.
-- `status`: Lifecycle state (`ACTIVE` | `DISABLED`). Disabled users cannot authenticate; existing sessions are immediately revoked upon status transition to `DISABLED`.
+- `status`: Lifecycle state (`ACTIVE` | `DISABLED`). Disabled users cannot authenticate; existing sessions are marked revoked via `SessionService.revokeAllForUser()` upon status transition to `DISABLED`.
 - `platformRole`: Global role (`PLATFORM_ADMIN` | `NONE`). `PLATFORM_ADMIN` grants cross-organisation oversight and administration capabilities.
 - `createdAt` / `updatedAt`: ISO-8601 UTC timestamps.
 
@@ -82,25 +82,39 @@ Constructed exclusively by the server-side authentication boundary upon validati
 
 ## 4. Local Authentication Provider & Enterprise Seam
 
-### Local Provider Implementation
-The default Sellable MVP implements a hardened embedded local authentication provider:
-- **Password Hashing:** Implemented using Node.js `crypto.scrypt` with a cryptographically secure 16-byte random salt per user.
-- **Key Parameters:** Cost parameter `N=16384`, block size `r=8`, parallelization `p=1`, derived key length 64 bytes.
-- **Format:** Versioned serialized hash string `scrypt:v1:<salt_hex>:<hash_hex>`.
-- **Timing Safety:** Password verification executes constant-time buffer comparison via `crypto.timingSafeEqual` to eliminate timing side-channel attacks.
+### Local Provider Implementation (`LocalAuthenticationProvider`)
+The default Sellable MVP implements a hardened embedded local authentication provider implementing `IAuthenticationProvider`:
+- **Password Hashing (`PasswordHasher`):** Implemented using standard Node.js `crypto.scrypt` with a cryptographically secure 16-byte random salt per user.
+- **Key Parameters:** Cost parameter `N=16384`, block size `r=8`, parallelization `p=1`, derived key length 64 bytes, max memory 32MB.
+- **Storage Representation:** Returned via `HashResult` with distinct fields:
+  - `algorithm`: `'scrypt-v1'`
+  - `salt`: 16-byte random salt (hex string)
+  - `passwordHash`: 64-byte derived key (hex string)
+  - `paramsJson`: `{"N":16384,"r":8,"p":1,"maxmem":33554432}`
+  These values are stored in dedicated columns (`algorithm`, `salt`, `password_hash`, `params_json`, `updated_at`) of the `local_credentials` SQLite table.
+- **Timing Safety:** Password verification executes constant-time buffer comparison via `crypto.timingSafeEqual` over the derived key buffer to eliminate timing side-channel attacks.
 - **Password Constraints:** Enforces minimum 12 characters and maximum 128 characters.
 - **Privacy:** Plaintext passwords are never logged, audited, or persisted.
 
-### Enterprise Identity Seam (`IIdentityProvider`)
-To accommodate future enterprise SAML 2.0 / OIDC integrations without altering business logic, authentication is abstracted behind an identity provider interface:
+### Enterprise Identity Seam (`IAuthenticationProvider`)
+To accommodate future enterprise SAML 2.0 / OIDC integrations without altering business logic, authentication is abstracted behind the provider interface:
 ```typescript
-export interface IIdentityProvider {
-  authenticate(credentials: AuthCredentials): Promise<AuthResult>;
-  validateSession(token: string): Promise<SessionValidationResult>;
-  revokeSession(sessionId: string): Promise<void>;
-  revokeAllUserSessions(userId: string): Promise<void>;
+export interface AuthenticationResult {
+  success: boolean;
+  principal?: AuthenticatedPrincipal;
+  user?: User;
+  errorMessage?: string;
+}
+
+export interface IAuthenticationProvider {
+  readonly providerId: string;
+  authenticate(credentials: Record<string, any>): Promise<AuthenticationResult>;
 }
 ```
+`LocalAuthenticationProvider` (`providerId: 'LOCAL'`) implements `IAuthenticationProvider` and additionally provides `buildPrincipal(userId: string, sessionId: string, authenticatedAt?: string): Promise<AuthenticatedPrincipal | null>`.
+
+Session token lifecycle management is decoupled from authentication and encapsulated in `SessionService` (`createSession`, `validateSession`, `revokeSession`, `revokeAllForUser`), backed by `ISessionRepository`.
+
 Replacing the local provider with an enterprise OIDC/SAML bridge requires zero modifications to downstream authorization policies, domain models, or audit logging.
 
 ---
@@ -108,11 +122,20 @@ Replacing the local provider with an enterprise OIDC/SAML bridge requires zero m
 ## 5. Session Lifecycle & Token Management
 
 - **Opaque Tokens:** Session tokens are 32-byte (256-bit) cryptographically random hexadecimal strings generated via `crypto.randomBytes(32)`.
-- **Token Hashing at Rest:** The raw token is delivered exclusively to the client in an HTTP-only cookie. The database stores only the SHA-256 hash of the token (`token_hash = sha256(raw_token)`). Compromise of the database does not reveal valid session tokens.
-- **Session Duration (TTL):** Default TTL is 12 hours, configurable via `PECP_SESSION_TTL_HOURS`.
-- **Forced Reauthentication on Credential Change:** Modifying or resetting a password immediately revokes all active sessions for the user and clears the client cookies.
-- **Revocation on User Disabling:** Setting user status to `DISABLED` revokes all active sessions immediately.
-- **Session Restoration:** Each validated session returns the original `authenticatedAt` timestamp, which remains invariant throughout the lifetime of the session.
+- **Token Hashing at Rest:** The raw token is delivered exclusively to the client in an HTTP-only cookie (or API response). The database stores only the SHA-256 hash of the token (`token_hash = sha256(raw_token)`). Compromise of the database does not reveal valid session tokens.
+- **Session Duration (TTL):** Default TTL is 12 hours, configurable when constructing `SessionService`.
+- **Soft Revocation via `revoked_at`:**
+  - Revocation is implemented by updating the `revoked_at` timestamp on session records (`session.revokedAt`).
+  - Session lookup in `SessionService.validateSession()` checks:
+    ```typescript
+    if (session.revokedAt) return null;
+    if (session.expiresAt <= now) return null;
+    ```
+  - `SessionService.revokeSession(sessionId)` sets `revoked_at` for a single session.
+  - `SessionService.revokeAllForUser(userId)` sets `revoked_at` across all active sessions for that user.
+- **Forced Reauthentication on Credential Change:** Modifying or resetting a password immediately revokes all active sessions for the user via `revokeAllForUser(userId)` and clears client cookies.
+- **Revocation on User Disabling:** Setting user status to `DISABLED` revokes all active sessions for that user via `revokeAllForUser(userId)`.
+- **Session Restoration:** Each validated session preserves the original immutable `authenticatedAt` timestamp, which remains invariant throughout the lifetime of the session.
 
 ---
 
@@ -121,21 +144,25 @@ Replacing the local provider with an enterprise OIDC/SAML bridge requires zero m
 ### Cookie Architecture
 - **Session Cookie (`pecp_session`):**
   - `HttpOnly`: True (inaccessible to JavaScript).
-  - `SameSite`: `Lax`.
-  - `Secure`: True in production (`NODE_ENV === 'production'`); configurable via `PECP_COOKIE_SECURE`.
+  - `SameSite`: `lax`.
+  - `Secure`: Controlled by `options.secureCookies` in `buildApiApp(options)`. If unspecified, defaults to production mode (`process.env.NODE_ENV === 'production'`). No custom environment variable is read for cookie security.
   - `Path`: `/`.
 - **CSRF Token Cookie (`pecp_csrf`):**
   - Double Submit Cookie pattern.
-  - Non-HttpOnly cookie paired with mandatory `x-csrf-token` HTTP request header for state-changing methods (`POST`, `PUT`, `PATCH`, `DELETE`).
-  - Safe methods (`GET`, `HEAD`, `OPTIONS`) are exempt from CSRF validation.
-  - Server-side comparison utilizes `crypto.timingSafeEqual`.
+  - Non-HttpOnly cookie paired with mandatory `X-PECP-CSRF` HTTP request header for state-changing browser mutations (`POST`, `PUT`, `PATCH`, `DELETE`).
+  - Server-side comparison validates `request.cookies['pecp_csrf'] === request.headers['x-pecp-csrf']`.
+  - **Mutation Enforcement & Exceptions:**
+    - CSRF validation is enforced exclusively when a request is authenticated via the `pecp_session` cookie.
+    - Requests authenticated via `Authorization: Bearer <token>` are exempt from CSRF checks.
+    - Safe methods (`GET`, `HEAD`, `OPTIONS`) are exempt.
+    - Public endpoints (`/health`, `/ready`, and `POST /api/v1/auth/login`) are exempt from CSRF checks.
 
 ### CORS Policy
 - Configured via Fastify `@fastify/cors`.
-- Explicit origin whitelist supplied via `PECP_ALLOWED_ORIGINS` (comma-separated list, e.g., `http://localhost:3000,http://localhost:5173`).
-- Credentials enabled (`credentials: true`) to allow transmission of authenticated cookies.
-- Allowed Methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`.
-- Allowed Headers: `Content-Type`, `Authorization`, `x-csrf-token`, `x-organisation-id`.
+- Allowed origins parsed from comma-separated `PECP_ALLOWED_ORIGINS` environment variable (default: `['http://localhost:3000', 'http://127.0.0.1:3000']`).
+- Credentials enabled (`credentials: true`) to permit authenticated cookie transmission.
+- Allowed Methods: `['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS']`.
+- Allowed Headers: `['Content-Type', 'Authorization', 'X-PECP-CSRF', 'Accept']`.
 
 ---
 
@@ -179,10 +206,10 @@ Replacing the local provider with an enterprise OIDC/SAML bridge requires zero m
 
 To prevent catastrophic administrative lockout:
 1. **Last Administrator Invariant:** An organisation must maintain at least one `ACTIVE` member with the `ORG_ADMIN` role at all times.
-2. **Atomic Unit of Work Boundary:** In `IdentityAdministrationService.updateMembershipRole()` and `revokeMembership()`, the current membership lookup, the active administrator count verification, the database mutation, and the audit event recording are strictly executed inside the same serialized SQLite Unit of Work (`withTransaction`).
-3. **Concurrency Protection:** Under concurrent attempts to demote or revoke the final two administrators, the serialized transaction ensures that exactly one operation succeeds while the subsequent conflicting operation is rejected with `Cannot demote/revoke the last ORG_ADMIN for this organisation`.
+2. **Atomic Unit of Work Boundary:** In `IdentityAdministrationService.updateMembershipRole()` and `revokeMembership()`, the current membership lookup, the active administrator count verification (`countActiveAdmins`), the database mutation, and the audit event recording are strictly executed inside the same serialized SQLite Unit of Work (`withTransaction`).
+3. **Concurrency Protection:** Under concurrent attempts to demote or revoke the final two administrators, the serialized transaction ensures that exactly one operation succeeds while the subsequent conflicting operation is rejected with `Cannot demote/revoke the last ORG_ADMIN for this organisation`. Rejected mutations leave zero partial state or audit records.
 4. **No Overwrite via Creation:** `IdentityAdministrationService.addMembership()` inspects existing membership state within the transaction:
-   - If an `ACTIVE` membership already exists, it immediately aborts with a controlled `409 Conflict` (`Active membership already exists`), preventing role hijacking or sole administrator demotion via POST requests.
+   - If an `ACTIVE` membership already exists, it immediately aborts with a controlled `409 Conflict` (`Active membership already exists for user...`), preventing role hijacking or sole administrator demotion via POST requests.
    - If a `REVOKED` membership exists, it reactivates the membership while preserving the original `createdAt` and `createdByUserId` creation provenance.
 5. **Universal Enforcement:** Even a `PLATFORM_ADMIN` actor cannot demote or revoke the sole active `ORG_ADMIN` of an organisation.
 
@@ -192,16 +219,26 @@ To prevent catastrophic administrative lockout:
 
 ### Transactional Audit Ledger
 Every state change is recorded in the append-only `audit_events` ledger:
-- `id`: Unique audit record identifier (`aud_...`).
-- `actorUserId`: Attributed authenticated user ID.
-- `actorEmail`: Actor email at the time of action.
+- `id`: Unique audit record identifier (UUID).
+- `occurredAt`: Immutable ISO-8601 UTC timestamp.
+- `actorUserId`: Attributed authenticated user ID (or null for unauthenticated/system actions).
+- `actorDisplayName`: Actor display name at time of event.
 - `organisationId`: Associated organisation (or null for platform-wide events).
-- `action`: Specific governed action (e.g., `USER_CREATE`, `MEMBERSHIP_CREATE`, `MEMBERSHIP_ROLE_CHANGE`, `MEMBERSHIP_REVOKE`, `PROJECT_CREATE`, `INTELLIGENCE_APPROVE`, `AUTHORIZATION_DENIED`).
+- `projectId`: Associated project (or null).
+- `action`: Specific governed `AuditAction` (e.g., `USER_CREATE`, `USER_DISABLE`, `USER_ENABLE`, `PASSWORD_CHANGE`, `PASSWORD_RESET`, `MEMBERSHIP_CREATE`, `MEMBERSHIP_ROLE_CHANGE`, `MEMBERSHIP_REVOKE`, `PROJECT_CREATE`, `PROJECT_UPDATE`, `PROJECT_ARCHIVE`, `INTELLIGENCE_CONFLICT_RESOLVE`, `INTELLIGENCE_APPROVE`, `AUTHORIZATION_DENIED`, `LOGIN_SUCCESS`, `LOGIN_FAILURE`, `LOGOUT`).
 - `targetType` & `targetId`: Entity type and composite identifier.
 - `outcome`: `SUCCESS` | `DENIED` | `FAILED`.
 - `reason`: Description of failure or denial rationale.
-- `metadataJson`: Structured parameters (roles, timestamps, diffs).
-- `timestamp`: Immutable ISO-8601 UTC timestamp.
+- `metadataJson`: Structured parameters (roles, timestamps, diffs) with automatic redaction of secrets, passwords, tokens, and hashes.
+
+### Query Filter Specification (`AuditQueryFilter`)
+Queries to `GET /api/v1/audit` support the following parameters:
+- `organisationId`: Filter to specific tenant events.
+- `projectId`: Filter to specific project events.
+- `actorUserId`: Filter by acting user.
+- `action`: Filter by `AuditAction`.
+- `limit`: Number of records to return.
+- `before` / `after`: ISO-8601 timestamp range filters.
 
 ### Atomicity & Denial Auditing
 - **Rollback Guarantee:** State mutations and audit entries share the identical database transaction. If audit insertion fails, the state mutation rolls back completely.
@@ -211,16 +248,53 @@ Every state change is recorded in the append-only `audit_events` ledger:
 
 ## 10. Bootstrap Process
 
-On initial startup, if zero platform administrators exist in the database, the system executes an automated, idempotent bootstrap sequence using environment variables:
-- `PECP_BOOTSTRAP_ADMIN_EMAIL` (default: `admin@pecp.io`)
-- `PECP_BOOTSTRAP_ADMIN_PASSWORD` (default: `Admin123456!`)
-- `PECP_BOOTSTRAP_ADMIN_NAME` (default: `Platform Administrator`)
+The initial platform administrator is created via an explicit CLI command (`apps/api/src/cli/bootstrap-admin.ts`), NOT an automatic startup routine.
 
-If any user with `platformRole === 'PLATFORM_ADMIN'` already exists, the bootstrap process cleanly skips execution.
+### CLI Invocation
+```bash
+PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!" \
+  node dist/cli/bootstrap-admin.js --email admin@example.com --name "Platform Administrator"
+```
+Or in development via tsx:
+```bash
+PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!" \
+  npx tsx apps/api/src/cli/bootstrap-admin.ts --email admin@example.com --name "Platform Administrator"
+```
+
+### Constraints & Rejection Behavior
+- **Arguments:** `--email` (required, valid email containing `@`) and `--name` (required, non-empty string).
+- **Password:** Read from the `PECP_BOOTSTRAP_ADMIN_PASSWORD` environment variable (required; validated by `PasswordHasher.validatePassword` to require 12 to 128 characters).
+- **Existing Administrator Rejection:**
+  The command checks `userRepo.countActivePlatformAdmins()`. If any active `PLATFORM_ADMIN` user already exists in the database, the command cleanly aborts with:
+  `Error: Platform administrator already exists. Bootstrap aborted.`
+- **Existing Email Rejection:**
+  If a user with the specified normalized email already exists, the command aborts with:
+  `Error: User with email '<email>' already exists`.
+- **No Defaults:** There are no hardcoded default admin credentials or automatic background initialization.
 
 ---
 
-## 11. Explicit Scope Boundaries & Limitations
+## 11. Database Configuration & Defaults
+
+Operators must align database path configuration across processes:
+
+| Context | Configuration Mechanism | Default Value | Notes |
+| :--- | :--- | :--- | :--- |
+| **Server Entrypoint** (`server.ts`) | `PECP_DB_PATH` env var | `data/pecp.db` | Production API server process. |
+| **Bootstrap CLI** (`bootstrap-admin.ts`) | `PECP_DB_PATH` env var or `options.dbPath` | `pecp-platform.sqlite` | CLI command executed prior to server launch. |
+| **App Factory / Tests** (`app.ts`) | `options.dbPath` or `PECP_DB_PATH` | `:memory:` | Vitest test runs and embedded instances. |
+
+*Operational Requirement:* When deploying with persistent storage, operators must explicitly set `PECP_DB_PATH` to the identical file path (e.g., `/var/lib/pecp/pecp.db`) for both the bootstrap command and the running API server.
+
+---
+
+## 12. Disaster Recovery Boundary (Break-Glass Procedure)
+
+Direct manipulation of the SQLite database (e.g. updating `platform_role` via `sqlite3` CLI) is strictly an out-of-band disaster recovery break-glass procedure for catastrophic lockout scenarios. It is not an audited, governed, or supported product feature.
+
+---
+
+## 13. Explicit Scope Boundaries & Limitations
 
 The following capabilities are deliberately out of scope for M5.1:
 - Third-party social or enterprise SSO providers (OIDC, SAML, Azure AD / Entra ID, Okta, Google).
