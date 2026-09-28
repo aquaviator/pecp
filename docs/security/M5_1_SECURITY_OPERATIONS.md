@@ -14,7 +14,7 @@ The PECP API server and security subsystem are governed by the following environ
 | `PECP_API_HOST` | `0.0.0.0` | Network interface host in `server.ts`. | `0.0.0.0` or container overlay network. |
 | `PECP_DB_PATH` | *Varies by context* | SQLite database file location. | **Must be explicitly configured** to the identical persistent volume path for all processes (e.g., `/var/lib/pecp/pecp.db`). |
 | `PECP_COOKIE_SECRET` | `pecp-local-cookie-secret-change-in-prod` | Fastify cookie signing secret. | High-entropy secret in production environments. |
-| `PECP_BOOTSTRAP_ADMIN_PASSWORD` | *None (Required)* | Password for bootstrap CLI administrator (12 to 128 characters). | Supply via environment variable when invoking `bootstrap-admin.js`. |
+| `PECP_BOOTSTRAP_ADMIN_PASSWORD` | *None (Required)* | Password for bootstrap CLI administrator (12 to 128 characters). | Supply via environment variable when invoking `api:bootstrap-admin`. |
 | `PECP_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated list of permitted CORS web origins. | Whitelist exact frontend domains (e.g., `https://portal.pecp.io`). |
 
 ### Database Defaults by Context
@@ -31,25 +31,16 @@ Cookie security (`Secure` attribute) is governed programmatically by `options.se
 
 ## 2. Platform Bootstrap & Initial Setup
 
-The initial platform administrator is created through an explicit CLI script (`apps/api/src/cli/bootstrap-admin.ts`), NOT automatically on server startup.
+The initial platform administrator is created through the supported root `api:bootstrap-admin` npm script, NOT automatically on server startup.
 
 ### 2.1 CLI Invocation
-Set the database path and bootstrap password in the environment, then run the CLI with required `--email` and `--name` arguments:
+Set the explicit shared database path and bootstrap password in the environment, then run the root script with required `--email` and `--name` arguments:
 
 ```bash
 export PECP_DB_PATH="/var/lib/pecp/pecp.db"
 export PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!"
 
-node apps/api/dist/cli/bootstrap-admin.js \
-  --email "admin@organisation.com" \
-  --name "Initial Platform Admin"
-```
-
-Or in development via `npx tsx`:
-```bash
-PECP_DB_PATH="data/pecp.db" \
-PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!" \
-npx tsx apps/api/src/cli/bootstrap-admin.ts \
+npm run api:bootstrap-admin -- \
   --email "admin@organisation.com" \
   --name "Initial Platform Admin"
 ```
@@ -318,7 +309,7 @@ If all platform administrators are lost or incapacitated:
    ```
 2. Locate an existing active user ID:
    ```sql
-   SELECT id, email, displayName, platformRole, status FROM users WHERE status = 'ACTIVE';
+   SELECT id, email, display_name, platform_role, status FROM users WHERE status = 'ACTIVE';
    ```
 3. Elevate that user to `PLATFORM_ADMIN`:
    ```sql

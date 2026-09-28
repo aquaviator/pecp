@@ -5,11 +5,14 @@
 - **Programme Milestone:** M5.1 — Identity, RBAC & Audit Authority
 - **Repository:** `aquaviator/pecp`
 - **Branch:** `master`
-- **Base Remote Audited Commit:** `a90e626428080932d15700c2410aa331d07d819a`
-- **Prior Failed GitHub CI Run:** `36427590377` (Job ID: `108945273246`)
-- **Remote CI Failure Reason:** In commit `a90e626`, `package-lock.json` retained unchanged Git blob SHA `163f1273fb768a30a5ab9e8c138b339e410ca00f`, which was missing `@fastify/cookie@11.1.2` and `cookie@2.0.1`. Consequently, GitHub Actions failed at `npm ci`.
-- **Programme State:** M5.0 CLOSED -> M5.1 Implementation Complete / Lockfile & Documentation Corrected -> M5.2 NOT STARTED
-- **Milestone Self-Closure:** **NOT SELF-CLOSED** (Pending operator push, GitHub Actions execution, and independent PM audit).
+- **Accepted Remote Implementation SHA:** `0f3f3f3b7541fa73c4c3bd5260f12235daa0b9fe`
+- **Successful GitHub CI Run:** `36430335260` (Job ID: `108954578668`) — **SUCCESS**
+- **CI Test Suite Counts:** 487 web + 86 API + 10 Reference Lab = **583 passing tests**, 0 failures
+- **Implementation Gate Status:** **ACCEPTED** by PM (typecheck, tests, and build all passed in remote CI).
+- **Separately Labelled Local Implementation Reference SHA:** `1d651d76e64be61d0e27ff0f04abbba3c523a0d9`
+- **Prior Failed CI Run (Resolved):** `36427590377` (Job ID: `108945273246`) failed at `npm ci` due to missing `@fastify/cookie@11.1.2` / `cookie@2.0.1` in the previous lockfile blob `163f1273fb768a30a5ab9e8c138b339e410ca00f`. Resolved by synchronized lockfile blob `0d1d756a8c7fb7298b0fa5c4b23456f885ecf97b`.
+- **Programme State:** M5.0 CLOSED -> M5.1 Implementation Gate Accepted / Documentation Corrections Completed -> M5.2 NOT STARTED
+- **Milestone Self-Closure:** **NOT SELF-CLOSED** (Submitted for final PM milestone closure).
 
 ---
 
@@ -65,10 +68,15 @@ In an isolated checkout/worktree of the committed revision, real end-to-end exec
 All platform security documents were thoroughly audited against actual source code and corrected:
 
 ### A. Platform Bootstrap
-- **Explicit CLI Command:** Documented that bootstrap is performed via `node apps/api/dist/cli/bootstrap-admin.js` (or `npx tsx apps/api/src/cli/bootstrap-admin.ts`), requiring `--email` and `--name` CLI flags.
+- **Explicit CLI Command:** Documented that bootstrap is performed via the supported root npm script:
+  ```bash
+  PECP_DB_PATH="data/pecp.db" \
+  PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!" \
+  npm run api:bootstrap-admin -- --email admin@example.com --name "Platform Administrator"
+  ```
 - **Password Delivery:** Requires `PECP_BOOTSTRAP_ADMIN_PASSWORD` environment variable (validated by `PasswordHasher` between 12 and 128 characters).
 - **Existing Admin Rejection:** Documented that `userRepo.countActivePlatformAdmins() > 0` aborts with `Platform administrator already exists. Bootstrap aborted.` and existing email aborts with `User with email '<email>' already exists`.
-- **Zero Invention:** Removed all claims of automatic startup bootstrap and invented default credentials (`admin@pecp.io` / `Admin123456!`).
+- **Zero Invention:** Removed all claims of automatic startup bootstrap and invented default credentials. Removed assumptions about compiled API dist files.
 
 ### B. Database Configuration Alignment
 - Documented explicit configuration requirements for `PECP_DB_PATH`:
@@ -96,16 +104,17 @@ All platform security documents were thoroughly audited against actual source co
 - `GET /api/v1/auth/me`: Documented exact response envelope containing `{ user, principal, permissions }`.
 - `POST /api/v1/auth/logout`: Documented exact response `{ success: true }`.
 - `POST /api/v1/auth/change-password`: Documented exact response `{ success: true, message: "Password changed successfully. Please log in again." }`.
-- `POST /api/v1/auth/login`: Documented exact response `{ user, principal, csrfToken }`.
+- `POST /api/v1/auth/login`: Documented exact response `{ user, principal, csrfToken }` (raw session token is delivered exclusively in the HttpOnly `pecp_session` cookie).
+- `POST /api/v1/organisations/:orgId/memberships/:userId/revoke`: Documented exact response `{ success: true }`.
 
 ### G. Security Contracts & Terminology
 - **Session Revocation:** Documented soft-revocation via `revoked_at` timestamp on session records (`SessionService.revokeSession`, `SessionService.revokeAllForUser`), verified at lookup time.
 - **Password Hasher:** Documented `HashResult` (`algorithm`, `salt`, `passwordHash`, `paramsJson`) mapped to individual columns in the `local_credentials` SQLite table.
 - **Identity Provider Interface:** Documented actual contract `IAuthenticationProvider` with `providerId` and `authenticate(credentials: Record<string, any>): Promise<AuthenticationResult>`.
-- **Audit Actions & Fields:** Aligned with `AuditEvent` schema (`id`, `occurredAt`, `actorUserId`, `actorDisplayName`, `organisationId`, `projectId`, `action`, `targetType`, `targetId`, `outcome`, `reason`, `metadataJson`) and exact `AuditAction` enum names. Documented query parameters (`organisationId`, `projectId`, `actorUserId`, `action`, `limit`, `before`, `after`).
+- **Audit Actions & Fields:** Aligned with `AuditEvent` schema (`id`, `occurredAt`, `actorUserId`, `actorDisplayName`, `organisationId`, `projectId`, `action`, `targetType`, `targetId`, `outcome`, `reason`, `metadataJson`), exact `AuditAction` enum names, and exact audit outcomes (`SUCCESS` | `DENIED` | `FAILURE`). Documented query parameters (`organisationId`, `projectId`, `actorUserId`, `action`, `limit`, `before`, `after`).
 
 ### H. Disaster Recovery Boundary
-- Clearly delineated direct database modification via `sqlite3` CLI as an un-audited, out-of-band break-glass emergency procedure, NOT a supported product feature or governed workflow.
+- Clearly delineated direct database modification via `sqlite3` CLI as an un-audited, out-of-band break-glass emergency procedure, NOT a supported product feature or governed workflow. Corrected SQL example to use snake_case column names (`display_name`, `platform_role`).
 
 ---
 
@@ -121,11 +130,13 @@ Preserved and verified the following core protections:
 
 ## 6. Verification Status & Remote Delivery
 
-- **Local Implementation SHA:** `6f534b779f49cbad41d2aabac402c33135a5a9b8` (committed on top of `a90e626428080932d15700c2410aa331d07d819a`).
-- **Root Lockfile Blob SHA:** `0d1d756a8c7fb7298b0fa5c4b23456f885ecf97b` (Verified differing from failed baseline `163f1273fb768a30a5ab9e8c138b339e410ca00f`).
-- **Remote CI Run / Job Status:** Remote git push credentials are restricted from this sandbox environment (`fatal: could not read Username for 'https://github.com': No such device or address`). In strict compliance with instructions:
-  - Local verification results are confirmed passing across all 583 tests.
-  - Remote CI execution is explicitly reported as pending operator push of this commit to `aquaviator/pecp`.
-  - Remote success is not declared from local build logs.
-  - M5.1 is not self-closed.
-  - M5.2 has not been started.
+- **Accepted Remote Implementation SHA:** `0f3f3f3b7541fa73c4c3bd5260f12235daa0b9fe`
+- **Remote CI Run:** `36430335260` (Job ID: `108954578668`) — **SUCCESS**
+  - Web Suite: 30 test files, **487 passed**, 0 failed
+  - API Suite: 17 test files, **86 passed**, 0 failed
+  - Reference Lab Suite: 1 test file, **10 passed**, 0 failed
+  - Total Remote Tests: **583 passed**, 0 failed
+- **Separately Labelled Local Implementation Reference SHA:** `1d651d76e64be61d0e27ff0f04abbba3c523a0d9`
+- **Root Lockfile Blob SHA:** `0d1d756a8c7fb7298b0fa5c4b23456f885ecf97b` (contains `@fastify/cookie@11.1.2` and `cookie@2.0.1`).
+- **Documentation Sign-off Corrections:** Delivered in this commit with 0 runtime, dependency, or lockfile changes.
+- **Milestone Status:** M5.1 ready for final PM sign-off. M5.1 is not self-closed. M5.2 has not been started.

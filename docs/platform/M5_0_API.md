@@ -425,7 +425,12 @@ Updates a member's role.
 Revokes membership (`status: 'REVOKED'`).
 - Enforces final-administrator protection inside the database transaction lock: revoking the last `ORG_ADMIN` returns **400 Bad Request** (`Cannot revoke the last ORG_ADMIN for this organisation`).
 
-**Response (200 OK):** Returns revoked membership object.
+**Response (200 OK):**
+```json
+{
+  "success": true
+}
+```
 
 ---
 

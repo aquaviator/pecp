@@ -122,7 +122,7 @@ Replacing the local provider with an enterprise OIDC/SAML bridge requires zero m
 ## 5. Session Lifecycle & Token Management
 
 - **Opaque Tokens:** Session tokens are 32-byte (256-bit) cryptographically random hexadecimal strings generated via `crypto.randomBytes(32)`.
-- **Token Hashing at Rest:** The raw token is delivered exclusively to the client in an HTTP-only cookie (or API response). The database stores only the SHA-256 hash of the token (`token_hash = sha256(raw_token)`). Compromise of the database does not reveal valid session tokens.
+- **Token Hashing at Rest:** The raw session token is delivered exclusively to the client in an HTTP-only cookie (`pecp_session`). The JSON login response returns `{ user, principal, csrfToken }`, never the raw session token. The database stores only the SHA-256 hash of the token (`token_hash = sha256(raw_token)`). Compromise of the database does not reveal valid session tokens.
 - **Session Duration (TTL):** Default TTL is 12 hours, configurable when constructing `SessionService`.
 - **Soft Revocation via `revoked_at`:**
   - Revocation is implemented by updating the `revoked_at` timestamp on session records (`session.revokedAt`).
@@ -227,7 +227,7 @@ Every state change is recorded in the append-only `audit_events` ledger:
 - `projectId`: Associated project (or null).
 - `action`: Specific governed `AuditAction` (e.g., `USER_CREATE`, `USER_DISABLE`, `USER_ENABLE`, `PASSWORD_CHANGE`, `PASSWORD_RESET`, `MEMBERSHIP_CREATE`, `MEMBERSHIP_ROLE_CHANGE`, `MEMBERSHIP_REVOKE`, `PROJECT_CREATE`, `PROJECT_UPDATE`, `PROJECT_ARCHIVE`, `INTELLIGENCE_CONFLICT_RESOLVE`, `INTELLIGENCE_APPROVE`, `AUTHORIZATION_DENIED`, `LOGIN_SUCCESS`, `LOGIN_FAILURE`, `LOGOUT`).
 - `targetType` & `targetId`: Entity type and composite identifier.
-- `outcome`: `SUCCESS` | `DENIED` | `FAILED`.
+- `outcome`: `SUCCESS` | `DENIED` | `FAILURE`.
 - `reason`: Description of failure or denial rationale.
 - `metadataJson`: Structured parameters (roles, timestamps, diffs) with automatic redaction of secrets, passwords, tokens, and hashes.
 
@@ -248,17 +248,15 @@ Queries to `GET /api/v1/audit` support the following parameters:
 
 ## 10. Bootstrap Process
 
-The initial platform administrator is created via an explicit CLI command (`apps/api/src/cli/bootstrap-admin.ts`), NOT an automatic startup routine.
+The initial platform administrator is created via an explicit CLI command using the supported root `api:bootstrap-admin` npm script, NOT an automatic startup routine.
 
 ### CLI Invocation
+Set the explicit shared database path and bootstrap password in the environment, then run the root script with required `--email` and `--name` arguments:
+
 ```bash
+PECP_DB_PATH="data/pecp.db" \
 PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!" \
-  node dist/cli/bootstrap-admin.js --email admin@example.com --name "Platform Administrator"
-```
-Or in development via tsx:
-```bash
-PECP_BOOTSTRAP_ADMIN_PASSWORD="SecureBootstrapPassword123!" \
-  npx tsx apps/api/src/cli/bootstrap-admin.ts --email admin@example.com --name "Platform Administrator"
+npm run api:bootstrap-admin -- --email admin@example.com --name "Platform Administrator"
 ```
 
 ### Constraints & Rejection Behavior
