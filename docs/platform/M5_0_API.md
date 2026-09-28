@@ -188,14 +188,133 @@ Retrieves a specific intelligence item by ID. Returns 404 if project or item is 
 
 ---
 
-## 6. Error Envelope Standard
+## 7. M5.1 Identity, Authentication & Session API
+
+All mutating endpoints require an active session and a valid `x-csrf-token` header matching the `pecp_csrf` cookie.
+
+### POST /api/v1/auth/login
+Authenticates user credentials and establishes an HTTP-only session cookie.
+
+**Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "Password123!"
+}
+```
+
+**Response (200 OK):** Sets `pecp_session` and `pecp_csrf` cookies. Returns authenticated principal.
+
+### POST /api/v1/auth/logout
+Terminates the active session and clears cookies.
+
+**Response (200 OK):**
+```json
+{ "status": "ok" }
+```
+
+### GET /api/v1/auth/me
+Returns the authenticated principal resolved from the active session. Returns 401 if unauthenticated.
+
+**Response (200 OK):**
+```json
+{
+  "userId": "usr_abc123",
+  "email": "user@example.com",
+  "displayName": "Jane Doe",
+  "platformRole": "NONE",
+  "memberships": [
+    { "organisationId": "org_northstar", "role": "PERFORMANCE_LEAD" }
+  ],
+  "sessionId": "ses_xyz789",
+  "authenticatedAt": "2026-09-28T08:00:00.000Z"
+}
+```
+
+### POST /api/v1/auth/change-password
+Updates password for current user, revokes existing sessions, and clears cookies.
+
+**Request:**
+```json
+{
+  "currentPassword": "OldPassword123!",
+  "newPassword": "NewPassword123!"
+}
+```
+
+---
+
+## 8. M5.1 User Administration API
+
+Requires `PLATFORM_ADMIN` platform role.
+
+### POST /api/v1/users
+Creates a new user.
+
+### GET /api/v1/users
+Lists all users.
+
+### GET /api/v1/users/:userId
+Retrieves user by ID.
+
+### PATCH /api/v1/users/:userId/status
+Updates user status (`ACTIVE` | `DISABLED`). Disabling immediately revokes all active sessions.
+
+### POST /api/v1/users/:userId/reset-password
+Administratively resets a user's password and revokes all active sessions.
+
+---
+
+## 9. M5.1 Organisation Membership API
+
+Governed by `ORGANISATION_MANAGE_MEMBERS` (`ORG_ADMIN` or `PLATFORM_ADMIN`).
+
+### GET /api/v1/organisations/:orgId/memberships
+Lists all memberships for the organisation. Requires `ORG_ADMIN` of the organisation or `PLATFORM_ADMIN`.
+
+### POST /api/v1/organisations/:orgId/memberships
+Adds a user to the organisation.
+- If user has an active membership: returns **409 Conflict** (`Active membership already exists`).
+- If user was revoked: reactivates membership and preserves original creation provenance (`createdByUserId`, `createdAt`).
+
+### PATCH /api/v1/organisations/:orgId/memberships/:userId/role
+Updates a member's role.
+- Enforces final-administrator protection: demoting the last `ORG_ADMIN` returns **400 Bad Request**.
+
+### POST /api/v1/organisations/:orgId/memberships/:userId/revoke
+Revokes membership (`status: 'REVOKED'`).
+- Enforces final-administrator protection: revoking the last `ORG_ADMIN` returns **400 Bad Request**.
+
+---
+
+## 10. M5.1 Intelligence Governance & Human Decision Authority
+
+### POST /api/v1/projects/:projectId/intelligence/:itemId/resolve
+Resolves an intelligence conflict. Requires `INTELLIGENCE_RESOLVE` (`ORG_ADMIN`, `PERFORMANCE_LEAD`, `REVIEWER`).
+Attribution is bound to the authenticated actor.
+
+### POST /api/v1/projects/:projectId/intelligence/:itemId/approve
+Approves an intelligence candidate. Requires `INTELLIGENCE_APPROVE` (`ORG_ADMIN`, `PERFORMANCE_LEAD`, `REVIEWER`).
+Attribution is bound to the authenticated actor.
+
+---
+
+## 11. M5.1 Audit Ledger API
+
+### GET /api/v1/audit
+Queries the immutable audit ledger. Requires `AUDIT_READ` (`ORG_ADMIN`, `PERFORMANCE_LEAD`, `REVIEWER`, or `PLATFORM_ADMIN`).
+Supports `organisationId`, `action`, `actorUserId`, `limit`, and `offset` query parameters.
+
+---
+
+## 12. Error Envelope Standard
 
 All non-2xx responses conform to the standard error envelope:
 
 ```json
 {
   "error": {
-    "code": "VALIDATION_ERROR | NOT_FOUND | CONFLICT | INTERNAL_ERROR",
+    "code": "VALIDATION_ERROR | NOT_FOUND | CONFLICT | FORBIDDEN | UNAUTHORIZED | INTERNAL_ERROR",
     "message": "Human-readable description of error",
     "details": null
   }

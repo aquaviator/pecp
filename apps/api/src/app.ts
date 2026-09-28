@@ -698,9 +698,11 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       );
       reply.status(201).send(membership);
     } catch (err: any) {
-      reply.status(400).send({
+      const isConflict = err.statusCode === 409 || err.message?.includes('already exists');
+      const status = isConflict ? 409 : 400;
+      reply.status(status).send({
         error: {
-          code: 'OPERATION_FAILED',
+          code: isConflict ? 'CONFLICT' : 'OPERATION_FAILED',
           message: err.message
         }
       });

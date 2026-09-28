@@ -308,17 +308,52 @@ export class IdentityAdministrationService {
     }
 
     const now = new Date().toISOString();
-    const membership: OrganisationMembership = {
-      organisationId,
-      userId: targetUserId,
-      role,
-      status: 'ACTIVE',
-      createdAt: now,
-      updatedAt: now,
-      createdByUserId: actor.userId
-    };
 
     return this.withTransaction(async () => {
+      const existing = await this.membershipRepo.get(organisationId, targetUserId);
+      if (existing) {
+        if (existing.status === 'ACTIVE') {
+          const conflictErr = new Error(
+            `Active membership already exists for user '${targetUserId}' in organisation '${organisationId}'`
+          );
+          (conflictErr as any).statusCode = 409;
+          throw conflictErr;
+        }
+
+        // Reactivating a previously revoked membership:
+        // Preserves original createdAt and createdByUserId creation provenance
+        const reactivated: OrganisationMembership = {
+          ...existing,
+          role,
+          status: 'ACTIVE',
+          updatedAt: now
+        };
+
+        await this.membershipRepo.save(reactivated);
+
+        await this.auditService.record({
+          actor,
+          organisationId,
+          action: 'MEMBERSHIP_CREATE',
+          targetType: 'MEMBERSHIP',
+          targetId: `${organisationId}:${targetUserId}`,
+          outcome: 'SUCCESS',
+          metadata: { targetUserId, role, reactivated: true, previousStatus: existing.status }
+        });
+
+        return reactivated;
+      }
+
+      const membership: OrganisationMembership = {
+        organisationId,
+        userId: targetUserId,
+        role,
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+        createdByUserId: actor.userId
+      };
+
       await this.membershipRepo.save(membership);
 
       await this.auditService.record({
@@ -328,7 +363,7 @@ export class IdentityAdministrationService {
         targetType: 'MEMBERSHIP',
         targetId: `${organisationId}:${targetUserId}`,
         outcome: 'SUCCESS',
-        metadata: { targetUserId, role }
+        metadata: { targetUserId, role, reactivated: false }
       });
 
       return membership;
@@ -347,22 +382,31 @@ export class IdentityAdministrationService {
     );
 
     if (!isPlatformAdmin && !isOrgAdmin) {
+      await this.auditService.record({
+        actor,
+        organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${targetUserId}`,
+        outcome: 'DENIED',
+        reason: 'ORG_ADMIN or PLATFORM_ADMIN required to manage memberships'
+      });
       throw new Error('Forbidden: Admin authority required for organisation');
     }
 
-    const current = await this.membershipRepo.get(organisationId, targetUserId);
-    if (!current || current.status !== 'ACTIVE') {
-      throw new Error('Active membership not found');
-    }
-
-    if (current.role === 'ORG_ADMIN' && newRole !== 'ORG_ADMIN') {
-      const adminCount = await this.membershipRepo.countActiveAdmins(organisationId);
-      if (adminCount <= 1) {
-        throw new Error('Cannot demote the last ORG_ADMIN for this organisation');
-      }
-    }
-
     return this.withTransaction(async () => {
+      const current = await this.membershipRepo.get(organisationId, targetUserId);
+      if (!current || current.status !== 'ACTIVE') {
+        throw new Error('Active membership not found');
+      }
+
+      if (current.role === 'ORG_ADMIN' && newRole !== 'ORG_ADMIN') {
+        const adminCount = await this.membershipRepo.countActiveAdmins(organisationId);
+        if (adminCount <= 1) {
+          throw new Error('Cannot demote the last ORG_ADMIN for this organisation');
+        }
+      }
+
       const updated: OrganisationMembership = {
         ...current,
         role: newRole,
@@ -396,22 +440,31 @@ export class IdentityAdministrationService {
     );
 
     if (!isPlatformAdmin && !isOrgAdmin) {
+      await this.auditService.record({
+        actor,
+        organisationId,
+        action: 'AUTHORIZATION_DENIED',
+        targetType: 'MEMBERSHIP',
+        targetId: `${organisationId}:${targetUserId}`,
+        outcome: 'DENIED',
+        reason: 'ORG_ADMIN or PLATFORM_ADMIN required to manage memberships'
+      });
       throw new Error('Forbidden: Admin authority required for organisation');
     }
 
-    const current = await this.membershipRepo.get(organisationId, targetUserId);
-    if (!current || current.status !== 'ACTIVE') {
-      throw new Error('Active membership not found');
-    }
-
-    if (current.role === 'ORG_ADMIN') {
-      const adminCount = await this.membershipRepo.countActiveAdmins(organisationId);
-      if (adminCount <= 1) {
-        throw new Error('Cannot revoke the last ORG_ADMIN for this organisation');
+    return this.withTransaction(async () => {
+      const current = await this.membershipRepo.get(organisationId, targetUserId);
+      if (!current || current.status !== 'ACTIVE') {
+        throw new Error('Active membership not found');
       }
-    }
 
-    await this.withTransaction(async () => {
+      if (current.role === 'ORG_ADMIN') {
+        const adminCount = await this.membershipRepo.countActiveAdmins(organisationId);
+        if (adminCount <= 1) {
+          throw new Error('Cannot revoke the last ORG_ADMIN for this organisation');
+        }
+      }
+
       const updated: OrganisationMembership = {
         ...current,
         status: 'REVOKED',
