@@ -1,226 +1,128 @@
 # PECP M5.1 Project Manager Review
 
-## Latest verdict
+## Final verdict
+
+**M5.1: PASS / APPROVED FOR CLOSURE**
 
-**M5.1: HOLD / NOT CLOSED**
+Review date: 2026-09-28.
 
-This follow-up reviews implementation `a50ff4040f095ce774d48029bfeed61339d53966` against the existing M5.1 work package and the previous PM review committed at `c6fcdfa3ff3d0004f86548cd47c91dbce6c97e06`.
+The five documentation-only sign-off corrections are accepted. The final remote documentation revision has also passed the normal GitHub CI pipeline. The previously accepted implementation gate remains intact.
 
-Correct M5.1 in place. Do not create M5.1.1 and do not start M5.2.
+This decision closes the defined M5.1 Identity, RBAC & Audit Authority work package. It is not a production deployment approval, penetration-test report, regulatory certification, or assertion that no security defects remain.
 
-This is a source review and inspection of actual GitHub Actions evidence, not a claim that the PM independently ran the local test suite. Accepted source changes below remain subject to successful clean CI and the applicable regression tests.
+## 1. Authoritative revision and evidence
 
-## 1. Authoritative implementation and verification
+| Evidence | Reference |
+| --- | --- |
+| Repository | `aquaviator/pecp` |
+| Audited branch | `master` |
+| Accepted runtime implementation | `0f3f3f3b7541fa73c4c3bd5260f12235daa0b9fe` |
+| Accepted implementation CI run / job | `36430335260` / `108954578668`, SUCCESS |
+| Final remote documentation revision | `7e3b90bf122a3b23d50cb9667e131b60fdaf18fb` |
+| Final documentation revision parent | `0f3f3f3b7541fa73c4c3bd5260f12235daa0b9fe` |
+| Final revision CI run / job | `36431793119` / `108959547758`, SUCCESS |
+| Workflow | `CI`, `.github/workflows/ci.yml` |
+| Accepted root lockfile blob | `0d1d756a8c7fb7298b0fa5c4b23456f885ecf97b` |
 
-- Repository: `aquaviator/pecp`
-- Audited branch: `master`
-- Implementation SHA: `a50ff4040f095ce774d48029bfeed61339d53966`
-- Workflow: `CI`
-- Run ID: `36123203003`
-- Job ID: `108033282058`
-- Remote conclusion: **FAILURE**
-- Failed step: **Install dependencies (deterministic)**
-- TypeScript, tests and production build: **SKIPPED in this remote run**
+The worker reported local documentation commit `6dbf1066db1b1201c739e9bd357842741f423516` and local implementation reference `1d651d76e64be61d0e27ff0f04abbba3c523a0d9`. These remain worker-supplied local references. They are not substituted for the remote revision actually inspected above.
 
-The run is bound to the audited implementation SHA. Its logs show Node v22.23.2 and npm 10.9.8, followed by:
+Evidence was obtained by inspecting the remote branch, commit metadata and changed-file patches, the corrected documentation, and GitHub Actions run/job metadata and decoded job logs. The PM did not independently execute a second local test suite or conduct a browser walkthrough during this final documentation review.
 
-```text
-npm error code EUSAGE
-npm ci can only install packages when package.json and package-lock.json are in sync.
-Missing: @fastify/cookie@11.1.2 from lock file
-Missing: cookie@2.0.1 from lock file
-```
+## 2. Documentation-only change boundary
 
-The submitted local totals are arithmetically consistent:
+The final revision is a direct child of the accepted implementation and changes exactly these four files:
 
-- Web: 487
-- API: 83
-- Reference Lab: 10
-- Total: 580
+- `docs/M5_1_COMPLETION_REPORT.md`
+- `docs/platform/M5_0_API.md`
+- `docs/security/M5_1_IDENTITY_RBAC_ARCHITECTURE.md`
+- `docs/security/M5_1_SECURITY_OPERATIONS.md`
 
-These remain **reported local results**, not verified remote results. This remote run did not execute those suites. No claim is made here that the tests themselves failed.
+No application source, tests, dependency manifests, lockfiles, RBAC implementation or transaction implementation changed in this revision. The earlier implementation acceptance is therefore preserved; this review does not reopen it.
 
-## 2. Previous corrections now present in source
+## 3. Final five corrections
 
-The remaining task is smaller than the original twelve-point correction. Do not discard or rewrite the corrections already present.
+| Correction | Final assessment |
+| --- | --- |
+| Supported administrator bootstrap command | PASS. The documents now use the root `npm run api:bootstrap-admin -- --email ... --name ...` script with required `PECP_BOOTSTRAP_ADMIN_PASSWORD` and an explicit shared `PECP_DB_PATH`. Unsupported assumptions about compiled API bootstrap files were removed from the corrected instructions. |
+| Session token delivery | PASS. Login JSON is documented as `{ user, principal, csrfToken }`. The raw session token is issued through the HttpOnly `pecp_session` cookie, not the JSON response; its hash is stored. |
+| Audit outcome vocabulary | PASS. The documented enum is `SUCCESS | DENIED | FAILURE`, matching the platform type and SQLite constraint. |
+| Recovery SQL column names | PASS. The SQL example uses `display_name` and `platform_role`. Direct database modification remains explicitly described as unaudited, out-of-band and not a supported governed application workflow. This review does not approve performing that procedure. |
+| Membership revocation response | PASS. The documented response is `{ "success": true }`, matching the handler rather than an invented membership-object response. |
 
-### Application authentication boundary
+The completion report also now distinguishes the accepted remote implementation and CI from local references and the documentation-only correction.
 
-`apps/web/src/App.tsx` now mounts:
+## 4. Remote CI verification at final documentation revision
 
-```text
-ServiceProvider
-  -> AuthProvider
-    -> AuthenticatedAppBoundary
-      -> AppContent
-```
+GitHub Actions run `36431793119`, job `108959547758`, executed against `7e3b90bf122a3b23d50cb9667e131b60fdaf18fb` on Node v22.23.2 and npm 10.9.8.
 
-The boundary contains API-mode session-loading, login and authenticated portal states. MOCK mode retains an AuthContext-backed reference path. The initial conflict count is now `number | null`, initialized to `null`, rather than the historical value of 3.
+| Gate | Observed result |
+| --- | --- |
+| Actual `npm ci` | PASS; 247 packages added, 255 audited |
+| Root TypeScript checks | PASS |
+| Web Vitest | 30 files, 487 tests passed |
+| API/platform Vitest | 17 files, 86 tests passed |
+| RetailCo Reference Lab | 10 tests passed in the Node runner |
+| Combined tests | 583 passed, 0 failed |
+| Production web build | PASS; Vite build completed |
 
-### Authenticated project and intelligence clients
+The total is 47 Vitest files plus the Reference Lab test file, not 48 Vitest files. The Node runner's reported test count is retained as reported.
 
-`ApiProjectService` and `ApiIntelligenceService` now delegate to the shared `ApiClient`. Existing collection-envelope checks and error propagation are retained. Intelligence mutation payloads do not send a trusted approver identity.
+Relevant regression suites observed in this run include:
 
-### Security mutations and audit atomicity
+- `AppAuthenticationGate.test.tsx`: 5 tests;
+- `ApiProjectService.test.ts`: 6 tests;
+- `ApiIntelligenceService.test.ts`: 7 tests;
+- `ServiceContextMode.test.tsx`: 3 tests;
+- `identity_atomic_rollback.test.ts`: 6 tests;
+- `mutation_denial_audit.test.ts`: 6 tests;
+- `concurrent_security.test.ts`: 4 tests;
+- `transaction_rollback.test.ts`: 8 tests;
+- `auth_api.test.ts`: 7 tests;
+- `rbac_matrix.test.ts`: 6 tests;
+- `tenant_isolation.test.ts`: 5 tests;
+- `intelligence_governance.test.ts`: 4 tests;
+- `session_lifecycle.test.ts`: 6 tests;
+- `bootstrap_admin.test.ts`: 4 tests.
 
-`IdentityAdministrationService` now accepts `IUnitOfWork`; the API factory supplies the SQLite unit of work. User creation, status changes, credential changes, and membership writes place their persistent mutation and success audit inside that boundary.
+Passing these suites is evidence for their tested behaviors, not proof of every possible security state or browser interaction.
 
-`apps/api/test/identity_atomic_rollback.test.ts` contains six failure-injection cases covering user creation, user disable, password reset, membership creation, membership role change and membership revocation.
+## 5. Prior gates retained as accepted
 
-This addresses the prior missing write/audit transaction boundary. The separate last-administrator check placement problem is described below.
+The earlier M5.1 reviews and accepted runtime revision established the work-package implementation and correction evidence for:
 
-### Mutation-denial auditing
+- LOCAL identity, password hashing and opaque session handling;
+- server-side organisation-scoped RBAC and tenant-filtered reads;
+- application authentication gate and shared credentialed API clients;
+- authenticated intelligence decision attribution;
+- identity mutation and required success-audit transactional writes;
+- protected mutation-denial audit coverage;
+- membership-directory permission restriction;
+- password-change forced reauthentication and persisted authentication timestamps;
+- administrator demotion/revocation checks inside the serialized Unit of Work;
+- duplicate active-membership creation rejection and provenance-preserving reactivation;
+- deterministic lockfile installation;
+- required security and API documents.
 
-Protected mutation denial audit calls have been added, including membership routes. `apps/api/test/mutation_denial_audit.test.ts` contains regressions for project creation/update/archive, membership mutations, intelligence approval and administrative user-creation denial. Its project fixture now supplies `organisation`.
+The final administrator regressions passed remotely, including concurrent demotion, concurrent revocation and the duplicate-membership overwrite path. This review does not expand that evidence into a claim that every possible administrative lockout scenario has been exhaustively tested.
 
-`SqliteAuditEventRepository` query-helper additions are present in the commit. Their presence is not, by itself, proof that every authorization or audit requirement is complete.
+## 6. Known limits and carry-forward release notes
 
-### Membership directory access
+The successful CI log is not warning-free. It reports two moderate dependency advisories, a Recharts deprecation warning, Node SQLite experimental warnings, browser externalization warnings for Node modules referenced by `resultsIngestion.ts`, and a large-bundle warning. Their production impact was not evaluated in this final review. Preserve them for release hardening and dependency triage; do not apply a blind forced dependency upgrade as part of this closure.
 
-The membership list route now requires `ORGANISATION_MANAGE_MEMBERS`; the identity service restricts membership listing to PLATFORM_ADMIN or the target organisation's ORG_ADMIN. Preserve this restriction and the original role matrix.
+The normal build is the web production build. API TypeScript and tests passed; this is not evidence of a separately packaged production API distribution.
 
-### Password-change lifecycle and authentication timestamp
+Audit append-only behavior is an application-level contract, not a claim of cryptographic protection against a privileged database operator.
 
-The password-change route now clears session and CSRF cookies after revocation instead of issuing a replacement session. Principal restoration receives the validated session's persisted `authenticatedAt`; login also copies the created session's authentication timestamp into its returned principal.
+M5.1 closure does not deliver OIDC/SAML, MFA, SCIM, invitations, service accounts, live third-party connectors, document extraction, BYOAI integration, production runner orchestration or a full production-security assessment.
 
-### Final ORG_ADMIN sequential check
+No runtime code or dependency was changed by this PM sign-off.
 
-Demotion/revocation no longer exempt PLATFORM_ADMIN from the final-ORG_ADMIN guard. This fixes the direct sequential exception but does not yet make the invariant complete under concurrency or the membership-create endpoint.
+## 7. Audit history and disposition
 
-## 3. Remaining blocker A: the pushed lockfile is still inconsistent
+Earlier HOLD reviews remain available in Git history. The previous review is preserved at commit `ea3ba8ac1b72609f4622beaf258d93a5a5013662`, path `docs/M5_1_PM_REVIEW.md`; the initial review was committed at `c6fcdfa3ff3d0004f86548cd47c91dbce6c97e06`.
 
-This is the same dependency-installation blocker, not a new requirement.
+Historical failed CI runs remain historical failures. Their conclusions are not rewritten by this approval. Later source corrections and the successful implementation/documentation runs above supersede them for the current milestone decision.
 
-The implementation commit still cannot pass clean `npm ci` in normal GitHub CI.
+**Final decision: the outstanding M5.1 gates are satisfied. M5.1 is approved for formal closure.**
 
-Required correction:
-
-1. Confirm the working directory is the repository root, not a nested sandbox export directory.
-2. Confirm the approved Node/npm environment, including npm 10.9.8.
-3. Synchronize the root lockfile against the root and workspace package manifests.
-4. Commit the actual updated `package-lock.json` alongside any dependency changes.
-5. Verify a clean installation and the normal lint/test/build commands from an isolated checkout or worktree.
-6. Push the implementation and bind the new report to the CI run for that exact SHA.
-
-Do not replace `npm ci` with `npm install` in CI. Do not add a fallback installation command. Do not treat a cached sandbox build as evidence that the pushed lockfile is correct.
-
-## 4. Remaining blocker B: final-administrator protection is incomplete
-
-This is completion of the existing last-ORG_ADMIN and concurrent-security requirements, not a new milestone or feature.
-
-### B1. The guard runs before the transaction lock
-
-In `IdentityAdministrationService.updateMembershipRole()` and `revokeMembership()`, the current membership read and `countActiveAdmins()` check happen before `withTransaction()` acquires the unit-of-work boundary.
-
-The write and audit are atomic, but the decision to permit removal is not protected by that same transaction.
-
-A permitted interleaving is:
-
-1. Organisation has two active ORG_ADMIN memberships.
-2. Two independent removal/demotion operations each read a count of two before either acquires the mutation transaction.
-3. Both pass the check.
-4. Their writes serialize, but neither repeats the guard inside the transaction.
-5. Both removals can complete, leaving zero active ORG_ADMIN memberships.
-
-This is a source-derived concurrency finding. It has not been exercised against a deployed customer instance during this audit.
-
-Required correction:
-
-- Move the current membership read, applicable administrator-count check, mutation and audit inside the same serialized unit of work.
-- Re-evaluate the relevant authority/state at the write boundary rather than relying on a pre-lock snapshot.
-- Preserve rollback behavior and audit attribution.
-- Add an async-barrier regression starting with two administrators and attempting concurrent demotions/revocations. At least one usable administrator must remain; rejected changes must not partially persist.
-
-### B2. Membership creation can overwrite an existing administrator
-
-`IdentityAdministrationService.addMembership()` constructs a new membership and calls `membershipRepo.save()` without checking for an existing membership.
-
-`SqliteOrganisationMembershipRepository.save()` implements an UPSERT:
-
-```text
-ON CONFLICT(organisation_id, user_id) DO UPDATE
-  role = excluded.role,
-  status = excluded.status,
-  updated_at = excluded.updated_at
-```
-
-Consequently, the POST membership-create path can change an existing ORG_ADMIN to VIEWER without passing through the role-change method's final-administrator check. It can also describe an overwrite as MEMBERSHIP_CREATE rather than the actual role transition.
-
-Required narrow correction:
-
-- For an existing active membership, return a controlled 409 conflict from the create path and require the governed role-change endpoint, or route the operation through exactly the same guarded transition.
-- Do not silently overwrite an existing active membership.
-- Define any revoked-membership reactivation behavior explicitly; do not use it as a role-change bypass or rewrite original creation provenance.
-- Perform the existence check and any permitted insertion/reactivation atomically.
-
-Required tests:
-
-- Re-posting the sole ORG_ADMIN as VIEWER cannot remove administrator authority.
-- Duplicate active-membership creation cannot silently change role, status or creation provenance.
-- The public API and direct application-service behavior agree.
-- Both PLATFORM_ADMIN and ORG_ADMIN actors are covered.
-- Concurrent removal tests cover demotion and revocation, with audit/state consistency.
-
-## 5. Remaining blocker C: required security documents and completion report are absent
-
-At the audited SHA, direct repository reads did not find:
-
-- `docs/security/` containing the required M5.1 documents;
-- `docs/M5_1_COMPLETION_REPORT.md`.
-
-The commit removes the report previously placed under `app/applet/docs/`; removing the misplaced copy does not create its required replacement.
-
-Create and commit:
-
-1. `docs/security/M5_1_IDENTITY_RBAC_ARCHITECTURE.md`
-2. `docs/security/M5_1_SECURITY_OPERATIONS.md`
-3. `docs/M5_1_COMPLETION_REPORT.md`
-
-Ensure the implemented API documentation is current as required by the original work package.
-
-The documents must describe the actual runtime hierarchy, LOCAL authentication provider, role matrix, tenant boundaries, session lifecycle, CSRF/CORS configuration, bootstrap process, administrator protection, audit transaction boundary and current limitations. Preserve the correct REVIEWER permissions; do not copy the erroneous matrix from the first completion report.
-
-The report must distinguish implementation SHA, documentation commit, local verification and remote CI. If remote CI is unavailable or incomplete, say so. Do not invent workflow identifiers or assert remote success from local logs.
-
-## 6. Verification and closure process
-
-Preserve all historical M0-M5.0 tests and current M5.1 security tests. Execute the normal repository pipeline:
-
-```text
-npm ci
-npm run lint
-npm run test
-npm run build
-```
-
-Retain and verify the originally required evidence for:
-
-- real application authentication gate and logout/session restoration;
-- credentialed project/intelligence calls and CSRF;
-- identity mutation/audit rollback;
-- protected mutation-denial audit;
-- membership-directory access restrictions;
-- final administrator protection, including the concurrency and alternate-endpoint paths above;
-- forced reauthentication after password change;
-- stable session authenticatedAt;
-- tenant filtering and no API-mode mock fallback.
-
-Do not report a source-level change as a passing runtime test unless it was actually executed. Do not claim a browser walkthrough from static-render tests alone.
-
-Return an updated **M5.1 Completion Report for PM Audit** containing:
-
-- actual implementation SHA;
-- GitHub workflow run and job IDs bound to that SHA;
-- remote conclusion and step outcomes;
-- exact web/API/reference-lab counts from that run;
-- clean-lockfile confirmation;
-- final-administrator regression results;
-- required documentation paths;
-- any remaining limitations;
-- confirmation M5.2 has not started.
-
-## Programme state
-
-**M5.0 CLOSED -> M5.1 implementation corrections largely present / HOLD on deterministic CI, final-administrator integrity and missing documentation -> M5.2 NOT STARTED.**
-
-This review does not close M5.1, does not reopen M5.0, and does not authorize additional product scope.
+Do not create another M5.1 correction milestone for these resolved items. M5.0 remains closed. M5.2 has not been started by this review and requires a separately scoped work package before implementation.
