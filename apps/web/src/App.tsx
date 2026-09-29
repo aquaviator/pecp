@@ -11,6 +11,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { AdministrationPage } from './pages/AdministrationPage';
 import { ProjectOverviewPage } from './pages/project/ProjectOverviewPage';
+import { SourcesIntakePage } from './pages/project/SourcesIntakePage';
 import { IntelligencePage } from './pages/project/IntelligencePage';
 import { ArchitecturePage } from './pages/project/ArchitecturePage';
 import { RequirementsPage } from './pages/project/RequirementsPage';
@@ -137,6 +138,12 @@ const AppContent: React.FC = () => {
               <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 {projectTab === 'OVERVIEW' && (
                   <ProjectOverviewPage
+                    project={activeProject}
+                    onNavigateTab={setProjectTab}
+                  />
+                )}
+                {projectTab === 'SOURCES' && (
+                  <SourcesIntakePage
                     project={activeProject}
                     onNavigateTab={setProjectTab}
                   />

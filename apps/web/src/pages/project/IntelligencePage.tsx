@@ -29,7 +29,7 @@ interface IntelligencePageProps {
 }
 
 export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) => {
-  const { intelligenceService } = useServices();
+  const { intelligenceService, sourceService } = useServices();
   const { user, hasPermission } = useAuth();
 
   const canResolve =
@@ -38,6 +38,7 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
   const canApprove = hasPermission('INTELLIGENCE_APPROVE', project.organisationId);
 
   const [summary, setSummary] = useState<IntelligenceReviewSummary | null>(null);
+  const [intakeSummary, setIntakeSummary] = useState<any | null>(null);
   const [items, setItems] = useState<IntelligenceItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<IntelligenceItem | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
@@ -65,6 +66,13 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
     } catch {
       // In API mode, review summary is not platformised in M5.0; client-invented summary is forbidden
       setSummary(null);
+    }
+
+    try {
+      const isum = await sourceService.getIntakeSummary(project.id);
+      setIntakeSummary(isum);
+    } catch {
+      setIntakeSummary(null);
     }
   };
 
@@ -145,8 +153,8 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
           </div>
         </div>
 
-        {/* 5 Required Summary Metrics from Constitution & Reference Project */}
-        {summary && (
+        {/* 5 Required Summary Metrics from Constitution & Reference Project or M5.2 Intake Summary */}
+        {summary ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-5">
             <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
               <div className="text-[11px] font-mono uppercase text-slate-400">Documents Analysed</div>
@@ -191,7 +199,52 @@ export const IntelligencePage: React.FC<IntelligencePageProps> = ({ project }) =
               <div className="text-[10px] text-rose-400/80 mt-1">Critical gaps to resolve</div>
             </div>
           </div>
-        )}
+        ) : intakeSummary ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-5">
+            <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
+              <div className="text-[11px] font-mono uppercase text-slate-400">Sources Ingested</div>
+              <div className="text-2xl font-bold font-mono text-white mt-1">
+                {intakeSummary.totalSourcesCount}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">Extracted: {intakeSummary.extractedCount}</div>
+            </div>
+
+            <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
+              <div className="text-[11px] font-mono uppercase text-slate-400">Total Assertions</div>
+              <div className="text-2xl font-bold font-mono text-sky-400 mt-1">
+                {intakeSummary.totalCandidateAssertionsCount}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">Traceable candidate fields</div>
+            </div>
+
+            <div className="bg-purple-950/20 p-3.5 rounded-xl border border-purple-900/40">
+              <div className="text-[11px] font-mono uppercase text-purple-300">Conflicts Detected</div>
+              <div className="text-2xl font-bold font-mono text-purple-400 mt-1 flex items-baseline gap-2">
+                <span>{intakeSummary.conflictsCount}</span>
+                {intakeSummary.conflictsCount > 0 && (
+                  <span className="text-[10px] text-purple-300 font-sans font-medium">Pending Resolution</span>
+                )}
+              </div>
+              <div className="text-[10px] text-purple-400/80 mt-1">Competing candidate values</div>
+            </div>
+
+            <div className="bg-amber-950/20 p-3.5 rounded-xl border border-amber-900/40">
+              <div className="text-[11px] font-mono uppercase text-amber-300">Checklist Gaps</div>
+              <div className="text-2xl font-bold font-mono text-amber-400 mt-1">
+                {intakeSummary.gapsCount}
+              </div>
+              <div className="text-[10px] text-amber-400/80 mt-1">Unsatisfied required fields</div>
+            </div>
+
+            <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/40">
+              <div className="text-[11px] font-mono uppercase text-emerald-300">Approved Items</div>
+              <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">
+                {intakeSummary.approvedCount}
+              </div>
+              <div className="text-[10px] text-emerald-400/80 mt-1">Authorized baselines</div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* 7 Readiness Sections Accordion/List */}

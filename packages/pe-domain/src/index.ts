@@ -95,6 +95,8 @@ export interface IntelligenceItemHistory {
   note?: string;
 }
 
+import type { SourceBindingReference, IntelligenceApprovalSnapshot } from './intake.js';
+
 export interface IntelligenceItem {
   id: string;
   key: string;
@@ -116,6 +118,10 @@ export interface IntelligenceItem {
   candidates?: IntelligenceCandidate[]; // For conflicting items
   history: IntelligenceItemHistory[];
   notes?: string;
+  revision?: number;
+  sourceBindings?: SourceBindingReference[];
+  intakeManaged?: boolean;
+  activeApprovalSnapshot?: IntelligenceApprovalSnapshot | null;
 }
 
 export interface ReadinessSection {
@@ -869,4 +875,5 @@ export * from './acceptance.js';
 export * from './findings.js';
 export * from './evidencePackage.js';
 export * from './exportPublication.js';
+export * from './intake.js';
 

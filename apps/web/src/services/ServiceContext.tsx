@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import { IProjectService } from './interfaces/IProjectService';
 import { IIntelligenceService } from './interfaces/IIntelligenceService';
+import { ISourceService } from './interfaces/ISourceService';
 import { IIntegrationService } from './interfaces/IIntegrationService';
 import { IExecutionEvidenceService } from './interfaces/IExecutionEvidenceService';
 import { IAuthService } from './interfaces/IAuthService';
 import { IAdminService } from './interfaces/IAdminService';
 import { MockProjectService } from './mock/MockProjectService';
 import { MockIntelligenceService } from './mock/MockIntelligenceService';
+import { MockSourceService } from './mock/MockSourceService';
 import { MockIntegrationService } from './mock/MockIntegrationService';
 import { MockExecutionEvidenceService } from './mock/MockExecutionEvidenceService';
 import { MockAuthService } from './mock/MockAuthService';
@@ -17,6 +19,7 @@ import {
   ApiUnavailableIntegrationService,
   ApiUnavailableExecutionEvidenceService
 } from './api';
+import { ApiSourceService } from './api/ApiSourceService';
 import { ApiAuthService } from './api/ApiAuthService';
 import { ApiAdminService } from './api/ApiAdminService';
 
@@ -27,6 +30,7 @@ export interface ServiceContainer {
   mode: ServiceMode;
   projectService: IProjectService;
   intelligenceService: IIntelligenceService;
+  sourceService: ISourceService;
   integrationService: IIntegrationService;
   executionEvidenceService: IExecutionEvidenceService;
   authService: IAuthService;
@@ -54,6 +58,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
   const services = useMemo<ServiceContainer>(() => {
     let projectService = overrideServices?.projectService;
     let intelligenceService = overrideServices?.intelligenceService;
+    let sourceService = overrideServices?.sourceService;
     let integrationService = overrideServices?.integrationService;
     let executionEvidenceService = overrideServices?.executionEvidenceService;
     let authService = overrideServices?.authService;
@@ -62,6 +67,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
     if (effectiveMode === 'API') {
       if (!projectService) projectService = new ApiProjectService();
       if (!intelligenceService) intelligenceService = new ApiIntelligenceService();
+      if (!sourceService) sourceService = new ApiSourceService();
       if (!integrationService) integrationService = new ApiUnavailableIntegrationService();
       if (!executionEvidenceService) executionEvidenceService = new ApiUnavailableExecutionEvidenceService();
       if (!authService) authService = new ApiAuthService();
@@ -69,6 +75,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
     } else {
       if (!projectService) projectService = new MockProjectService();
       if (!intelligenceService) intelligenceService = new MockIntelligenceService();
+      if (!sourceService) sourceService = new MockSourceService();
       if (!integrationService) integrationService = new MockIntegrationService();
       if (!executionEvidenceService) executionEvidenceService = new MockExecutionEvidenceService();
       if (!authService) authService = new MockAuthService();
@@ -80,6 +87,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       mode: effectiveMode,
       projectService,
       intelligenceService,
+      sourceService,
       integrationService,
       executionEvidenceService,
       authService,

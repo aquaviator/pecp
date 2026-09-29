@@ -59,7 +59,9 @@ export interface UpdateProjectInput {
   conflictsCount?: number;
   requirementsCount?: number;
   documentsCount?: number;
+  briefText?: string;
 }
+
 
 export interface ProjectWithMetadata {
   project: ProjectSummary;
@@ -126,6 +128,8 @@ export type Permission =
   | 'INTELLIGENCE_READ'
   | 'INTELLIGENCE_RESOLVE'
   | 'INTELLIGENCE_APPROVE'
+  | 'SOURCE_WRITE'
+  | 'INTELLIGENCE_WRITE'
   | 'AUDIT_READ';
 
 export interface Session {
@@ -166,6 +170,14 @@ export type AuditAction =
   | 'PROJECT_ARCHIVE'
   | 'INTELLIGENCE_CONFLICT_RESOLVE'
   | 'INTELLIGENCE_APPROVE'
+  | 'SOURCE_CREATE'
+  | 'SOURCE_VERSION_CREATE'
+  | 'SOURCE_EXTRACT'
+  | 'INTELLIGENCE_CREATE'
+  | 'INTELLIGENCE_UPDATE'
+  | 'INTELLIGENCE_IMPORT'
+  | 'INTELLIGENCE_CHECKLIST_UPDATE'
+  | 'INTELLIGENCE_APPROVAL_INVALIDATE'
   | 'AUTHORIZATION_DENIED';
 
 export type AuditOutcome = 'SUCCESS' | 'DENIED' | 'FAILURE';

@@ -207,6 +207,159 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_audit_occurred_at ON audit_events(occurred_at);
       `);
     }
+  },
+  {
+    version: 4,
+    name: '004_m5_2_intake_provenance',
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sources (
+          id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('BRIEF', 'MANUAL_ASSERTION', 'UPLOAD')),
+          title TEXT NOT NULL,
+          current_version_number INTEGER NOT NULL,
+          current_version_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by_user_id TEXT NOT NULL,
+          created_by_user_display_name TEXT NOT NULL,
+          PRIMARY KEY (project_id, id),
+          FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS source_versions (
+          id TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          version_number INTEGER NOT NULL,
+          byte_size INTEGER NOT NULL,
+          media_type TEXT NOT NULL,
+          format TEXT NOT NULL,
+          sha256 TEXT NOT NULL,
+          captured_at TEXT NOT NULL,
+          captured_by_user_id TEXT NOT NULL,
+          captured_by_user_display_name TEXT NOT NULL,
+          supplied_authored_at TEXT,
+          supplied_speaker TEXT,
+          supplied_external_reference TEXT,
+          extraction_status TEXT NOT NULL,
+          extraction_id TEXT,
+          diagnostics TEXT,
+          PRIMARY KEY (project_id, source_id, id),
+          UNIQUE (project_id, source_id, version_number),
+          FOREIGN KEY (project_id, source_id) REFERENCES sources(project_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS source_blobs (
+          project_id TEXT NOT NULL,
+          version_id TEXT NOT NULL,
+          bytes BLOB NOT NULL,
+          PRIMARY KEY (project_id, version_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS extraction_results (
+          id TEXT NOT NULL,
+          source_version_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          parser_id TEXT NOT NULL,
+          parser_version TEXT NOT NULL,
+          extracted_at TEXT NOT NULL,
+          text_length INTEGER NOT NULL,
+          page_count INTEGER,
+          content_digest TEXT NOT NULL,
+          diagnostics TEXT,
+          plain_text TEXT NOT NULL,
+          PRIMARY KEY (project_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS extracted_fragments (
+          id TEXT NOT NULL,
+          extraction_id TEXT NOT NULL,
+          source_version_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          segment_index INTEGER NOT NULL,
+          locator TEXT NOT NULL,
+          text TEXT NOT NULL,
+          character_offset INTEGER,
+          length INTEGER,
+          metadata_json TEXT,
+          PRIMARY KEY (project_id, extraction_id, id),
+          FOREIGN KEY (project_id, extraction_id) REFERENCES extraction_results(project_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS intelligence_revisions (
+          id TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          revision_number INTEGER NOT NULL,
+          recorded_at TEXT NOT NULL,
+          actor_user_id TEXT,
+          actor_display_name TEXT,
+          canonical_state TEXT NOT NULL,
+          review_status TEXT NOT NULL,
+          value_text TEXT,
+          value_number REAL,
+          unit TEXT,
+          approval_state TEXT NOT NULL,
+          approved_by_user_id TEXT,
+          source_bindings_json TEXT NOT NULL,
+          candidates_json TEXT,
+          snapshot_json TEXT NOT NULL,
+          PRIMARY KEY (project_id, item_id, revision_number),
+          FOREIGN KEY (project_id, item_id) REFERENCES project_intelligence_items(project_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS intelligence_source_bindings (
+          id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          revision_number INTEGER NOT NULL,
+          source_id TEXT NOT NULL,
+          source_version_id TEXT NOT NULL,
+          source_version_number INTEGER NOT NULL,
+          original_sha256 TEXT NOT NULL,
+          extraction_id TEXT,
+          locator TEXT NOT NULL,
+          excerpt TEXT,
+          PRIMARY KEY (project_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_checklists (
+          project_id TEXT PRIMARY KEY,
+          organisation_id TEXT NOT NULL,
+          revision INTEGER NOT NULL,
+          updated_at TEXT NOT NULL,
+          updated_by_user_id TEXT NOT NULL,
+          items_json TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS idempotency_records (
+          key TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          actor_user_id TEXT NOT NULL,
+          operation TEXT NOT NULL,
+          payload_sha256 TEXT NOT NULL,
+          response_status INTEGER NOT NULL,
+          response_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sources_project ON sources(project_id);
+        CREATE INDEX IF NOT EXISTS idx_source_versions_source ON source_versions(project_id, source_id);
+        CREATE INDEX IF NOT EXISTS idx_extraction_version ON extraction_results(project_id, source_version_id);
+        CREATE INDEX IF NOT EXISTS idx_fragments_extraction ON extracted_fragments(project_id, extraction_id);
+        CREATE INDEX IF NOT EXISTS idx_intel_revisions_item ON intelligence_revisions(project_id, item_id);
+        CREATE INDEX IF NOT EXISTS idx_bindings_source_version ON intelligence_source_bindings(project_id, source_version_id);
+        CREATE INDEX IF NOT EXISTS idx_idempotency_project ON idempotency_records(project_id);
+      `);
+    }
   }
 ];
 

@@ -169,13 +169,23 @@ export class SqliteProjectRepository implements IProjectRepository {
     const newDocs = updates.documentsCount !== undefined ? updates.documentsCount : existing.documentsCount;
     const now = new Date().toISOString();
 
-    raw.prepare(`
-      UPDATE projects
-      SET name = ?, description = ?, intent = ?, status = ?,
-          conflicts_count = ?, requirements_count = ?, documents_count = ?,
-          updated_at = ?
-      WHERE id = ?
-    `).run(newName, newDescription, newIntent, newStatus, newConflicts, newReqs, newDocs, now, id);
+    if (updates.briefText !== undefined) {
+      raw.prepare(`
+        UPDATE projects
+        SET name = ?, description = ?, intent = ?, status = ?,
+            conflicts_count = ?, requirements_count = ?, documents_count = ?,
+            brief_text = ?, updated_at = ?
+        WHERE id = ?
+      `).run(newName, newDescription, newIntent, newStatus, newConflicts, newReqs, newDocs, updates.briefText, now, id);
+    } else {
+      raw.prepare(`
+        UPDATE projects
+        SET name = ?, description = ?, intent = ?, status = ?,
+            conflicts_count = ?, requirements_count = ?, documents_count = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(newName, newDescription, newIntent, newStatus, newConflicts, newReqs, newDocs, now, id);
+    }
 
     return this.getById(id);
   }

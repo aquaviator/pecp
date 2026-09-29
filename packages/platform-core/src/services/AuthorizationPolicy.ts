@@ -13,6 +13,8 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'INTELLIGENCE_READ',
   'INTELLIGENCE_RESOLVE',
   'INTELLIGENCE_APPROVE',
+  'SOURCE_WRITE',
+  'INTELLIGENCE_WRITE',
   'AUDIT_READ'
 ] as const;
 
@@ -27,6 +29,8 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'INTELLIGENCE_READ',
     'INTELLIGENCE_RESOLVE',
     'INTELLIGENCE_APPROVE',
+    'SOURCE_WRITE',
+    'INTELLIGENCE_WRITE',
     'AUDIT_READ'
   ],
   PERFORMANCE_LEAD: [
@@ -38,6 +42,8 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'INTELLIGENCE_READ',
     'INTELLIGENCE_RESOLVE',
     'INTELLIGENCE_APPROVE',
+    'SOURCE_WRITE',
+    'INTELLIGENCE_WRITE',
     'AUDIT_READ'
   ],
   PERFORMANCE_ENGINEER: [
@@ -45,7 +51,9 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'PROJECT_READ',
     'PROJECT_CREATE',
     'PROJECT_UPDATE',
-    'INTELLIGENCE_READ'
+    'INTELLIGENCE_READ',
+    'SOURCE_WRITE',
+    'INTELLIGENCE_WRITE'
   ],
   REVIEWER: [
     'ORGANISATION_READ',

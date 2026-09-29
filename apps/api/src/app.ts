@@ -2,8 +2,10 @@
 // Defined according to M5.0 & M5.1 Work Package Specifications
 
 import fastify, { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { createHash } from 'node:crypto';
 import cors from '@fastify/cors';
 import fastifyCookie from '@fastify/cookie';
+import fastifyMultipart from '@fastify/multipart';
 import { EngineeringIntent, ProjectCreationMethod } from '@pecp/pe-domain';
 import {
   PlatformApplicationService,
@@ -14,6 +16,7 @@ import {
   LocalAuthenticationProvider,
   AuditService,
   IdentityAdministrationService,
+  IntakeService,
   OrganisationRole,
   Permission
 } from '@pecp/platform-core';
@@ -27,6 +30,11 @@ import { SqliteLocalCredentialRepository } from './persistence/sqlite/SqliteLoca
 import { SqliteOrganisationMembershipRepository } from './persistence/sqlite/SqliteOrganisationMembershipRepository.js';
 import { SqliteSessionRepository } from './persistence/sqlite/SqliteSessionRepository.js';
 import { SqliteAuditEventRepository } from './persistence/sqlite/SqliteAuditEventRepository.js';
+import { SqliteSourceRepository } from './persistence/sqlite/SqliteSourceRepository.js';
+import { SqliteExtractionRepository } from './persistence/sqlite/SqliteExtractionRepository.js';
+import { SqliteChecklistRepository } from './persistence/sqlite/SqliteChecklistRepository.js';
+import { SqliteIdempotencyRepository } from './persistence/sqlite/SqliteIdempotencyRepository.js';
+import { DocumentParserRegistry } from './intake/parsers/DocumentParserRegistry.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -38,6 +46,7 @@ export interface ApiAppOptions {
   dbPath?: string;
   database?: SqliteDatabase;
   platformService?: PlatformApplicationService;
+  intakeService?: IntakeService;
   identityAdminService?: IdentityAdministrationService;
   sessionService?: SessionService;
   localAuthProvider?: LocalAuthenticationProvider;
@@ -45,6 +54,7 @@ export interface ApiAppOptions {
   logger?: boolean;
   secureCookies?: boolean;
 }
+
 
 const VALID_INTENTS: Set<string> = new Set<EngineeringIntent>([
   'DISCOVERY',
@@ -117,6 +127,14 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     parseOptions: {}
   });
 
+  // Multipart Support for file uploads (Bounded to 10 MiB, 1 file per request)
+  app.register(fastifyMultipart, {
+    limits: {
+      fileSize: 10 * 1024 * 1024,
+      files: 1
+    }
+  });
+
   // Persistence & Services initialization
   let db: SqliteDatabase;
   if (options.database) {
@@ -132,6 +150,15 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
   const membershipRepo = new SqliteOrganisationMembershipRepository(db);
   const sessionRepo = new SqliteSessionRepository(db);
   const auditRepo = new SqliteAuditEventRepository(db);
+  const orgRepo = new SqliteOrganisationRepository(db);
+  const projectRepo = new SqliteProjectRepository(db);
+  const revisionRepo = new SqliteEntityRevisionRepository(db);
+  const intelligenceRepo = new SqliteIntelligenceRepository(db);
+  const sourceRepo = new SqliteSourceRepository(db);
+  const extractionRepo = new SqliteExtractionRepository(db);
+  const checklistRepo = new SqliteChecklistRepository(db);
+  const idempotencyRepo = new SqliteIdempotencyRepository(db);
+  const parserRegistry = new DocumentParserRegistry();
 
   const ttlHours = process.env.PECP_SESSION_TTL_HOURS ? Number(process.env.PECP_SESSION_TTL_HOURS) : 12;
   const sessionService = options.sessionService || new SessionService(sessionRepo, userRepo, ttlHours);
@@ -150,10 +177,6 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
   if (options.platformService) {
     service = options.platformService;
   } else {
-    const orgRepo = new SqliteOrganisationRepository(db);
-    const projectRepo = new SqliteProjectRepository(db);
-    const revisionRepo = new SqliteEntityRevisionRepository(db);
-    const intelligenceRepo = new SqliteIntelligenceRepository(db);
     service = new PlatformApplicationService({
       organisationRepository: orgRepo,
       projectRepository: projectRepo,
@@ -165,6 +188,21 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     });
   }
 
+  const intakeService =
+    options.intakeService ||
+    new IntakeService({
+      sourceRepository: sourceRepo,
+      extractionRepository: extractionRepo,
+      intelligenceRepository: intelligenceRepo,
+      checklistRepository: checklistRepo,
+      idempotencyRepository: idempotencyRepo,
+      projectRepository: projectRepo,
+      membershipRepository: membershipRepo,
+      auditService: auditService,
+      unitOfWork: db,
+      parserRegistry: parserRegistry
+    });
+
   const isProduction = process.env.NODE_ENV === 'production';
   const secureCookie = options.secureCookies !== undefined ? options.secureCookies : isProduction;
 
@@ -173,7 +211,9 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     const statusCode = error?.statusCode || 500;
 
     let code = 'INTERNAL_ERROR';
-    if (statusCode === 400) code = 'VALIDATION_ERROR';
+    if (error?.code === 'FST_REQ_FILE_TOO_LARGE' || statusCode === 413) code = 'RESOURCE_LIMIT_EXCEEDED';
+    else if (statusCode === 415) code = 'UNSUPPORTED_MEDIA_TYPE';
+    else if (statusCode === 400) code = 'VALIDATION_ERROR';
     else if (statusCode === 401) code = 'UNAUTHORIZED';
     else if (statusCode === 403) code = 'FORBIDDEN';
     else if (statusCode === 404) code = 'NOT_FOUND';
@@ -192,6 +232,7 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       }
     });
   });
+
 
   // Authentication & CSRF Hook
   app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -1466,19 +1507,20 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     }
 
     try {
-      const resolved = await service.resolveIntelligenceConflict(
+      const resolved = await intakeService.resolveConflict(
         projectId,
         itemId,
         body.chosenCandidateId,
-        principal,
-        body.rationale
+        body.rationale,
+        body.expectedRevision !== undefined ? Number(body.expectedRevision) : undefined,
+        principal
       );
       return resolved;
     } catch (err: any) {
       const status = err.statusCode || 400;
       reply.status(status).send({
         error: {
-          code: status === 404 ? 'NOT_FOUND' : 'OPERATION_FAILED',
+          code: status === 409 ? 'CONFLICT' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'OPERATION_FAILED',
           message: err.message
         }
       });
@@ -1522,19 +1564,638 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       return;
     }
 
+    const body = (request.body as any) || {};
+
     try {
-      const approved = await service.approveIntelligenceItem(projectId, itemId, principal);
+      const approved = await intakeService.approveIntelligenceItem(
+        projectId,
+        itemId,
+        body.expectedRevision !== undefined ? Number(body.expectedRevision) : undefined,
+        principal
+      );
       return approved;
     } catch (err: any) {
       const status = err.statusCode || 400;
       reply.status(status).send({
         error: {
-          code: status === 404 ? 'NOT_FOUND' : 'OPERATION_FAILED',
+          code: status === 409 ? 'CONFLICT' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'OPERATION_FAILED',
           message: err.message
         }
       });
     }
   });
+
+
+  // --- M5.2 Sources & Intake API (§10 [I08]) ---
+
+  app.get('/api/v1/projects/:projectId/sources', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+
+    try {
+      const sources = await intakeService.listSources(projectId, principal);
+      return { items: sources };
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/sources/text', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as any;
+
+    if (!body || !body.text || !body.kind) {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: "kind ('BRIEF' or 'MANUAL_ASSERTION') and text are required"
+        }
+      });
+      return;
+    }
+
+    if (body.kind !== 'BRIEF' && body.kind !== 'MANUAL_ASSERTION') {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: "kind must be 'BRIEF' or 'MANUAL_ASSERTION'"
+        }
+      });
+      return;
+    }
+
+    // Idempotency check
+    const idempKey = (request.headers['idempotency-key'] || request.headers['x-idempotency-key']) as string | undefined;
+    const payloadHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+    const scopedKey = idempKey ? `${projectId}:${principal.userId}:source_text:${idempKey}` : undefined;
+
+    if (scopedKey && idempotencyRepo) {
+      const existing = await idempotencyRepo.get(scopedKey);
+      if (existing) {
+        if (existing.payloadSha256 !== payloadHash) {
+          reply.status(409).send({
+            error: {
+              code: 'IDEMPOTENCY_CONFLICT',
+              message: 'Idempotency key replayed with differing payload'
+            }
+          });
+          return;
+        }
+        return reply.status(existing.responseStatus).send(JSON.parse(existing.responseJson));
+      }
+    }
+
+    try {
+      const result = await intakeService.captureTextSource(
+        projectId,
+        {
+          kind: body.kind,
+          title: body.title || (body.kind === 'BRIEF' ? 'Project Brief' : 'Stakeholder Assertion'),
+          text: body.text,
+          format: body.format,
+          suppliedAuthoredAt: body.suppliedAuthoredAt,
+          suppliedSpeaker: body.suppliedSpeaker,
+          suppliedExternalReference: body.suppliedExternalReference
+        },
+        principal
+      );
+
+      if (scopedKey && idempotencyRepo) {
+        await idempotencyRepo.save({
+          key: scopedKey,
+          projectId,
+          actorUserId: principal.userId,
+          operation: 'source_text',
+          payloadSha256: payloadHash,
+          responseStatus: 201,
+          responseJson: JSON.stringify(result),
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      reply.status(201).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 413 ? 'RESOURCE_LIMIT_EXCEEDED' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'VALIDATION_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/sources/upload', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+
+    let data: any;
+    try {
+      data = await request.file();
+    } catch (err: any) {
+      if (err.code === 'FST_REQ_FILE_TOO_LARGE') {
+        reply.status(413).send({
+          error: {
+            code: 'RESOURCE_LIMIT_EXCEEDED',
+            message: 'File size exceeds 10 MiB upload limit'
+          }
+        });
+        return;
+      }
+      throw err;
+    }
+
+    if (!data) {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'No file uploaded'
+        }
+      });
+      return;
+    }
+
+    const buffer = await data.toBuffer();
+    const title = (data.fields?.title as any)?.value;
+
+    // Idempotency check
+    const idempKey = (request.headers['idempotency-key'] || request.headers['x-idempotency-key']) as string | undefined;
+    const payloadHash = createHash('sha256').update(buffer).digest('hex');
+    const scopedKey = idempKey ? `${projectId}:${principal.userId}:source_upload:${idempKey}` : undefined;
+
+    if (scopedKey && idempotencyRepo) {
+      const existing = await idempotencyRepo.get(scopedKey);
+      if (existing) {
+        if (existing.payloadSha256 !== payloadHash) {
+          reply.status(409).send({
+            error: {
+              code: 'IDEMPOTENCY_CONFLICT',
+              message: 'Idempotency key replayed with differing file content'
+            }
+          });
+          return;
+        }
+        return reply.status(existing.responseStatus).send(JSON.parse(existing.responseJson));
+      }
+    }
+
+    try {
+      const result = await intakeService.captureUploadSource(
+        projectId,
+        {
+          filename: data.filename,
+          buffer,
+          mimeType: data.mimetype,
+          title
+        },
+        principal
+      );
+
+      if (scopedKey && idempotencyRepo) {
+        await idempotencyRepo.save({
+          key: scopedKey,
+          projectId,
+          actorUserId: principal.userId,
+          operation: 'source_upload',
+          payloadSha256: payloadHash,
+          responseStatus: 201,
+          responseJson: JSON.stringify(result),
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      reply.status(201).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 413 ? 'RESOURCE_LIMIT_EXCEEDED' : status === 415 ? 'UNSUPPORTED_MEDIA_TYPE' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'VALIDATION_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/sources/:sourceId', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, sourceId } = request.params as { projectId: string; sourceId: string };
+
+    try {
+      const source = await intakeService.getSource(projectId, sourceId, principal);
+      return source;
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/sources/:sourceId/versions', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, sourceId } = request.params as { projectId: string; sourceId: string };
+
+    try {
+      const versions = await intakeService.listSourceVersions(projectId, sourceId, principal);
+      return { items: versions };
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/sources/:sourceId/versions', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, sourceId } = request.params as { projectId: string; sourceId: string };
+
+    const isMulti = request.isMultipart();
+    let text: string | undefined;
+    let buffer: Buffer | undefined;
+    let filename: string | undefined;
+    let mimeType: string | undefined;
+    let expectedRevision: number | undefined;
+
+    if (isMulti) {
+      const data = await request.file();
+      if (data) {
+        buffer = await data.toBuffer();
+        filename = data.filename;
+        mimeType = data.mimetype;
+        const revField = (data.fields?.expectedRevision as any)?.value;
+        if (revField) expectedRevision = Number(revField);
+      }
+    } else {
+      const body = request.body as any;
+      text = body?.text;
+      if (body?.expectedRevision !== undefined) expectedRevision = Number(body.expectedRevision);
+    }
+
+    try {
+      const result = await intakeService.createSourceVersion(
+        projectId,
+        sourceId,
+        { text, buffer, filename, mimeType, expectedRevision },
+        principal
+      );
+      reply.status(201).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 409 ? 'CONFLICT' : status === 413 ? 'RESOURCE_LIMIT_EXCEEDED' : status === 415 ? 'UNSUPPORTED_MEDIA_TYPE' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'OPERATION_FAILED',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/sources/:sourceId/versions/:versionId/content', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, sourceId, versionId } = request.params as {
+      projectId: string;
+      sourceId: string;
+      versionId: string;
+    };
+
+    try {
+      const { version, buffer } = await intakeService.getSourceBlob(projectId, sourceId, versionId, principal);
+      const source = await intakeService.getSource(projectId, sourceId, principal);
+
+      const safeFilename = source.title.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      reply
+        .header('Content-Type', version.mediaType || 'application/octet-stream')
+        .header('Content-Disposition', `attachment; filename="${safeFilename}"`)
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Cache-Control', 'private, no-store')
+        .send(buffer);
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/sources/:sourceId/versions/:versionId/extract', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, sourceId, versionId } = request.params as {
+      projectId: string;
+      sourceId: string;
+      versionId: string;
+    };
+
+    try {
+      const extraction = await intakeService.extractSourceVersion(projectId, sourceId, versionId, principal);
+      return extraction;
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'OPERATION_FAILED',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/sources/:sourceId/versions/:versionId/extraction', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, sourceId, versionId } = request.params as {
+      projectId: string;
+      sourceId: string;
+      versionId: string;
+    };
+
+    try {
+      const extraction = await intakeService.getExtraction(projectId, sourceId, versionId, principal);
+      return extraction;
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/intelligence', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as any;
+
+    if (!body || !body.key || typeof body.key !== 'string') {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Intelligence key is required'
+        }
+      });
+      return;
+    }
+
+    try {
+      const item = await intakeService.captureIntelligenceItem(
+        projectId,
+        {
+          key: body.key,
+          title: body.title || body.key,
+          category: body.category || 'REQUIREMENTS',
+          valueKind: body.valueKind,
+          value: body.value,
+          unit: body.unit,
+          ambiguityReason: body.ambiguityReason,
+          sourceBinding: body.sourceBinding
+        },
+        principal
+      );
+      reply.status(201).send(item);
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'VALIDATION_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.patch('/api/v1/projects/:projectId/intelligence/:itemId', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, itemId } = request.params as { projectId: string; itemId: string };
+    const body = request.body as any;
+
+    if (!body || body.expectedRevision === undefined) {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'expectedRevision is required for optimistic concurrency'
+        }
+      });
+      return;
+    }
+
+    try {
+      const item = await intakeService.updateIntelligenceItem(
+        projectId,
+        itemId,
+        {
+          expectedRevision: Number(body.expectedRevision),
+          title: body.title,
+          value: body.value,
+          unit: body.unit,
+          ambiguityReason: body.ambiguityReason,
+          sourceBinding: body.sourceBinding
+        },
+        principal
+      );
+      return item;
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 409 ? 'CONFLICT' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'OPERATION_FAILED',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/intelligence/:itemId/history', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, itemId } = request.params as { projectId: string; itemId: string };
+
+    try {
+      const history = await intakeService.getIntelligenceHistory(projectId, itemId, principal);
+      return { items: history };
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/intelligence/import-preview', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as any;
+
+    if (!body || !body.sourceId || !body.sourceVersionId || !Array.isArray(body.mappings)) {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'sourceId, sourceVersionId and mappings array are required'
+        }
+      });
+      return;
+    }
+
+    try {
+      const preview = await intakeService.previewImport(
+        projectId,
+        {
+          sourceId: body.sourceId,
+          sourceVersionId: body.sourceVersionId,
+          mappings: body.mappings
+        },
+        principal
+      );
+      return preview;
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'VALIDATION_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/intelligence/import-apply', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as any;
+
+    if (!body || !body.sourceId || !body.sourceVersionId || !Array.isArray(body.mappings) || !body.mappingDigest) {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'sourceId, sourceVersionId, mappings and mappingDigest are required'
+        }
+      });
+      return;
+    }
+
+    try {
+      const result = await intakeService.applyImport(
+        projectId,
+        {
+          sourceId: body.sourceId,
+          sourceVersionId: body.sourceVersionId,
+          mappings: body.mappings,
+          mappingDigest: body.mappingDigest,
+          expectedRevisions: body.expectedRevisions
+        },
+        principal
+      );
+      reply.status(201).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'VALIDATION_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/intelligence-requirements', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+
+    try {
+      const checklist = await intakeService.getChecklist(projectId, principal);
+      if (!checklist) {
+        return {
+          projectId,
+          revision: 0,
+          status: 'NOT_CONFIGURED',
+          items: []
+        };
+      }
+      return checklist;
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.put('/api/v1/projects/:projectId/intelligence-requirements', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+    const body = request.body as any;
+
+    if (!body || !Array.isArray(body.items)) {
+      reply.status(400).send({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'items array is required'
+        }
+      });
+      return;
+    }
+
+    try {
+      const updated = await intakeService.updateChecklist(
+        projectId,
+        {
+          expectedRevision: body.expectedRevision !== undefined ? Number(body.expectedRevision) : undefined,
+          items: body.items
+        },
+        principal
+      );
+      return updated;
+    } catch (err: any) {
+      const status = err.statusCode || 400;
+      reply.status(status).send({
+        error: {
+          code: status === 409 ? 'CONFLICT' : status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'OPERATION_FAILED',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/intelligence-intake-summary', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+
+    try {
+      const summary = await intakeService.getIntakeReviewSummary(projectId, principal);
+      return summary;
+    } catch (err: any) {
+      const status = err.statusCode || 404;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
 
   app.addHook('onClose', async () => {
     db.close();

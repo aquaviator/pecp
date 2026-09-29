@@ -13,11 +13,13 @@ import {
   CheckCircle2,
   AlertTriangle,
   Award,
-  Share2
+  Share2,
+  FileUp
 } from 'lucide-react';
 
 export type ProjectTab =
   | 'OVERVIEW'
+  | 'SOURCES'
   | 'INTELLIGENCE'
   | 'ARCHITECTURE'
   | 'REQUIREMENTS'
@@ -45,6 +47,7 @@ export const ProjectSubnav: React.FC<ProjectSubnavProps> = ({
 }) => {
   const tabs: { id: ProjectTab; label: string; icon: React.FC<{ className?: string }>; badge?: number | null }[] = [
     { id: 'OVERVIEW', label: 'Overview', icon: Activity },
+    { id: 'SOURCES', label: 'Sources & Intake', icon: FileUp },
     { id: 'INTELLIGENCE', label: 'Intelligence', icon: FileSearch, badge: conflictsCount },
     { id: 'ARCHITECTURE', label: 'Architecture', icon: Network },
     { id: 'REQUIREMENTS', label: 'Requirements', icon: ListFilter },

@@ -101,6 +101,50 @@ export class ApiClient {
     });
   }
 
+  async put<T>(path: string, body?: any, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(path, {
+      ...options,
+      method: 'PUT',
+      body: body !== undefined ? JSON.stringify(body) : undefined
+    });
+  }
+
+  async upload<T>(path: string, formData: FormData, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(path, {
+      ...options,
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async downloadBlob(path: string, options: RequestInit = {}): Promise<{ blob: Blob; filename?: string }> {
+    const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const headers: Record<string, string> = {
+      ...((options.headers as Record<string, string>) || {})
+    };
+
+    const response = await fetch(url, {
+      ...options,
+      method: 'GET',
+      headers,
+      credentials: options.credentials || 'include'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to download: HTTP ${response.status}`);
+    }
+
+    const disposition = response.headers.get('content-disposition');
+    let filename: string | undefined;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match) filename = match[1];
+    }
+
+    const blob = await response.blob();
+    return { blob, filename };
+  }
+
   async delete<T>(path: string, options: RequestInit = {}): Promise<T> {
     return this.request<T>(path, { ...options, method: 'DELETE' });
   }

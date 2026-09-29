@@ -1,0 +1,7 @@
+{
+  "system": "Northstar Retail Checkout",
+  "sla": {
+    "checkout_latency_p95_ms": 250,
+    "availability_percentage": 99.95
+  }
+}

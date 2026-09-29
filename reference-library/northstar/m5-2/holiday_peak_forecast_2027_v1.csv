@@ -1,0 +1,2 @@
+metric_name,declared_value,unit,time_window,notes
+peak_demand_orders,24000,orders/hr,Peak Hour (19:00-20:00 UTC),Forecast model 2027.1
