@@ -42,6 +42,9 @@ export function traverseJsonPointers(
   }
 
   if (Array.isArray(obj)) {
+    if (obj.length > 5000) {
+      throw new Error(`JSON array length (${obj.length}) exceeds maximum limit of 5000 elements`);
+    }
     if (obj.length === 0) {
       fragments.push({
         id: randomUUID(),
@@ -68,6 +71,9 @@ export function traverseJsonPointers(
 
   if (typeof obj === 'object') {
     const keys = Object.keys(obj);
+    if (keys.length > 2000) {
+      throw new Error(`JSON object keys count (${keys.length}) exceeds maximum limit of 2000 keys`);
+    }
     if (keys.length === 0) {
       fragments.push({
         id: randomUUID(),

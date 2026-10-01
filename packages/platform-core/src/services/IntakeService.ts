@@ -22,7 +22,8 @@ import {
   IntelligenceCandidate,
   IntelligenceCategory,
   CanonicalState,
-  ReviewStatus
+  ReviewStatus,
+  parseCsvRows
 } from '@pecp/pe-domain';
 import {
   ISourceRepository,
@@ -87,6 +88,19 @@ export const INTAKE_LIMITS = {
   EXTRACTION_TIMEOUT_MS: 30000 // 30 seconds
 };
 
+export function areValuesAndUnitsEqual(
+  val1: string | number | undefined | null,
+  unit1: string | undefined | null,
+  val2: string | number | undefined | null,
+  unit2: string | undefined | null
+): boolean {
+  if (typeof val1 !== typeof val2) return false;
+  if (val1 !== val2) return false;
+  const u1 = unit1 === null || unit1 === undefined || unit1 === '' ? undefined : unit1;
+  const u2 = unit2 === null || unit2 === undefined || unit2 === '' ? undefined : unit2;
+  return u1 === u2;
+}
+
 export class IntakeService {
   private readonly sourceRepo: ISourceRepository;
   private readonly extractionRepo: IExtractionRepository;
@@ -94,6 +108,7 @@ export class IntakeService {
   private readonly checklistRepo: IChecklistRepository;
   private readonly idempotencyRepo?: IIdempotencyRepository;
   private readonly projectRepo: IProjectRepository;
+  private readonly membershipRepo?: IOrganisationMembershipRepository;
   private readonly auditService: AuditService;
   private readonly unitOfWork: IUnitOfWork;
   private readonly parserRegistry: IDocumentParserRegistry;
@@ -105,9 +120,14 @@ export class IntakeService {
     this.checklistRepo = deps.checklistRepository;
     this.idempotencyRepo = deps.idempotencyRepository;
     this.projectRepo = deps.projectRepository;
+    this.membershipRepo = deps.membershipRepository;
     this.auditService = deps.auditService;
     this.unitOfWork = deps.unitOfWork;
     this.parserRegistry = deps.parserRegistry;
+  }
+
+  async assertSourceWritePermission(projectId: string, actor: AuthenticatedPrincipal): Promise<void> {
+    await this.assertProjectAccess(projectId, actor, 'SOURCE_WRITE');
   }
 
   private async assertProjectAccess(
@@ -125,7 +145,16 @@ export class IntakeService {
     const orgId = project.organisationId || '';
 
     if (actor.platformRole !== 'PLATFORM_ADMIN') {
-      const membership = actor.memberships.find((m) => m.organisationId === orgId);
+      let membership = actor.memberships.find((m) => m.organisationId === orgId);
+      if (this.membershipRepo) {
+        const fresh = await this.membershipRepo.get(orgId, actor.userId);
+        if (fresh) {
+          membership = fresh;
+        } else {
+          membership = undefined;
+        }
+      }
+
       if (!membership) {
         // Concealed 404 for cross-tenant isolation
         const err = new Error(`Project '${projectId}' not found`);
@@ -134,7 +163,13 @@ export class IntakeService {
       }
 
       if (requiredPermission) {
-        const has = AuthorizationPolicy.hasPermission(actor, requiredPermission, orgId);
+        const effectiveActor: AuthenticatedPrincipal = {
+          ...actor,
+          memberships: actor.memberships.map((m) =>
+            m.organisationId === orgId && membership ? membership : m
+          )
+        };
+        const has = AuthorizationPolicy.hasPermission(effectiveActor, requiredPermission, orgId);
         if (!has) {
           const err = new Error(`Insufficient permissions: ${requiredPermission} required`);
           (err as any).statusCode = 403;
@@ -144,6 +179,75 @@ export class IntakeService {
     }
 
     return project;
+  }
+
+  private async validateSourceBinding(
+    projectId: string,
+    binding: {
+      sourceId: string;
+      sourceVersionId: string;
+      locator: string;
+      excerpt?: string;
+    }
+  ): Promise<SourceBindingReference> {
+    const sMeta = await this.sourceRepo.getSource(projectId, binding.sourceId);
+    if (!sMeta) {
+      const err = new Error(`Referenced source '${binding.sourceId}' does not exist in project '${projectId}'`);
+      (err as any).statusCode = 400;
+      throw err;
+    }
+    const sVer = await this.sourceRepo.getVersion(projectId, binding.sourceId, binding.sourceVersionId);
+    if (!sVer) {
+      const err = new Error(
+        `Referenced source version '${binding.sourceVersionId}' not found for source '${binding.sourceId}'`
+      );
+      (err as any).statusCode = 400;
+      throw err;
+    }
+    if (!sVer.extractionId) {
+      const err = new Error(`Source version '${binding.sourceVersionId}' has no extraction result`);
+      (err as any).statusCode = 400;
+      throw err;
+    }
+    const extraction = await this.extractionRepo.getExtraction(projectId, sVer.extractionId);
+    if (!extraction) {
+      const err = new Error(
+        `Extraction '${sVer.extractionId}' not found for source version '${binding.sourceVersionId}'`
+      );
+      (err as any).statusCode = 400;
+      throw err;
+    }
+    const frag = extraction.fragments.find((f) => f.locator === binding.locator);
+    if (!frag && !extraction.plainText.includes(binding.locator)) {
+      const err = new Error(
+        `Locator '${binding.locator}' could not be resolved in extraction fragments for source '${sMeta.title}'`
+      );
+      (err as any).statusCode = 400;
+      throw err;
+    }
+    if (binding.excerpt && binding.excerpt.trim().length > 0) {
+      const excerptClean = binding.excerpt.trim();
+      const inFrag = frag && frag.text && frag.text.includes(excerptClean);
+      const inPlain = extraction.plainText && extraction.plainText.includes(excerptClean);
+      if (!inFrag && !inPlain) {
+        const err = new Error(
+          `Quoted excerpt '${binding.excerpt}' does not match extracted content at locator '${binding.locator}'`
+        );
+        (err as any).statusCode = 400;
+        throw err;
+      }
+    }
+
+    return {
+      projectId,
+      sourceId: sMeta.id,
+      sourceVersionId: sVer.id,
+      sourceVersionNumber: sVer.versionNumber,
+      originalSha256: sVer.sha256,
+      extractionId: sVer.extractionId,
+      locator: binding.locator,
+      excerpt: binding.excerpt
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -446,6 +550,15 @@ export class IntakeService {
 
     // 1. Commit source + version + blob
     await this.unitOfWork.execute(async () => {
+      const currentAggregate = await this.sourceRepo.getAggregateByteSize(projectId);
+      if (currentAggregate + input.buffer.length > INTAKE_LIMITS.MAX_PROJECT_AGGREGATE_BYTES) {
+        const err = new Error(
+          `Project aggregate storage limit (${INTAKE_LIMITS.MAX_PROJECT_AGGREGATE_BYTES} bytes) exceeded`
+        );
+        (err as any).statusCode = 413;
+        throw err;
+      }
+
       await this.sourceRepo.createSource(source, initialVersion, input.buffer);
 
       // Increment documents count on project
@@ -500,8 +613,16 @@ export class IntakeService {
       fragments: parsed.fragments.map((f) => ({ ...f, extractionId }))
     };
 
-    // 3. Commit extraction result
+    // 3. Commit extraction result (recheck permissions & source state inside transaction)
     await this.unitOfWork.execute(async () => {
+      await this.assertProjectAccess(projectId, actor, 'SOURCE_WRITE');
+      const v = await this.sourceRepo.getVersion(projectId, sourceId, versionId);
+      if (!v) {
+        const err = new Error(`Source version '${versionId}' no longer exists`);
+        (err as any).statusCode = 404;
+        throw err;
+      }
+
       await this.extractionRepo.saveExtraction(extractionResult);
       await this.sourceRepo.updateVersionExtraction(
         projectId,
@@ -554,8 +675,16 @@ export class IntakeService {
     const orgId = project.organisationId || '';
     const source = await this.getSource(projectId, sourceId, actor);
 
-    // Optimistic concurrency check
-    if (input.expectedRevision !== undefined && source.currentVersionNumber !== input.expectedRevision) {
+    // Optimistic concurrency check - required for updating existing source (§5 [I03, I05])
+    if (input.expectedRevision === undefined) {
+      const err = new Error(
+        `Precondition Failed: expectedRevision is required when creating a new version of an existing source`
+      );
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    if (source.currentVersionNumber !== input.expectedRevision) {
       const err = new Error(
         `Precondition Failed: Source current version is ${source.currentVersionNumber}, expected ${input.expectedRevision}`
       );
@@ -607,15 +736,6 @@ export class IntakeService {
       mediaType = detection.mediaType;
     }
 
-    const currentAggregate = await this.sourceRepo.getAggregateByteSize(projectId);
-    if (currentAggregate + buffer.length > INTAKE_LIMITS.MAX_PROJECT_AGGREGATE_BYTES) {
-      const err = new Error(
-        `Project aggregate storage limit (${INTAKE_LIMITS.MAX_PROJECT_AGGREGATE_BYTES} bytes) exceeded`
-      );
-      (err as any).statusCode = 413;
-      throw err;
-    }
-
     const nextVersionNumber = source.currentVersionNumber + 1;
     const versionId = `sv-${randomUUID()}`;
     const sha256 = createHash('sha256').update(buffer).digest('hex');
@@ -640,8 +760,17 @@ export class IntakeService {
       extractionStatus: 'PENDING'
     };
 
-    // Commit new version + invalidate linked current intake approvals
+    // Commit new version + invalidate linked current intake approvals inside write lock
     await this.unitOfWork.execute(async () => {
+      const currentAggregate = await this.sourceRepo.getAggregateByteSize(projectId);
+      if (currentAggregate + buffer.length > INTAKE_LIMITS.MAX_PROJECT_AGGREGATE_BYTES) {
+        const err = new Error(
+          `Project aggregate storage limit (${INTAKE_LIMITS.MAX_PROJECT_AGGREGATE_BYTES} bytes) exceeded`
+        );
+        (err as any).statusCode = 413;
+        throw err;
+      }
+
       await this.sourceRepo.createVersion(version, buffer);
 
       if (source.kind === 'BRIEF' && input.text) {
@@ -665,6 +794,7 @@ export class IntakeService {
           item.approvedBy = undefined;
           item.approvedById = undefined;
           item.approvalDate = undefined;
+          item.activeApprovalSnapshot = undefined;
 
           if (!item.history) item.history = [];
           item.history.push({
@@ -766,7 +896,16 @@ export class IntakeService {
       fragments: parsed.fragments.map((f) => ({ ...f, extractionId }))
     };
 
+    // Commit extraction result (recheck permissions & state inside lock)
     await this.unitOfWork.execute(async () => {
+      await this.assertProjectAccess(projectId, actor, 'SOURCE_WRITE');
+      const v = await this.sourceRepo.getVersion(projectId, sourceId, versionId);
+      if (!v) {
+        const err = new Error(`Source version '${versionId}' no longer exists`);
+        (err as any).statusCode = 404;
+        throw err;
+      }
+
       await this.extractionRepo.saveExtraction(extractionResult);
       await this.sourceRepo.updateVersionExtraction(
         projectId,
@@ -929,35 +1068,8 @@ export class IntakeService {
     let sourceVer: SourceVersion | null = null;
 
     if (input.sourceBinding) {
-      sourceMeta = await this.sourceRepo.getSource(projectId, input.sourceBinding.sourceId);
-      if (!sourceMeta) {
-        const err = new Error(`Source '${input.sourceBinding.sourceId}' not found in project`);
-        (err as any).statusCode = 400;
-        throw err;
-      }
-      sourceVer = await this.sourceRepo.getVersion(
-        projectId,
-        input.sourceBinding.sourceId,
-        input.sourceBinding.sourceVersionId
-      );
-      if (!sourceVer) {
-        const err = new Error(
-          `Source version '${input.sourceBinding.sourceVersionId}' not found for source '${input.sourceBinding.sourceId}'`
-        );
-        (err as any).statusCode = 400;
-        throw err;
-      }
-
-      bindingRef = {
-        projectId,
-        sourceId: sourceMeta.id,
-        sourceVersionId: sourceVer.id,
-        sourceVersionNumber: sourceVer.versionNumber,
-        originalSha256: sourceVer.sha256,
-        extractionId: sourceVer.extractionId,
-        locator: input.sourceBinding.locator,
-        excerpt: input.sourceBinding.excerpt
-      };
+      bindingRef = await this.validateSourceBinding(projectId, input.sourceBinding);
+      sourceMeta = await this.sourceRepo.getSource(projectId, bindingRef.sourceId);
     }
 
     return this.unitOfWork.execute(async () => {
@@ -1045,12 +1157,12 @@ export class IntakeService {
       }
 
       // Existing item found: apply conflict, corroboration or update rules (§7 [I05])
-      const existingVal = String(existing.value ?? '');
-      const newVal = String(input.value ?? '');
-      const existingUnit = existing.unit ?? '';
-      const newUnit = input.unit ?? '';
-
-      const sameValueAndUnit = existingVal === newVal && existingUnit === newUnit;
+      const sameValueAndUnit = areValuesAndUnitsEqual(
+        existing.value,
+        existing.unit,
+        input.value,
+        input.unit
+      );
 
       const currentRev = existing.revision ?? 1;
       const nextRev = currentRev + 1;
@@ -1059,6 +1171,7 @@ export class IntakeService {
 
       if (sameValueAndUnit) {
         // Corroboration: same value & unit from independent source
+        let addedNewBinding = false;
         if (bindingRef) {
           if (!existing.sourceBindings) existing.sourceBindings = [];
           // Avoid duplicate retry binding
@@ -1067,8 +1180,34 @@ export class IntakeService {
           );
           if (!alreadyBound) {
             existing.sourceBindings.push(bindingRef);
+            addedNewBinding = true;
           }
         }
+
+        // Material binding change invalidates existing approval (§7 [I05])
+        if (addedNewBinding && existing.approvalState === 'APPROVED') {
+          existing.approvalState = 'UNREVIEWED';
+          existing.approvedBy = undefined;
+          existing.approvedById = undefined;
+          existing.approvalDate = undefined;
+          existing.activeApprovalSnapshot = undefined;
+          existing.reviewStatus = 'FOUND';
+
+          await this.auditService.record({
+            actor,
+            organisationId: orgId,
+            projectId,
+            action: 'INTELLIGENCE_APPROVAL_INVALIDATE',
+            targetType: 'INTELLIGENCE_ITEM',
+            targetId: existing.id,
+            outcome: 'SUCCESS',
+            metadata: {
+              reason: 'NEW_SOURCE_BINDING',
+              newRevision: nextRev
+            }
+          });
+        }
+
         existing.history.push({
           date: now,
           action: `Corroborated by independent source (${sourceMeta?.title || 'Manual'})`,
@@ -1083,8 +1222,9 @@ export class IntakeService {
         existing.approvedBy = undefined;
         existing.approvedById = undefined;
         existing.approvalDate = undefined;
+        existing.activeApprovalSnapshot = undefined;
 
-        // Build or update candidates
+        // Build or update candidates with independent source bindings
         if (!existing.candidates || existing.candidates.length === 0) {
           const cand1: IntelligenceCandidate = {
             id: `cand-${randomUUID()}`,
@@ -1093,9 +1233,10 @@ export class IntakeService {
             sourceLocation: existing.sourceLocation || 'unspecified',
             value: existing.value ?? '',
             unit: existing.unit,
-            canonicalState: 'MANUAL',
+            canonicalState: existing.canonicalState,
             reviewStatus: 'FOUND',
-            capturedDate: existing.capturedDate || now
+            capturedDate: existing.capturedDate || now,
+            sourceBindings: existing.sourceBindings ? [...existing.sourceBindings] : []
           };
           const cand2: IntelligenceCandidate = {
             id: `cand-${randomUUID()}`,
@@ -1106,7 +1247,8 @@ export class IntakeService {
             unit: input.unit,
             canonicalState: bindingRef ? 'IMPORTED' : 'MANUAL',
             reviewStatus: 'FOUND',
-            capturedDate: now
+            capturedDate: now,
+            sourceBindings: bindingRef ? [bindingRef] : []
           };
           existing.candidates = [cand1, cand2];
         } else {
@@ -1119,7 +1261,8 @@ export class IntakeService {
             unit: input.unit,
             canonicalState: bindingRef ? 'IMPORTED' : 'MANUAL',
             reviewStatus: 'FOUND',
-            capturedDate: now
+            capturedDate: now,
+            sourceBindings: bindingRef ? [bindingRef] : []
           };
           existing.candidates.push(newCand);
         }
@@ -1131,7 +1274,7 @@ export class IntakeService {
 
         existing.history.push({
           date: now,
-          action: `Conflicting assertion captured (${input.value}${input.unit ? ' ' + input.unit : ''} vs ${existingVal}${existingUnit ? ' ' + existingUnit : ''})`,
+          action: `Conflicting assertion captured (${input.value}${input.unit ? ' ' + input.unit : ''} vs ${existing.value}${existing.unit ? ' ' + existing.unit : ''})`,
           actor: actor.displayName,
           note: `New assertion from ${sourceMeta?.title || 'Manual'} conflicts with existing value.`
         });
@@ -1227,8 +1370,8 @@ export class IntakeService {
 
       const wasApproved = item.approvalState === 'APPROVED';
       const isMaterialChange =
-        (input.value !== undefined && input.value !== item.value) ||
-        (input.unit !== undefined && input.unit !== item.unit) ||
+        (input.value !== undefined && !areValuesAndUnitsEqual(input.value, item.unit, item.value, item.unit)) ||
+        (input.unit !== undefined && !areValuesAndUnitsEqual(item.value, input.unit, item.value, item.unit)) ||
         (input.ambiguityReason !== undefined && input.ambiguityReason !== item.ambiguityReason) ||
         !!input.sourceBinding;
 
@@ -1244,28 +1387,13 @@ export class IntakeService {
       }
 
       if (input.sourceBinding) {
-        const sMeta = await this.sourceRepo.getSource(projectId, input.sourceBinding.sourceId);
-        const sVer = await this.sourceRepo.getVersion(
-          projectId,
-          input.sourceBinding.sourceId,
-          input.sourceBinding.sourceVersionId
-        );
-        if (sMeta && sVer) {
-          if (!item.sourceBindings) item.sourceBindings = [];
-          item.sourceBindings.push({
-            projectId,
-            sourceId: sMeta.id,
-            sourceVersionId: sVer.id,
-            sourceVersionNumber: sVer.versionNumber,
-            originalSha256: sVer.sha256,
-            extractionId: sVer.extractionId,
-            locator: input.sourceBinding.locator,
-            excerpt: input.sourceBinding.excerpt
-          });
-          item.source = sMeta.title;
-          item.sourceDocument = sMeta.title;
-          item.sourceLocation = input.sourceBinding.locator;
-        }
+        const validatedBinding = await this.validateSourceBinding(projectId, input.sourceBinding);
+        if (!item.sourceBindings) item.sourceBindings = [];
+        item.sourceBindings.push(validatedBinding);
+        const sMeta = await this.sourceRepo.getSource(projectId, validatedBinding.sourceId);
+        item.source = sMeta?.title || 'Linked Source';
+        item.sourceDocument = sMeta?.title || 'Linked Source';
+        item.sourceLocation = validatedBinding.locator;
       }
 
       // Material change invalidates current approval (§7 [I05])
@@ -1274,6 +1402,7 @@ export class IntakeService {
         item.approvedBy = undefined;
         item.approvedById = undefined;
         item.approvalDate = undefined;
+        item.activeApprovalSnapshot = undefined;
         item.canonicalState = item.sourceBindings && item.sourceBindings.length > 0 ? 'IMPORTED' : 'MANUAL';
         item.reviewStatus = item.ambiguityReason ? 'AMBIGUOUS' : 'STALE';
 
@@ -1390,8 +1519,8 @@ export class IntakeService {
     const text = blob.toString('utf-8');
 
     if (version.format === 'CSV') {
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      if (lines.length === 0) {
+      const rows = parseCsvRows(text);
+      if (rows.length === 0) {
         return {
           sourceId: input.sourceId,
           sourceVersionId: input.sourceVersionId,
@@ -1405,10 +1534,10 @@ export class IntakeService {
         };
       }
 
-      const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+      const headers = rows[0] || [];
 
-      for (let rowIdx = 1; rowIdx < lines.length; rowIdx++) {
-        const row = lines[rowIdx].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
 
         for (const mapping of input.mappings) {
           const colIdx = headers.indexOf(mapping.sourceColumnOrKey);
@@ -1418,7 +1547,7 @@ export class IntakeService {
               title: mapping.title,
               category: mapping.category,
               value: '',
-              sourceLocation: `row:${rowIdx + 1},col:unknown`,
+              sourceLocation: `row:${r},col:unknown`,
               validationError: `Source column '${mapping.sourceColumnOrKey}' not found in CSV header`
             });
             invalidCount++;
@@ -1430,8 +1559,9 @@ export class IntakeService {
           let valErr: string | undefined;
 
           if (mapping.valueKind === 'NUMBER') {
-            const num = Number(rawVal);
-            if (rawVal === '' || !Number.isFinite(num)) {
+            const trimmed = rawVal.trim();
+            const num = Number(trimmed);
+            if (trimmed === '' || !Number.isFinite(num)) {
               valErr = `Value '${rawVal}' is not a valid finite number for target '${mapping.targetKey}'`;
               invalidCount++;
             } else {
@@ -1448,7 +1578,7 @@ export class IntakeService {
             category: mapping.category,
             value: finalVal,
             unit: mapping.unit,
-            sourceLocation: `row:${rowIdx + 1},col:${colIdx + 1}`,
+            sourceLocation: `row:${r},col:${colIdx + 1}`,
             excerpt: rawVal,
             validationError: valErr
           });
@@ -1465,11 +1595,14 @@ export class IntakeService {
       }
 
       for (const mapping of input.mappings) {
-        // Resolve JSON pointer or key (e.g. /target/tps or target.tps or key)
+        // Resolve RFC 6901 JSON pointer with escaping: ~1 -> /, ~0 -> ~
         const ptr = mapping.sourceColumnOrKey.startsWith('/')
           ? mapping.sourceColumnOrKey
           : `/${mapping.sourceColumnOrKey.replace(/\./g, '/')}`;
-        const parts = ptr.split('/').filter(Boolean);
+        const parts = ptr
+          .split('/')
+          .filter(Boolean)
+          .map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'));
 
         let cur = jsonObj;
         let found = true;
@@ -1499,13 +1632,19 @@ export class IntakeService {
         let valErr: string | undefined;
 
         if (mapping.valueKind === 'NUMBER') {
-          const num = Number(cur);
-          if (!Number.isFinite(num)) {
-            valErr = `JSON value '${cur}' is not a valid number for target '${mapping.targetKey}'`;
+          if (typeof cur !== 'number' && typeof cur !== 'string') {
+            valErr = `JSON value for '${mapping.targetKey}' is of invalid non-numeric type ${typeof cur}`;
             invalidCount++;
           } else {
-            finalVal = num;
-            validCount++;
+            const trimmed = String(cur).trim();
+            const num = Number(trimmed);
+            if (trimmed === '' || !Number.isFinite(num)) {
+              valErr = `JSON value '${cur}' is not a valid finite number for target '${mapping.targetKey}'`;
+              invalidCount++;
+            } else {
+              finalVal = num;
+              validCount++;
+            }
           }
         } else {
           finalVal = String(cur);
@@ -1556,23 +1695,51 @@ export class IntakeService {
     const project = await this.assertProjectAccess(projectId, actor, 'INTELLIGENCE_WRITE');
     const orgId = project.organisationId || '';
 
-    // Run preview inside transaction to recompute & validate (§10 [I08])
-    const preview = await this.previewImport(projectId, {
-      sourceId: input.sourceId,
-      sourceVersionId: input.sourceVersionId,
-      mappings: input.mappings
-    }, actor);
-
-    if (preview.invalidCount > 0) {
-      const firstErr = preview.proposedItems.find((p) => p.validationError)?.validationError;
-      const err = new Error(
-        `Import contains ${preview.invalidCount} invalid row(s). All-or-nothing apply aborted: ${firstErr}`
-      );
-      (err as any).statusCode = 400;
-      throw err;
-    }
-
     return this.unitOfWork.execute(async () => {
+      // Recompute preview inside transaction to validate source state & tamper resistance (§6, §10 [I04, I08])
+      const preview = await this.previewImport(
+        projectId,
+        {
+          sourceId: input.sourceId,
+          sourceVersionId: input.sourceVersionId,
+          mappings: input.mappings
+        },
+        actor
+      );
+
+      if (input.mappingDigest !== preview.mappingDigest) {
+        const err = new Error(
+          `Mapping digest mismatch: submitted '${input.mappingDigest}' does not match recomputed '${preview.mappingDigest}' (preview tampered or mappings modified)`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      if (preview.invalidCount > 0) {
+        const firstErr = preview.proposedItems.find((p) => p.validationError)?.validationError;
+        const err = new Error(
+          `Import contains ${preview.invalidCount} invalid row(s). All-or-nothing apply aborted: ${firstErr}`
+        );
+        (err as any).statusCode = 400;
+        throw err;
+      }
+
+      // Check expected revisions
+      const existingItems = await this.intelligenceRepo.listByProject(projectId);
+      if (input.expectedRevisions) {
+        for (const [key, expectedRev] of Object.entries(input.expectedRevisions)) {
+          const ex = existingItems.find((i) => i.key === key);
+          const actualRev = ex ? ex.revision ?? 1 : 0;
+          if (actualRev !== expectedRev) {
+            const err = new Error(
+              `Precondition Failed: Field '${key}' current revision is ${actualRev}, expected ${expectedRev}`
+            );
+            (err as any).statusCode = 409;
+            throw err;
+          }
+        }
+      }
+
       const appliedItems: IntelligenceItem[] = [];
 
       for (const proposed of preview.proposedItems) {
@@ -1639,6 +1806,15 @@ export class IntakeService {
       const existing = await this.checklistRepo.getChecklist(projectId);
       const currentRev = existing ? existing.revision : 0;
 
+      // Require explicit revision precondition when updating an existing checklist (§5 [I03, I05])
+      if (existing !== null && input.expectedRevision === undefined) {
+        const err = new Error(
+          `Precondition Failed: expectedRevision is required when updating an existing checklist`
+        );
+        (err as any).statusCode = 400;
+        throw err;
+      }
+
       if (input.expectedRevision !== undefined && currentRev !== input.expectedRevision) {
         const err = new Error(
           `Precondition Failed: Checklist current revision is ${currentRev}, expected ${input.expectedRevision}`
@@ -1694,13 +1870,23 @@ export class IntakeService {
     let extractedSuccessCount = 0;
     let extractionFailedCount = 0;
     let extractionPendingCount = 0;
+    let extractionManualReviewCount = 0;
 
     for (const s of uploadedFiles) {
       const ver = await this.sourceRepo.getVersion(projectId, s.id, s.currentVersionId);
       if (ver) {
-        if (ver.extractionStatus === 'SUCCESS') extractedSuccessCount++;
-        else if (ver.extractionStatus === 'FAILED') extractionFailedCount++;
-        else extractionPendingCount++;
+        if (ver.extractionStatus === 'SUCCESS') {
+          extractedSuccessCount++;
+        } else if (ver.extractionStatus === 'FAILED') {
+          extractionFailedCount++;
+        } else if (
+          ver.extractionStatus === 'NO_EXTRACTABLE_TEXT' ||
+          ver.extractionStatus === 'NEEDS_MANUAL_REVIEW'
+        ) {
+          extractionManualReviewCount++;
+        } else {
+          extractionPendingCount++;
+        }
       }
     }
 
@@ -1755,7 +1941,7 @@ export class IntakeService {
       key: string;
       title: string;
       category: IntelligenceCategory;
-      reason: 'MISSING' | 'AMBIGUOUS' | 'CONFLICTING' | 'STALE' | 'NOT_APPROVED';
+      reason: 'MISSING' | 'AMBIGUOUS' | 'CONFLICTING' | 'STALE' | 'NOT_APPROVED' | 'INVALID_CONTRACT';
     }> = [];
 
     let configuredRequiredCount = 0;
@@ -1774,6 +1960,31 @@ export class IntakeService {
             title: req.title,
             category: req.category,
             reason: 'MISSING'
+          });
+        } else if (match.value === undefined || match.value === null || match.value === '') {
+          configuredMissingGapsCount++;
+          gaps.push({
+            key: req.key,
+            title: req.title,
+            category: req.category,
+            reason: 'MISSING'
+          });
+        } else if (
+          req.expectedValueKind === 'NUMBER' &&
+          (typeof match.value !== 'number' || !Number.isFinite(match.value))
+        ) {
+          gaps.push({
+            key: req.key,
+            title: req.title,
+            category: req.category,
+            reason: 'INVALID_CONTRACT'
+          });
+        } else if (req.expectedUnit && match.unit !== req.expectedUnit) {
+          gaps.push({
+            key: req.key,
+            title: req.title,
+            category: req.category,
+            reason: 'INVALID_CONTRACT'
           });
         } else if (match.canonicalState === 'CONFLICTING' || match.reviewStatus === 'CONFLICTING') {
           gaps.push({
@@ -1814,6 +2025,7 @@ export class IntakeService {
       extractedSuccessCount,
       extractionFailedCount,
       extractionPendingCount,
+      extractionManualReviewCount,
       briefSourcesCount: briefSources.length,
       manualAssertionsCount: manualAssertions.length,
       totalIntelligenceFields: items.length,
@@ -1853,13 +2065,30 @@ export class IntakeService {
         throw err;
       }
 
-      // Check expected revision
+      // Precondition: expectedRevision is required for intake-managed records (§5 [I03, I05])
       const currentRev = item.revision ?? 1;
+      if (item.intakeManaged && expectedRevision === undefined) {
+        const err = new Error(
+          `Precondition Failed: expectedRevision is required for approving intake-managed records`
+        );
+        (err as any).statusCode = 400;
+        throw err;
+      }
+
       if (expectedRevision !== undefined && currentRev !== expectedRevision) {
         const err = new Error(
           `Precondition Failed: Item current revision is ${currentRev}, expected ${expectedRevision}`
         );
         (err as any).statusCode = 409;
+        throw err;
+      }
+
+      // Missing / absent value cannot be approved
+      if (item.value === undefined || item.value === null || item.value === '') {
+        const err = new Error(
+          `Cannot approve intelligence item '${itemId}' with missing or empty value`
+        );
+        (err as any).statusCode = 400;
         throw err;
       }
 
@@ -1884,6 +2113,17 @@ export class IntakeService {
         );
         (err as any).statusCode = 400;
         throw err;
+      }
+
+      // For intake-managed imported records, verify that source bindings exist and are valid
+      if (item.intakeManaged && item.canonicalState === 'IMPORTED') {
+        if (!item.sourceBindings || item.sourceBindings.length === 0) {
+          const err = new Error(
+            `Cannot approve imported intelligence item '${itemId}' without supporting source bindings`
+          );
+          (err as any).statusCode = 400;
+          throw err;
+        }
       }
 
       const now = new Date().toISOString();
@@ -1982,6 +2222,14 @@ export class IntakeService {
       }
 
       const currentRev = item.revision ?? 1;
+      if (item.intakeManaged && expectedRevision === undefined) {
+        const err = new Error(
+          `Precondition Failed: expectedRevision is required for resolving intake-managed records`
+        );
+        (err as any).statusCode = 400;
+        throw err;
+      }
+
       if (expectedRevision !== undefined && currentRev !== expectedRevision) {
         const err = new Error(
           `Precondition Failed: Item current revision is ${currentRev}, expected ${expectedRevision}`
@@ -2013,6 +2261,11 @@ export class IntakeService {
       item.sourceDocument = chosen.sourceDocument;
       item.sourceLocation = chosen.sourceLocation;
       item.notes = `Authoritative candidate selected from ${chosen.source}. ${rationale ? `Rationale: ${rationale}` : ''}`.trim();
+
+      // Transfer chosen candidate's source bindings if present
+      if (chosen.sourceBindings && chosen.sourceBindings.length > 0) {
+        item.sourceBindings = [...chosen.sourceBindings];
+      }
 
       const boundIds = item.sourceBindings?.map((b) => b.sourceVersionId) ?? [];
       const snapshotRecord: IntelligenceApprovalSnapshot = {

@@ -1,8 +1,8 @@
-// PdfDocumentParser - Text-based PDF extraction with page-level locators
-// Defined according to M5.2 Work Package §1 & §4 [I01, I02]
+// PdfDocumentParser - Text-based PDF extraction with verified page-level locators
+// Defined according to M5.2 Work Package §1, §3 & §4 [I01, I02]
 
 import { randomUUID, createHash } from 'node:crypto';
-import pdfParse from 'pdf-parse';
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { SourceFormat, ExtractedFragment } from '@pecp/pe-domain';
 import { IDocumentParser, ParsedDocumentOutput, ParseOptions } from './types.js';
 
@@ -38,7 +38,7 @@ export class PdfDocumentParser implements IDocumentParser {
 
     const pageTexts: Array<{ pageNumber: number; text: string }> = [];
 
-    // Custom pagerender to capture text per page
+    // Custom pagerender to capture text per page strictly from verified document structure
     const renderPage = (pageData: any): Promise<string> => {
       const renderOptions = {
         normalizeWhitespace: false,
@@ -81,70 +81,6 @@ export class PdfDocumentParser implements IDocumentParser {
           limitations: ['Unencrypted PDF required']
         };
       }
-
-      // Fallback extraction for uncompressed streams or handcrafted test fixtures with strict xref issues
-      const rawPdf = buffer.toString('binary');
-      const pageMatches = (rawPdf.match(/\/Type\s*\/Page\b/g) || []).length;
-      const totalFallbackPages = pageMatches > 0 ? pageMatches : 1;
-
-      // Extract text in BT ... ET blocks with Tj or TJ
-      const textMatches: string[] = [];
-      const tjRegex = /\(([^)]*)\)\s*Tj/g;
-      let match: RegExpExecArray | null;
-      while ((match = tjRegex.exec(rawPdf)) !== null) {
-        if (match[1].trim().length > 0) {
-          textMatches.push(match[1]);
-        }
-      }
-
-      if (textMatches.length > 0) {
-        const text = textMatches.join(' ');
-        const fragments: ExtractedFragment[] = [
-          {
-            id: randomUUID(),
-            extractionId: '',
-            sourceVersionId,
-            segmentIndex: 1,
-            locator: 'page:1',
-            text
-          }
-        ];
-        return {
-          status: 'SUCCESS',
-          parserId: this.parserId,
-          parserVersion: this.parserVersion,
-          plainText: text,
-          fragments,
-          pageCount: totalFallbackPages,
-          contentDigest,
-          limitations: [
-            'Text-based PDF extraction only (page index locators: page:n)',
-            'Diagrams, flowcharts, and embedded graphics are not interpreted',
-            'Flattened reading order; no assumption of multi-column layout fidelity'
-          ]
-        };
-      }
-
-      // If no text was found, check if it has valid PDF objects / page structure
-      if (pageMatches > 0 || rawPdf.includes('/Pages') || rawPdf.includes('stream')) {
-        return {
-          status: 'NO_EXTRACTABLE_TEXT',
-          parserId: this.parserId,
-          parserVersion: this.parserVersion,
-          plainText: '',
-          fragments: [],
-          pageCount: totalFallbackPages,
-          contentDigest,
-          diagnostics:
-            'No extractable text layer found in PDF (scanned/raster document or empty pages)',
-          limitations: [
-            'Text-based PDF only',
-            'No OCR scanning performed',
-            'Manual stakeholder assertion can be supplied instead'
-          ]
-        };
-      }
-
       return {
         status: 'FAILED',
         parserId: this.parserId,
@@ -191,8 +127,9 @@ export class PdfDocumentParser implements IDocumentParser {
     }
 
     const fullText = plainTextPieces.join('\n\n');
+    const extractedBytes = Buffer.byteLength(fullText, 'utf8');
 
-    if (fullText.length > maxExtractedBytes) {
+    if (extractedBytes > maxExtractedBytes) {
       return {
         status: 'FAILED',
         parserId: this.parserId,
@@ -200,7 +137,7 @@ export class PdfDocumentParser implements IDocumentParser {
         plainText: '',
         fragments: [],
         pageCount: totalPages,
-        diagnostics: `Extracted PDF text (${fullText.length} bytes) exceeds limit of ${maxExtractedBytes} bytes`,
+        diagnostics: `Extracted PDF text (${extractedBytes} bytes) exceeds limit of ${maxExtractedBytes} bytes`,
         limitations: ['Extracted text bounded to 2 MiB']
       };
     }
@@ -215,7 +152,7 @@ export class PdfDocumentParser implements IDocumentParser {
         pageCount: totalPages,
         contentDigest,
         diagnostics:
-          'PDF contains no extractable text layer (scanned/raster document or image-only pages)',
+          'No extractable text layer found in PDF (scanned/raster document or empty pages)',
         limitations: [
           'Text-based PDF only',
           'No OCR scanning performed',

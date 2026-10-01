@@ -49,6 +49,19 @@ export class DocxDocumentParser implements IDocumentParser {
     }
 
     const zipEntries = zip.getEntries();
+    const maxEntries = 500;
+    if (zipEntries.length > maxEntries) {
+      return {
+        status: 'FAILED',
+        parserId: this.parserId,
+        parserVersion: this.parserVersion,
+        plainText: '',
+        fragments: [],
+        diagnostics: `DOCX archive contains too many entries (${zipEntries.length} > ${maxEntries})`,
+        limitations: ['Zip-bomb prevention']
+      };
+    }
+
     let totalUncompressedSize = 0;
 
     for (const entry of zipEntries) {
@@ -193,15 +206,16 @@ export class DocxDocumentParser implements IDocumentParser {
 
     const fullText = plainTextLines.join('\n');
     const contentDigest = createHash('sha256').update(buffer).digest('hex');
+    const extractedBytes = Buffer.byteLength(fullText, 'utf8');
 
-    if (fullText.length > maxExtractedBytes) {
+    if (extractedBytes > maxExtractedBytes) {
       return {
         status: 'FAILED',
         parserId: this.parserId,
         parserVersion: this.parserVersion,
         plainText: '',
         fragments: [],
-        diagnostics: `Extracted text (${fullText.length} bytes) exceeds limit of ${maxExtractedBytes} bytes`,
+        diagnostics: `Extracted text (${extractedBytes} bytes) exceeds limit of ${maxExtractedBytes} bytes`,
         limitations: ['Text size bounded to 2 MiB']
       };
     }

@@ -2,80 +2,10 @@
 // Defined according to M5.2 Work Package §1 & §4 [I01, I02]
 
 import { randomUUID, createHash } from 'node:crypto';
-import { SourceFormat, ExtractedFragment } from '@pecp/pe-domain';
+import { SourceFormat, ExtractedFragment, parseCsvRows } from '@pecp/pe-domain';
 import { IDocumentParser, ParsedDocumentOutput, ParseOptions } from './types.js';
 
-export function parseCsvRows(input: string): string[][] {
-  const rows: string[][] = [];
-  let currentRow: string[] = [];
-  let currentField = '';
-  let inQuotes = false;
-  let i = 0;
-
-  while (i < input.length) {
-    const char = input[i];
-
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < input.length && input[i + 1] === '"') {
-          // Escaped quote
-          currentField += '"';
-          i += 2;
-          continue;
-        } else {
-          // End of quoted field
-          inQuotes = false;
-          i++;
-          continue;
-        }
-      } else {
-        currentField += char;
-        i++;
-        continue;
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true;
-        i++;
-        continue;
-      } else if (char === ',') {
-        currentRow.push(currentField);
-        currentField = '';
-        i++;
-        continue;
-      } else if (char === '\r') {
-        if (i + 1 < input.length && input[i + 1] === '\n') {
-          i++;
-        }
-        currentRow.push(currentField);
-        rows.push(currentRow);
-        currentRow = [];
-        currentField = '';
-        i++;
-        continue;
-      } else if (char === '\n') {
-        currentRow.push(currentField);
-        rows.push(currentRow);
-        currentRow = [];
-        currentField = '';
-        i++;
-        continue;
-      } else {
-        currentField += char;
-        i++;
-        continue;
-      }
-    }
-  }
-
-  // Final field and row if any
-  if (currentField.length > 0 || currentRow.length > 0) {
-    currentRow.push(currentField);
-    rows.push(currentRow);
-  }
-
-  return rows;
-}
+export { parseCsvRows };
 
 export class CsvDocumentParser implements IDocumentParser {
   readonly parserId = 'pecp-csv-parser';

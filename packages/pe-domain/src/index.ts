@@ -86,6 +86,7 @@ export interface IntelligenceCandidate {
   reviewStatus: ReviewStatus;
   capturedDate: string;
   notes?: string;
+  sourceBindings?: SourceBindingReference[];
 }
 
 export interface IntelligenceItemHistory {

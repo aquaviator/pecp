@@ -448,6 +448,7 @@ export class MockSourceService implements ISourceService {
       extractedSuccessCount: list.length,
       extractionFailedCount: 0,
       extractionPendingCount: 0,
+      extractionManualReviewCount: 0,
       briefSourcesCount: list.filter((s) => s.kind === 'BRIEF').length,
       manualAssertionsCount: list.filter((s) => s.kind === 'MANUAL_ASSERTION').length,
       totalIntelligenceFields: 4,

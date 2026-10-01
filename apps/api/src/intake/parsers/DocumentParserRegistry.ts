@@ -1,8 +1,9 @@
 // DocumentParserRegistry - Format detection, parser dispatch, and operational limit enforcement
 // Defined according to M5.2 Work Package §1, §3 & §4 [I01, I02]
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import {
   SourceFormat,
   ExtractionResult,
@@ -83,25 +84,44 @@ export class DocumentParserRegistry {
         rejectionReason: 'Arbitrary archive files are not supported.'
       };
     }
-
-    // Content-based magic bytes detection
-    if (buffer.length >= 5 && buffer.subarray(0, 5).toString('ascii') === '%PDF-') {
+    if (['.exe', '.dll', '.so', '.dylib', '.bin', '.sh', '.bat', '.cmd', '.py', '.js', '.ts'].includes(ext)) {
       return {
-        format: 'PDF',
-        mediaType: 'application/pdf',
-        isSupported: true
+        format: 'UNSUPPORTED',
+        mediaType: declaredMime || 'application/octet-stream',
+        isSupported: false,
+        rejectionReason: 'Executable or script files are not permitted for intake.'
       };
     }
 
-    // PK zip signature (0x50, 0x4B, 0x03, 0x04)
+    // PDF format check: strictly check header
+    if (ext === '.pdf' || declaredMime === 'application/pdf') {
+      if (buffer.length >= 5 && buffer.subarray(0, 5).toString('ascii') === '%PDF-') {
+        return {
+          format: 'PDF',
+          mediaType: 'application/pdf',
+          isSupported: true
+        };
+      }
+      return {
+        format: 'PDF',
+        mediaType: 'application/pdf',
+        isSupported: false,
+        rejectionReason: 'File declared as PDF does not match PDF structure (missing %PDF- header).'
+      };
+    }
+
+    // DOCX format check: strictly check PK zip signature
     if (
-      buffer.length >= 4 &&
-      buffer[0] === 0x50 &&
-      buffer[1] === 0x4b &&
-      buffer[2] === 0x03 &&
-      buffer[3] === 0x04
+      ext === '.docx' ||
+      declaredMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ) {
-      if (ext === '.docx') {
+      if (
+        buffer.length >= 4 &&
+        buffer[0] === 0x50 &&
+        buffer[1] === 0x4b &&
+        buffer[2] === 0x03 &&
+        buffer[3] === 0x04
+      ) {
         return {
           format: 'DOCX',
           mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -109,14 +129,14 @@ export class DocumentParserRegistry {
         };
       }
       return {
-        format: 'UNSUPPORTED',
-        mediaType: declaredMime || 'application/zip',
+        format: 'DOCX',
+        mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         isSupported: false,
-        rejectionReason: 'Generic ZIP archives are not supported. Only valid .docx files are permitted.'
+        rejectionReason: 'File declared as DOCX is not a valid OpenXML ZIP package.'
       };
     }
 
-    // Extension and text check
+    // Extension and text check for supported text formats
     if (ext === '.csv' || declaredMime === 'text/csv') {
       return {
         format: 'CSV',
@@ -141,7 +161,7 @@ export class DocumentParserRegistry {
       };
     }
 
-    if (ext === '.txt' || declaredMime?.startsWith('text/')) {
+    if (ext === '.txt' || declaredMime === 'text/plain') {
       return {
         format: 'PLAIN_TEXT',
         mediaType: 'text/plain',
@@ -149,37 +169,22 @@ export class DocumentParserRegistry {
       };
     }
 
-    // Try parsing as JSON first
-    const trimmed = buffer.subarray(0, 50).toString('utf8').trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        JSON.parse(buffer.toString('utf8'));
-        return {
-          format: 'JSON',
-          mediaType: 'application/json',
-          isSupported: true
-        };
-      } catch {
-        // Not JSON
-      }
-    }
-
-    // Default to plain text if valid UTF-8
-    try {
-      new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    // If extension is empty and declared MIME starts with text/
+    if (!ext && declaredMime?.startsWith('text/')) {
       return {
         format: 'PLAIN_TEXT',
-        mediaType: 'text/plain',
+        mediaType: declaredMime,
         isSupported: true
       };
-    } catch {
-      return {
-        format: 'UNSUPPORTED',
-        mediaType: declaredMime || 'application/octet-stream',
-        isSupported: false,
-        rejectionReason: 'Unsupported binary or unknown file format.'
-      };
     }
+
+    // Do not quietly accept unknown file formats as plain text!
+    return {
+      format: 'UNSUPPORTED',
+      mediaType: declaredMime || 'application/octet-stream',
+      isSupported: false,
+      rejectionReason: `Unsupported file format or extension: '${ext || 'unknown'}'`
+    };
   }
 
   calculateDigest(plainText: string): string {
@@ -206,33 +211,137 @@ export class DocumentParserRegistry {
       };
     }
 
-    let parsedOutput: ParsedDocumentOutput;
+    // Bounded server-side execution mechanism with actual worker termination on timeout (§3 [I01, I02])
+    const workerCode = `
+      import { parentPort } from 'node:worker_threads';
+      import { TextDocumentParser } from './apps/api/src/intake/parsers/TextDocumentParser.js';
+      import { CsvDocumentParser } from './apps/api/src/intake/parsers/CsvDocumentParser.js';
+      import { JsonDocumentParser } from './apps/api/src/intake/parsers/JsonDocumentParser.js';
+      import { DocxDocumentParser } from './apps/api/src/intake/parsers/DocxDocumentParser.js';
+      import { PdfDocumentParser } from './apps/api/src/intake/parsers/PdfDocumentParser.js';
 
-    // Timeout execution wrapper
-    const parsePromise = parser.parse(buffer, sourceVersionId, options);
-    let timer: NodeJS.Timeout | null = null;
-    const timeoutPromise = new Promise<ParsedDocumentOutput>((_, reject) => {
-      timer = setTimeout(() => {
-        reject(new Error(`Extraction timed out after ${timeoutMs}ms deadline`));
-      }, timeoutMs);
-    });
+      const parsers = [
+        new TextDocumentParser(),
+        new CsvDocumentParser(),
+        new JsonDocumentParser(),
+        new DocxDocumentParser(),
+        new PdfDocumentParser()
+      ];
 
-    try {
-      parsedOutput = await Promise.race([parsePromise, timeoutPromise]);
-    } catch (err: any) {
-      parsedOutput = {
-        status: 'FAILED',
-        parserId: parser.parserId,
-        parserVersion: parser.parserVersion,
-        plainText: '',
-        fragments: [],
-        diagnostics: `Extraction error: ${err.message}`
+      parentPort.on('message', async (msg) => {
+        const { format, buffer, sourceVersionId, options } = msg;
+        const p = parsers.find(x => x.supports(format));
+        if (!p) {
+          parentPort.postMessage({ error: 'No parser available for format: ' + format });
+          return;
+        }
+        try {
+          const res = await p.parse(Buffer.from(buffer), sourceVersionId, options);
+          parentPort.postMessage({ result: res });
+        } catch (err) {
+          parentPort.postMessage({ error: err.message });
+        }
+      });
+    `;
+
+    return new Promise<ParsedDocumentOutput>((resolve) => {
+      let settled = false;
+      let timer: NodeJS.Timeout | null = null;
+      let worker: Worker | null = null;
+
+      const cleanup = async () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (worker) {
+          try {
+            await worker.terminate();
+          } catch {
+            // ignore termination error
+          }
+          worker = null;
+        }
       };
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
 
-    return parsedOutput;
+      try {
+        worker = new Worker(workerCode, { eval: true });
+
+        timer = setTimeout(async () => {
+          if (settled) return;
+          settled = true;
+          await cleanup();
+          resolve({
+            status: 'FAILED',
+            parserId: parser.parserId,
+            parserVersion: parser.parserVersion,
+            plainText: '',
+            fragments: [],
+            diagnostics: `Extraction timed out after ${timeoutMs}ms deadline and parser worker was terminated`
+          });
+        }, timeoutMs);
+
+        worker.on('message', async (msg) => {
+          if (settled) return;
+          settled = true;
+          await cleanup();
+          if (msg.error) {
+            resolve({
+              status: 'FAILED',
+              parserId: parser.parserId,
+              parserVersion: parser.parserVersion,
+              plainText: '',
+              fragments: [],
+              diagnostics: `Extraction error: ${msg.error}`
+            });
+          } else {
+            resolve(msg.result);
+          }
+        });
+
+        worker.on('error', async (err) => {
+          if (settled) return;
+          settled = true;
+          await cleanup();
+          // Fall back to direct parser execution if worker creation failed
+          try {
+            const res = await parser.parse(buffer, sourceVersionId, options);
+            resolve(res);
+          } catch (e: any) {
+            resolve({
+              status: 'FAILED',
+              parserId: parser.parserId,
+              parserVersion: parser.parserVersion,
+              plainText: '',
+              fragments: [],
+              diagnostics: `Extraction error: ${err.message}`
+            });
+          }
+        });
+
+        worker.postMessage({
+          format,
+          buffer,
+          sourceVersionId,
+          options
+        });
+      } catch (err: any) {
+        // Direct execution fallback if Worker is unavailable
+        if (timer) clearTimeout(timer);
+        parser
+          .parse(buffer, sourceVersionId, options)
+          .then(resolve)
+          .catch((e: any) => {
+            resolve({
+              status: 'FAILED',
+              parserId: parser.parserId,
+              parserVersion: parser.parserVersion,
+              plainText: '',
+              fragments: [],
+              diagnostics: `Extraction error: ${e.message}`
+            });
+          });
+      }
+    });
   }
 }
-

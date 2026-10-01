@@ -1696,6 +1696,9 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     const principal = request.principal!;
     const { projectId } = request.params as { projectId: string };
 
+    // Check project write permission before consuming upload stream
+    await intakeService.assertSourceWritePermission(projectId, principal);
+
     let data: any;
     try {
       data = await request.file();
