@@ -7,7 +7,7 @@
 - **Branch:** `master`
 - **Target Synchronized Base Commit:** `702cf689eec47fbb751892a45b45fd214d20f9a0`
 - **Prior CI State:** Remote CI Run `36544796876` (Job `109328478487`) green on `03964df8f439cb9f2b7d32fff7a0903c99e57c2e` (592 tests passing).
-- **Current Verification Suite Count:** 487 web + 99 API + 10 Reference Lab = **596 passing tests**, 0 failures across 50 test files.
+- **Current Verification Suite Count:** 489 web + 103 API + 10 Reference Lab = **602 passing tests**, 0 failures across 51 test files.
 - **Milestone Scope & Continuation:** This is a continuation of M5.2 addressing PM Review findings. Milestone is **NOT SELF-CLOSED**; submitted for PM Audit and formal closure.
 - **Programme State:** M5.1 CLOSED -> M5.2 Corrections & Workflow Verification Completed -> M5.2 SUBMITTED FOR PM AUDIT -> M5.3 NOT STARTED.
 
@@ -17,13 +17,14 @@
 
 | # | PM Review Finding | Implemented Resolution | Authoritative Files | Verifying Named Tests |
 | :--- | :--- | :--- | :--- | :--- |
-| **1** | **Parser Validity**<br>Remove fallback promoting failed PDF parses to SUCCESS; enforce magic bytes; bounded execution. | Removed tj-token promotion path; PDF requires `%PDF-` magic bytes; DOCX requires `PK\x03\x04`; corrupt/no-text PDFs explicitly fail or report `NO_EXTRACTABLE_TEXT`; bounded parser execution. | `apps/api/src/intake/parsers/PdfDocumentParser.ts`<br>`apps/api/src/intake/parsers/DocumentParserRegistry.ts` | `test/intake_parsers.test.ts`:<br>• `7. PdfDocumentParser extracts text...`<br>• `8. PdfDocumentParser handles corrupt and no-text PDFs...`<br>• `9. DocumentParserRegistry accurately detects formats...` |
+| **1** | **Parser Validity & Bounded Execution**<br>Remove fallback promoting failed PDF parses to SUCCESS; enforce magic bytes; bounded execution in isolated Worker context with hard termination. | Removed tj-token promotion path; PDF requires `%PDF-` magic bytes; DOCX requires `PK\x03\x04`; corrupt/no-text PDFs explicitly fail or report `NO_EXTRACTABLE_TEXT`. Parser runs in dedicated Node Worker (`documentParserWorker.cjs`) outside API event loop. Timeout triggers `worker.terminate()` killing CPU-bound execution. Zero fallback to main-thread parsing; worker startup/module error deterministically returns `FAILED`. | `apps/api/src/intake/parsers/PdfDocumentParser.ts`<br>`apps/api/src/intake/parsers/DocumentParserRegistry.ts`<br>`apps/api/src/intake/parsers/documentParserWorker.cjs` | `test/intake_parsers.test.ts`:<br>• `7. PdfDocumentParser extracts text...`<br>• `8. PdfDocumentParser handles corrupt and no-text PDFs...`<br>• `9. DocumentParserRegistry accurately detects formats...`<br>• `10. DocumentParserRegistry parses documents inside dedicated Worker thread...`<br>• `11. DocumentParserRegistry terminates a deliberately CPU-bound non-returning parser...`<br>• `12. Worker execution failure returns deterministic FAILED status...`<br>• `13. Worker startup or module-resolution failure produces deterministic FAILED status...` |
 | **2** | **Source Bindings**<br>Validate ownership, version existence, locator resolution, and exact quoted excerpts; reject invalid references. | `validateSourceBinding()` verifies source project ownership, version existence, extraction availability, fragment locator match, and exact excerpt match. Cross-tenant references rejected with 400. | `packages/platform-core/src/services/IntakeService.ts` | `test/northstar_intake_workflow.test.ts`:<br>• `2. Enforces Cross-Tenant Isolation & Rejects Foreign Source Bindings` |
 | **3** | **Typed Values & Approval**<br>Preserve type-sensitive comparisons & absent units; material edits/source supersession invalidate approvals while preserving history. | `areValuesAndUnitsEqual()` preserves type distinctions; material changes (value, unit, ambiguity, binding) or source supersession invalidate active approval (`UNREVIEWED`, `STALE`), increment revision, and store immutable snapshot. | `packages/platform-core/src/services/IntakeService.ts` | `test/northstar_intake_workflow.test.ts`:<br>• `1. Proves full Northstar intake... (Steps H, I, J)` |
 | **4** | **Revision Safety**<br>Enforce `expectedRevision` precondition on intake-managed edits, decisions, and source changes inside unit of work. | All state-changing mutations require `expectedRevision` on managed records. Outdated revisions rejected with `409 Conflict`. Permitted state checked within transaction lock. | `packages/platform-core/src/services/IntakeService.ts` | `test/northstar_intake_workflow.test.ts`:<br>• `1. Proves full Northstar intake... (Step J: Stale Revision Rejection)` |
 | **5** | **Structured Import**<br>Use unified RFC 4180/JSON pointer representation; validate `mappingDigest`; enforce all-or-nothing rollback. | Preview and apply share identical `parseCsvRows` / `JsonDocumentParser`. Recomputes and validates `mappingDigest` during apply. Any invalid row aborts entire import without partial writes. | `packages/platform-core/src/services/IntakeService.ts`<br>`packages/pe-domain/src/intake.ts` | `test/northstar_intake_workflow.test.ts`:<br>• `4. Rejects Tampered Import Previews & Incompatible Revisions with All-or-Nothing Rollback` |
 | **6** | **Uploads & Retries**<br>Check write permission before consuming upload stream; re-authorize idempotent replays. | `app.post('/sources/upload')` verifies `assertSourceWritePermission` before calling `request.file()` or buffering. Idempotent replays re-authorized before returning cached response. | `apps/api/src/app.ts` | `test/northstar_intake_workflow.test.ts`:<br>• `3. Enforces Write Permission BEFORE Consuming Upload Stream & Re-authorizes Idempotent Replays` |
 | **7** | **Summary Fidelity**<br>Distinguish extraction states; reflect declared value-kinds without inventing conversions. | `IntakeReviewSummary` exposes distinct `extractedSuccessCount`, `extractionFailedCount`, `extractionPendingCount`, and `extractionManualReviewCount`. No invented unit conversions. | `packages/platform-core/src/services/IntakeService.ts`<br>`packages/pe-domain/src/intake.ts` | `test/northstar_intake_workflow.test.ts`:<br>• `1. Proves full Northstar intake... (Step K: Summary Fidelity)` |
+| **8** | **Intake Portal DOM Interaction & Isolation**<br>Prove upload failure and retry without duplicate project creation, and project switching isolation in real DOM. | Implemented real DOM mounting tests in `apps/web/src/__tests__/IntakePortalInteractionM5_2.test.tsx` using Happy-DOM and React 18 DOM root. Proves error notice presentation, retry upload, single project creation, and zero cross-project leakage during project switching. | `apps/web/src/pages/project/NewProjectModal.tsx`<br>`apps/web/src/pages/project/SourcesIntakePage.tsx` | `apps/web/src/__tests__/IntakePortalInteractionM5_2.test.tsx`:<br>• `1. Correctly handles upload failure, displays error state, and allows retry without duplicating project`<br>• `2. Isolates project sources and ensures no source leaks during project switching in DOM` |
 
 ---
 
@@ -83,6 +84,9 @@ The automated end-to-end workflow executed in `apps/api/test/northstar_intake_wo
 In an isolated checkout of the revision:
 
 ```bash
+npm ci
+# Result: clean install passed, 263 packages audited, 0 errors.
+
 npm run lint
 # > @pecp/web@1.0.0 lint > tsc --noEmit
 # > tsc --noEmit --project apps/api/tsconfig.json
@@ -90,13 +94,13 @@ npm run lint
 
 npm run build
 # > @pecp/web@1.0.0 build > vite build
-# Result: built in 9.62s (dist/ generated, 2592 modules transformed).
+# Result: built in 9.40s (dist/ generated, 2592 modules transformed).
 
 npm test
-# Web Suite (apps/web): 30 test files, 487 passed, 0 failed
-# API Suite (apps/api): 19 test files, 99 passed, 0 failed
+# Web Suite (apps/web): 31 test files, 489 passed, 0 failed
+# API Suite (apps/api): 19 test files, 103 passed, 0 failed
 # Reference Lab (reference-lab/retailco): 1 test file, 10 passed, 0 failed
-# Total: 596 tests passed across 50 test files.
+# Total: 602 tests passed across 51 test files.
 ```
 
 ---

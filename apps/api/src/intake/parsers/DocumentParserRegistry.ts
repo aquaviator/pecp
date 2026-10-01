@@ -211,38 +211,8 @@ export class DocumentParserRegistry {
       };
     }
 
-    // Bounded server-side execution mechanism with actual worker termination on timeout (§3 [I01, I02])
-    const workerCode = `
-      import { parentPort } from 'node:worker_threads';
-      import { TextDocumentParser } from './apps/api/src/intake/parsers/TextDocumentParser.js';
-      import { CsvDocumentParser } from './apps/api/src/intake/parsers/CsvDocumentParser.js';
-      import { JsonDocumentParser } from './apps/api/src/intake/parsers/JsonDocumentParser.js';
-      import { DocxDocumentParser } from './apps/api/src/intake/parsers/DocxDocumentParser.js';
-      import { PdfDocumentParser } from './apps/api/src/intake/parsers/PdfDocumentParser.js';
-
-      const parsers = [
-        new TextDocumentParser(),
-        new CsvDocumentParser(),
-        new JsonDocumentParser(),
-        new DocxDocumentParser(),
-        new PdfDocumentParser()
-      ];
-
-      parentPort.on('message', async (msg) => {
-        const { format, buffer, sourceVersionId, options } = msg;
-        const p = parsers.find(x => x.supports(format));
-        if (!p) {
-          parentPort.postMessage({ error: 'No parser available for format: ' + format });
-          return;
-        }
-        try {
-          const res = await p.parse(Buffer.from(buffer), sourceVersionId, options);
-          parentPort.postMessage({ result: res });
-        } catch (err) {
-          parentPort.postMessage({ error: err.message });
-        }
-      });
-    `;
+    // Bounded server-side execution mechanism with dedicated worker thread and termination on timeout (§3 [I01, I02])
+    const workerUrl = options?.workerUrlOverride ?? new URL('./documentParserWorker.cjs', import.meta.url);
 
     return new Promise<ParsedDocumentOutput>((resolve) => {
       let settled = false;
@@ -264,22 +234,22 @@ export class DocumentParserRegistry {
         }
       };
 
-      try {
-        worker = new Worker(workerCode, { eval: true });
+      timer = setTimeout(async () => {
+        if (settled) return;
+        settled = true;
+        await cleanup();
+        resolve({
+          status: 'FAILED',
+          parserId: parser.parserId,
+          parserVersion: parser.parserVersion,
+          plainText: '',
+          fragments: [],
+          diagnostics: `Extraction timed out after ${timeoutMs}ms deadline and parser worker was terminated`
+        });
+      }, timeoutMs);
 
-        timer = setTimeout(async () => {
-          if (settled) return;
-          settled = true;
-          await cleanup();
-          resolve({
-            status: 'FAILED',
-            parserId: parser.parserId,
-            parserVersion: parser.parserVersion,
-            plainText: '',
-            fragments: [],
-            diagnostics: `Extraction timed out after ${timeoutMs}ms deadline and parser worker was terminated`
-          });
-        }, timeoutMs);
+      try {
+        worker = new Worker(workerUrl);
 
         worker.on('message', async (msg) => {
           if (settled) return;
@@ -287,7 +257,7 @@ export class DocumentParserRegistry {
           await cleanup();
           if (msg.error) {
             resolve({
-              status: 'FAILED',
+              status: msg.status || 'FAILED',
               parserId: parser.parserId,
               parserVersion: parser.parserVersion,
               plainText: '',
@@ -303,20 +273,15 @@ export class DocumentParserRegistry {
           if (settled) return;
           settled = true;
           await cleanup();
-          // Fall back to direct parser execution if worker creation failed
-          try {
-            const res = await parser.parse(buffer, sourceVersionId, options);
-            resolve(res);
-          } catch (e: any) {
-            resolve({
-              status: 'FAILED',
-              parserId: parser.parserId,
-              parserVersion: parser.parserVersion,
-              plainText: '',
-              fragments: [],
-              diagnostics: `Extraction error: ${err.message}`
-            });
-          }
+          // Fail safely with deterministic FAILED result; no unbounded main-thread execution (§3 [I01, I02])
+          resolve({
+            status: 'FAILED',
+            parserId: parser.parserId,
+            parserVersion: parser.parserVersion,
+            plainText: '',
+            fragments: [],
+            diagnostics: `Extraction worker execution failure: ${err.message}`
+          });
         });
 
         worker.postMessage({
@@ -326,21 +291,17 @@ export class DocumentParserRegistry {
           options
         });
       } catch (err: any) {
-        // Direct execution fallback if Worker is unavailable
+        if (settled) return;
+        settled = true;
         if (timer) clearTimeout(timer);
-        parser
-          .parse(buffer, sourceVersionId, options)
-          .then(resolve)
-          .catch((e: any) => {
-            resolve({
-              status: 'FAILED',
-              parserId: parser.parserId,
-              parserVersion: parser.parserVersion,
-              plainText: '',
-              fragments: [],
-              diagnostics: `Extraction error: ${e.message}`
-            });
-          });
+        resolve({
+          status: 'FAILED',
+          parserId: parser.parserId,
+          parserVersion: parser.parserVersion,
+          plainText: '',
+          fragments: [],
+          diagnostics: `Extraction worker startup failure: ${err.message}`
+        });
       }
     });
   }

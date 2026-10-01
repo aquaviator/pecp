@@ -8,6 +8,9 @@ export interface ParseOptions {
   maxExtractedBytes?: number;
   maxPages?: number;
   maxExpandedBytes?: number;
+  workerUrlOverride?: URL;
+  simulateInfiniteLoop?: boolean;
+  simulateHangMs?: number;
 }
 
 export interface ParsedDocumentOutput {

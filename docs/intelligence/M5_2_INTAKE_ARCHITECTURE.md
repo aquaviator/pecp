@@ -26,9 +26,11 @@ Format detection avoids naive file extension reliance:
 - **DOCX**: Confirms standard PK zip signature (`PK\x03\x04`). Rejects corrupted or encrypted ZIP archives safely.
 - **CSV / JSON / Plain Text**: Validates UTF-8 encoding and schema structure.
 
-### 2.2 Bounded Server-Side Execution
-- Synchronous parser execution is bound to a default timeout of 15,000 ms.
-- Parsing failures, password-protected files, or empty text streams produce explicit non-success states (`FAILED`, `NO_EXTRACTABLE_TEXT`, `NEEDS_MANUAL_REVIEW`) and never promote corrupt documents to `SUCCESS`.
+### 2.2 Bounded Server-Side Execution & Dedicated Worker Architecture
+- **Dedicated Worker Thread Boundary**: All document parsing is executed outside the main Fastify API event-loop thread inside an isolated Node Worker (`documentParserWorker.cjs`).
+- **Hard Execution Bound & Termination**: Parsing operations are bounded by an enforceable execution deadline (`timeoutMs`, default 30,000 ms). When the timeout expires, `worker.terminate()` is invoked immediately, forcibly halting any CPU-bound, pathological, or non-returning operations without blocking the event loop.
+- **Zero Fallback & Deterministic Failure**: There is no fallback to unbounded main-thread parsing. Any worker startup failure, module resolution failure, timeout, or uncaught exception inside the worker context produces a deterministic `FAILED` extraction result with exact diagnostics.
+- **Non-Success States**: Parsing failures, password-protected files, or textless PDF streams produce explicit deterministic states (`FAILED`, `NO_EXTRACTABLE_TEXT`, `NEEDS_MANUAL_REVIEW`) and never promote corrupt documents to `SUCCESS`.
 
 ---
 

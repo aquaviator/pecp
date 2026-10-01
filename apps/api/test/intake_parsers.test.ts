@@ -137,4 +137,65 @@ describe('M5.2 Document Parsers and Traceable Extraction', () => {
     expect(unsupported.format).toBe('UNSUPPORTED');
     expect(unsupported.isSupported).toBe(false);
   });
+
+  it('10. DocumentParserRegistry parses documents inside dedicated Worker thread successfully in real test runtime', async () => {
+    const csvBuffer = fs.readFileSync(path.join(fixtureDir, 'holiday_peak_forecast_2027_v1.csv'));
+    const result = await registry.parse('CSV', csvBuffer, 'ver-worker-csv-1', { timeoutMs: 10000 });
+
+    expect(result.status).toBe('SUCCESS');
+    expect(result.parserId).toBe('pecp-csv-parser');
+    expect(result.plainText).toContain('peak_demand_orders');
+    expect(result.fragments.length).toBeGreaterThan(0);
+    const valFrag = result.fragments.find((f) => f.text === '24000');
+    expect(valFrag?.locator).toBe('row:1,col:2');
+  });
+
+  it('11. DocumentParserRegistry terminates a deliberately CPU-bound non-returning parser when timeout expires', async () => {
+    const start = Date.now();
+    const result = await registry.parse(
+      'PLAIN_TEXT',
+      Buffer.from('infinite loop payload'),
+      'ver-hang-1',
+      { simulateInfiniteLoop: true, timeoutMs: 150 } as any
+    );
+    const duration = Date.now() - start;
+
+    expect(result.status).toBe('FAILED');
+    expect(result.diagnostics).toContain('Extraction timed out after 150ms deadline and parser worker was terminated');
+    expect(result.plainText).toBe('');
+    expect(result.fragments).toEqual([]);
+    // Must have terminated promptly without hanging event loop
+    expect(duration).toBeGreaterThanOrEqual(140);
+    expect(duration).toBeLessThan(2000);
+  });
+
+  it('12. Worker execution failure returns deterministic FAILED status without fallback to unbounded direct parsing', async () => {
+    // Malformed JSON that triggers worker-level error
+    const result = await registry.parse(
+      'JSON',
+      Buffer.from('{ "broken": json structure'),
+      'ver-broken-json-1',
+      { timeoutMs: 5000 }
+    );
+
+    expect(result.status).toBe('FAILED');
+    expect(result.diagnostics).toMatch(/JSON/i);
+    expect(result.plainText).toBe('');
+    expect(result.fragments).toEqual([]);
+  });
+
+  it('13. Worker startup or module-resolution failure produces deterministic FAILED status without invoking unbounded parsing', async () => {
+    const nonexistentWorkerUrl = new URL('./nonexistent_worker_module.cjs', import.meta.url);
+    const result = await registry.parse(
+      'PLAIN_TEXT',
+      Buffer.from('test content'),
+      'ver-fail-startup-1',
+      { workerUrlOverride: nonexistentWorkerUrl, timeoutMs: 2000 }
+    );
+
+    expect(result.status).toBe('FAILED');
+    expect(result.diagnostics).toMatch(/Extraction worker (startup|execution) failure/);
+    expect(result.plainText).toBe('');
+    expect(result.fragments).toEqual([]);
+  });
 });

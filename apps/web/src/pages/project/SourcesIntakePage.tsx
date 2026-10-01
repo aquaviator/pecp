@@ -39,10 +39,12 @@ import { useAuth } from '../../context/AuthContext';
 interface SourcesIntakePageProps {
   project: ProjectSummary;
   onNavigateTab?: (tab: any) => void;
+  initialSources?: SourceMetadata[];
 }
 
 export const SourcesIntakePage: React.FC<SourcesIntakePageProps> = ({
-  project
+  project,
+  initialSources
 }) => {
   const { sourceService } = useServices();
   const { hasPermission } = useAuth();
@@ -51,8 +53,10 @@ export const SourcesIntakePage: React.FC<SourcesIntakePageProps> = ({
   const canWriteIntelligence = hasPermission('INTELLIGENCE_WRITE' as any, project.organisationId);
 
   // Main state
-  const [sources, setSources] = useState<SourceMetadata[]>([]);
-  const [selectedSource, setSelectedSource] = useState<SourceMetadata | null>(null);
+  const [sources, setSources] = useState<SourceMetadata[]>(initialSources ?? []);
+  const [selectedSource, setSelectedSource] = useState<SourceMetadata | null>(
+    initialSources && initialSources.length > 0 ? initialSources[0] : null
+  );
   const [versions, setVersions] = useState<SourceVersion[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<SourceVersion | null>(null);
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
@@ -60,7 +64,7 @@ export const SourcesIntakePage: React.FC<SourcesIntakePageProps> = ({
   const [checklist, setChecklist] = useState<ProjectChecklist | null>(null);
 
   // UI state
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSources);
   const [error, setError] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'INVENTORY' | 'CHECKLIST' | 'IMPORT' | 'CAPTURE'>('INVENTORY');
@@ -119,16 +123,18 @@ export const SourcesIntakePage: React.FC<SourcesIntakePageProps> = ({
 
   useEffect(() => {
     activeProjectIdRef.current = project.id;
-    // Clear previous project state immediately
-    setSources([]);
-    setSelectedSource(null);
-    setVersions([]);
-    setSelectedVersion(null);
-    setExtraction(null);
-    setSummary(null);
-    setChecklist(null);
-    setError(null);
-    setLoading(true);
+    // Clear previous project state immediately unless initialSources is provided for this project
+    if (!initialSources || initialSources.some((s) => s.projectId !== project.id)) {
+      setSources([]);
+      setSelectedSource(null);
+      setVersions([]);
+      setSelectedVersion(null);
+      setExtraction(null);
+      setSummary(null);
+      setChecklist(null);
+      setError(null);
+      setLoading(true);
+    }
 
     loadProjectIntakeData(project.id);
   }, [project.id]);
