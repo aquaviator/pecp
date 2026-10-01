@@ -1,119 +1,240 @@
-# AI Studio Instruction — PECP M5.2 Formal Closure
+# AI Studio Instruction — PECP Product Build
 
-## Authority
+## Current State
 
 Repository: `aquaviator/pecp`
 
-This file is the current authoritative execution instruction for AI Studio.
+Current authoritative base:
 
-Do not rely on prior chat history for project state. Use the repository and this instruction.
+`ac57a3bab0ec7ced5efca4db1317a4c278e6af20`
 
-## Current Programme State
+M5.2 is formally CLOSED.
 
-- M5.0: CLOSED
-- M5.1: CLOSED
-- M5.2: APPROVED FOR FORMAL CLOSURE
-- M5.3: NOT STARTED / NOT AUTHORIZED
+The user has now authorized the next product-build phase.
 
-The independent final re-audit has approved M5.2 for formal closure.
+This is no longer a reporting/audit task. Build the product.
 
-## Authoritative Evidence
+Do not create PM reports, audit reports, completion reports, closure reports, or speculative roadmap documents unless explicitly required by this instruction.
 
-Correction commit:
+## Build Objective
 
-`413b597d52f25365d9e8dc710bee067b537e8768`
+Implement the first production slice that connects **real governed intelligence from M5.2** to the existing deterministic **PECP Performance Contract / workload engineering pipeline**.
 
-GitHub Actions run:
+The product must be able to take approved project intelligence already persisted through the M5.2 intake workflow and deterministically compile it into the same canonical engineering model used by the existing workload, artefact, execution and evidence engines.
 
-`36849383088`
+The governing principle is:
 
-Remote CI conclusion:
+```
+real source
+  -> extracted evidence
+  -> governed intelligence
+  -> approved intelligence
+  -> canonical performance contract
+  -> existing deterministic PECP engines
+```
 
-`success`
+No invented values. No hidden defaults. No AI-generated authority.
 
-Verified suite state:
+## Non-Negotiable Product Rules
 
-- apps/web: 31 test files, 489 passed
-- apps/api: 19 test files, 103 passed
-- reference-lab/retailco: 10 passed
-- total: 602 tests across 51 test files
-- TypeScript/lint: pass
-- production build: pass
+Preserve the PECP Constitution and all previously established invariants.
 
-The independent final PM re-audit decision is:
+1. **Source authority remains visible**
+   - Every compiled contract value must retain provenance back to the governing IntelligenceItem and, where applicable, its source binding / source version / locator / excerpt.
+   - Do not flatten provenance into untraceable primitive values.
 
-`APPROVED FOR FORMAL CLOSURE`
+2. **Only eligible governed intelligence may become authoritative contract input**
+   - Approved intake-managed records may compile.
+   - `CONFLICTING`, `AMBIGUOUS`, `STALE`, missing, invalid-contract, or unapproved required records must not silently become usable contract values.
+   - The compiler must return explicit blocking issues for unusable required inputs.
 
-## Required Task
+3. **No invention**
+   - Do not introduce fallback workload values, percentages, durations, units, mixes, peaks, concurrency or schedules.
+   - Do not reuse historical hard-coded defaults removed by earlier semantic gates.
 
-Perform the separate formal M5.2 closure action only.
+4. **Typed values stay typed**
+   - Preserve number vs string distinctions.
+   - Preserve absent unit vs supplied unit.
+   - Reject incompatible value-kind or unit contracts rather than coercing them invisibly.
 
-Do not implement product code.
+5. **Deterministic output**
+   - Same authoritative project state must produce the same contract content and fingerprint.
+   - Volatile runtime timestamps must not alter semantic fingerprints.
 
-Do not refactor existing implementation.
+6. **Backward compatibility**
+   - Existing reference fixtures/tests and deterministic engine behavior must remain green.
+   - Do not bypass or replace existing `@pecp/pe-domain`, `@pecp/workload-engine`, `@pecp/artefact-engine`, execution or evidence contracts.
+   - Integrate M5.2 intake with them.
 
-Do not begin M5.3.
+## Required Product Slice
 
-Do not create M5.2.1.
+### 1. Define the governed compilation boundary
 
-### 1. Create Formal Closure Record
+Add a production service in the appropriate platform/core domain layer that compiles persisted project intelligence into the existing canonical performance contract input/model.
 
-Create:
+Use existing domain types wherever possible.
 
-`docs/M5_2_CLOSURE.md`
+Do not create a parallel duplicate contract model if the repo already contains an authoritative one.
 
-The closure record must accurately capture:
+The service should conceptually support:
 
-- milestone name: M5.2 — Real Intelligence Intake, Source Provenance & Governance;
-- governing work package: `docs/work-packages/M5_2_REAL_INTELLIGENCE_INTAKE_SOURCE_PROVENANCE.md`;
-- authoritative implementation commit: `413b597d52f25365d9e8dc710bee067b537e8768`;
-- final successful GitHub Actions run: `36849383088`;
-- final verified test totals: 489 web + 103 API + 10 Reference Lab = 602 passing across 51 test files;
-- lint/typecheck pass;
-- production build pass;
-- final independent PM decision: `APPROVED FOR FORMAL CLOSURE`;
-- confirmation that both final audit corrections were resolved:
-  1. genuinely bounded worker-thread document parsing with hard termination and no unbounded main-thread fallback;
-  2. DOM-capable intake portal interaction evidence covering upload retry without duplicate project creation and project switching isolation;
-- confirmation that all I01–I12 requirements are satisfied;
-- confirmation that M5.3 was not started during M5.2;
-- formal statement that M5.2 is CLOSED.
+```ts
+compileProjectPerformanceContract(projectId, principal)
+```
 
-Do not invent evidence beyond repository-backed facts.
+or the equivalent that fits the current architecture.
 
-### 2. Update Programme Documentation Only If Required
+It must read persisted project intelligence from the authoritative repository, not mock fixture state.
 
-Inspect the current M5.2 completion and PM documentation.
+### 2. Introduce explicit input eligibility evaluation
 
-If a programme-state line still says M5.2 is pending audit or submitted for audit, update only the minimal programme-state wording necessary to reflect formal closure.
+For every mapped contract field, evaluate whether the current IntelligenceItem is usable.
 
-Do not rewrite historical PM audit findings or erase the previous HOLD history.
+At minimum distinguish:
 
-Historical documents must remain truthful to the point in time when they were written.
+- usable / approved
+- missing
+- conflicting
+- ambiguous
+- stale
+- unapproved
+- invalid type
+- invalid/missing required unit
+- invalid provenance/source binding where required
 
-### 3. Verification
+Return deterministic structured issues rather than throwing generic strings for ordinary governance gaps.
 
-Because this action is documentation-only, confirm that no product-code files changed.
+Use existing canonical/review states and issue models if available.
 
-If CI is automatically triggered by the closure commit, report its run ID and state.
+### 3. Compile provenance into lineage
 
-Do not claim M5.3 authorization.
+For each successfully compiled contract field, preserve lineage sufficient to answer:
 
-## Required Final Response
+- which IntelligenceItem produced this value;
+- which intelligence revision was compiled;
+- approval snapshot / approval revision where applicable;
+- source ID;
+- source version ID;
+- SHA-256/source digest where present;
+- locator;
+- excerpt where present;
+- whether the value was imported, manual, calculated, inferred or otherwise represented by the canonical state.
 
-Return:
+Do not fabricate missing provenance fields.
 
-1. Closure commit SHA
-2. Files changed
-3. Confirmation that `docs/M5_2_CLOSURE.md` was created
-4. Any programme-state documentation minimally updated
-5. Confirmation that no product code changed
-6. CI run ID/status if triggered
-7. Exact statement: `M5.2 CLOSED`
-8. Exact statement: `M5.3 NOT STARTED / NOT AUTHORIZED`
+### 4. Connect to the existing workload / contract compiler
+
+Where the existing PECP engine already performs deterministic calculations or workload construction, feed the governed input into that existing path.
+
+Do not duplicate calculation logic inside the API/service layer.
+
+Existing calculation lineage must remain intact and should compose with the new intake lineage.
+
+### 5. Add governed API exposure
+
+Expose the compiled contract or compilation result through the existing governed API architecture.
+
+Use the existing authentication/RBAC model.
+
+Minimum useful endpoint shape may be:
+
+`GET /api/v1/projects/:projectId/performance-contract`
+
+or an equivalent consistent with existing route conventions.
+
+The response must make clear:
+
+- whether the contract is compile-ready / blocked;
+- compiled canonical values when eligible;
+- deterministic blocking issues;
+- provenance/lineage;
+- semantic fingerprint / binding identifier where the existing contract model supports it.
+
+Do not return a fabricated partial contract as if it were approved/ready.
+
+### 6. Surface it in the product UI
+
+Add the smallest useful portal experience that lets a user see the result of the real intelligence-to-contract bridge.
+
+Use the existing project/intelligence/contract pages and design language.
+
+The UI must show, at minimum:
+
+- contract readiness;
+- authoritative compiled values;
+- blocked fields and reasons;
+- provenance/source link or source locator information where available.
+
+Do not build a new design system.
+
+Do not add chat/LLM UI.
+
+### 7. Prove the real Northstar flow
+
+Extend the Northstar reference scenario so that the already-governed intake state produces a canonical contract only after the required intelligence is valid and approved.
+
+Prove at least:
+
+1. Approved `24,000 orders/hr` from the governed Northstar source compiles into the appropriate canonical workload/contract field.
+2. The competing `30,000 orders/hr` assertion blocks compilation while the item is `CONFLICTING`.
+3. Resolving the conflict and approving the chosen candidate enables compilation.
+4. Replacing/superseding the bound source invalidates the approval to `STALE` and causes the contract to become blocked again.
+5. Reapproval against the current source/revision restores compile readiness.
+6. Provenance in the compiled output points to the exact governing source version/candidate used.
+7. A database restart preserves the same canonical compilation result and semantic fingerprint.
+
+### 8. Product regression tests
+
+Add tests at the correct layers:
+
+- domain/service tests for eligibility and mapping;
+- API integration tests for real persisted project state;
+- at least one DOM-capable portal interaction test for readiness/provenance rendering;
+- Northstar end-to-end integration coverage.
+
+Test negative paths, not only success.
 
 ## Scope Guard
 
-This is a documentation and programme-governance closure action only.
+Do NOT implement in this slice:
 
-Do not begin the next milestone.
+- external LLM/BYOAI ingestion;
+- Jira/Azure DevOps/Confluence/SharePoint connectors;
+- new k6 execution behavior;
+- JMeter;
+- Kubernetes;
+- billing/subscriptions;
+- marketing/public website;
+- M5.2 changes unless required to fix a regression discovered by this implementation.
+
+This slice is the product bridge from **real governed intelligence** into the **existing canonical deterministic PECP engineering pipeline**.
+
+## Build Method
+
+1. Inspect the existing authoritative contract/domain/workload compiler before changing code.
+2. Reuse existing models and engines.
+3. Implement the smallest coherent production slice.
+4. Run:
+   - `npm ci`
+   - `npm run lint`
+   - `npm test`
+   - `npm run build`
+5. Commit all implemented product changes to `master` only when the full suite is green.
+
+## Required Final Response
+
+Do not write a milestone report.
+
+Return only a concise implementation handoff containing:
+
+1. commit SHA;
+2. product capability now working;
+3. files/components materially changed;
+4. exact new API route(s);
+5. exact new/changed UI behavior;
+6. test totals and build/lint result;
+7. any genuine product blocker that remains.
+
+If implementation succeeds, stop there.
+
+Do not create an audit cycle or ask for permission to continue.
