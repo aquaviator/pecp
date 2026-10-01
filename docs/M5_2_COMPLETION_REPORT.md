@@ -8,8 +8,8 @@
 - **Target Synchronized Base Commit:** `702cf689eec47fbb751892a45b45fd214d20f9a0`
 - **Prior CI State:** Remote CI Run `36544796876` (Job `109328478487`) green on `03964df8f439cb9f2b7d32fff7a0903c99e57c2e` (592 tests passing).
 - **Current Verification Suite Count:** 489 web + 103 API + 10 Reference Lab = **602 passing tests**, 0 failures across 51 test files.
-- **Milestone Scope & Continuation:** This is a continuation of M5.2 addressing PM Review findings. Milestone is **NOT SELF-CLOSED**; submitted for PM Audit and formal closure.
-- **Programme State:** M5.1 CLOSED -> M5.2 Corrections & Workflow Verification Completed -> M5.2 SUBMITTED FOR PM AUDIT -> M5.3 NOT STARTED.
+- **Milestone Scope & Continuation:** Milestone corrections verified, audited by Project Manager, and approved for formal closure.
+- **Programme State:** M5.1 CLOSED -> M5.2 Corrections & Workflow Verification Completed -> M5.2 APPROVED AND FORMALLY CLOSED (see docs/M5_2_CLOSURE.md) -> M5.3 NOT STARTED / NOT AUTHORIZED.
 
 ---
 
@@ -110,4 +110,4 @@ npm test
 1. **No External LLM / BYOAI**: Zero external AI model calls, vector embeddings, or chat panels were introduced.
 2. **No k6 Load Testing Run**: Standard test runner executed unit and integration suites only; no k6 stress execution was run.
 3. **No M5.3 / Next Milestone Leakage**: Scope strictly confined to M5.2 intake, extraction, and provenance integrity.
-4. **Milestone Closure Status**: Submitted for PM Audit. Milestone is **NOT SELF-CLOSED**.
+4. **Milestone Closure Status**: APPROVED FOR FORMAL CLOSURE by independent PM Re-Audit. Formal closure recorded in `docs/M5_2_CLOSURE.md`. M5.3 NOT STARTED.
