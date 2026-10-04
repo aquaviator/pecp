@@ -1,5 +1,23 @@
 # AI Studio Instruction: Build Real Strategy and Test Plan Workflow
 
+## Manual transfer workflow (applies to every task)
+
+Andy performs BOTH repository transfers manually through AI Studio:
+
+1. ChatGPT writes the build instruction into GitHub and provides a short instruction to read it.
+2. Andy manually pulls the repository changes into AI Studio.
+3. AI Studio reads the instruction already present in its workspace, implements the assigned product change, and runs local verification.
+4. Andy manually pushes the finished changes from AI Studio to GitHub.
+5. ChatGPT checks the resulting remote implementation commit and its CI evidence before preparing the next build instruction.
+
+Do not attempt terminal-based `git fetch`, `git pull`, or `git push` as part of this handoff. Do not request GitHub credentials, change remotes, force-push, reset the workspace, or discard local work to resolve synchronization. Terminal write credentials are not required for Andy's manual transfer workflow.
+
+Local Git inspection is permitted. If a local commit exists, label its SHA as LOCAL. Do not assume that it is the SHA produced by Andy's subsequent manual push. The remote commit and CI state must be read from GitHub after the manual push, not inferred from a local build.
+
+Finish implementation by preserving the working changes and saying they are ready for Andy's manual push. Pending manual transfer is a handoff state, not a product-code defect. Report genuine implementation or test failures separately.
+
+This workflow clarification does not authorize repeating an already delivered feature, adding new product scope, or starting a reporting cycle. Preserve existing implementation and complete only genuinely missing work in the assigned slice.
+
 ## Active task
 
 Repository: `aquaviator/pecp`
@@ -20,7 +38,7 @@ The earlier SHA `ac57a3bab0ec7ced5efca4db1317a4c278e6af20` is the M5.2 closure b
 
 Remote CI run `37202826658`, job `111437833676`, completed successfully for the implementation. Its logs show 491 web tests, 118 API tests, and 10 Reference Lab tests: 619 passing, plus successful npm ci, TypeScript checks, and production web build. These are baseline execution results, not a production or security certification.
 
-Fetch and safely synchronize with current `master`, including this instruction. Preserve any later commits and legitimate local changes. Do not force-push, discard work, reset customer data, or overwrite another worker's implementation. If this slice is already partly present, complete its missing production paths instead of duplicating them.
+Use the repository state Andy has manually pulled into AI Studio, including this instruction. Inspect local state before editing and preserve later commits and legitimate local changes. Do not perform repository synchronization yourself. If the required instruction or source is absent, describe the exact missing prerequisite without requesting credentials or attempting destructive recovery. If this slice is already partly present, complete its missing production paths instead of duplicating them; if already delivered, do not rebuild it merely to perform a handoff.
 
 ## User-visible outcome
 
@@ -148,15 +166,15 @@ Keep the existing 619-test baseline green and add meaningful coverage. Do not re
 
 Run `npm ci`, `npm run lint`, `npm test`, and `npm run build`. Exercise the new workflow in API mode with a persisted project. Use browser interaction tooling if available; otherwise report exactly which DOM/API execution provided evidence and do not claim a manual browser walkthrough.
 
-Commit the working implementation to `master` using the established repository workflow once local checks pass. Preserve upstream commits. If the environment cannot push, retain the changes and state that plainly instead of returning an old SHA as the delivered implementation. If remote CI is still pending, say pending; do not invent a green result or create a separate reporting task.
+After local checks pass, preserve the finished implementation in the AI Studio workspace for Andy's manual push. Do not run terminal-based Git synchronization or attempt to acquire write credentials. If a local commit was created, record its exact SHA as LOCAL, not as proof of remote delivery. State that remote CI is unverified until the manual push has occurred and its resulting GitHub run has been inspected. A pending manual push does not require an audit report or a separate credential-repair task.
 
 Do not introduce new k6 runs or engine behaviour, JMeter, connectors, BYOAI, billing, deployment platforms, marketing work, or unrelated dependency upgrades. Do not run forced dependency upgrades to remove warnings. Normal tests and small operational/API notes needed to use this capability are permitted; PM reports, re-audits, milestone closure documents, and speculative plans are not the deliverable.
 
 Return a compact handoff containing only:
 
-- the actual NEW implementation commit SHA and whether it is pushed;
+- readiness for Andy's manual push, plus the exact LOCAL implementation commit SHA if one exists;
 - what the user can now do, with exact UI navigation/clicks and implemented API routes;
-- test totals, install/typecheck/build results, and observed CI status;
+- test totals and local install/typecheck/build results; keep remote CI separate and do not infer its state;
 - any genuine unfinished behaviour or blocker, scoped to this slice.
 
 Stop after implementing and handing off this slice. Do not self-authorize unrelated work or initiate another audit/report cycle.
