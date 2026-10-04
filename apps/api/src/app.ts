@@ -17,6 +17,7 @@ import {
   AuditService,
   IdentityAdministrationService,
   IntakeService,
+  PerformanceContractService,
   OrganisationRole,
   Permission
 } from '@pecp/platform-core';
@@ -47,6 +48,7 @@ export interface ApiAppOptions {
   database?: SqliteDatabase;
   platformService?: PlatformApplicationService;
   intakeService?: IntakeService;
+  performanceContractService?: PerformanceContractService;
   identityAdminService?: IdentityAdministrationService;
   sessionService?: SessionService;
   localAuthProvider?: LocalAuthenticationProvider;
@@ -201,6 +203,17 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       auditService: auditService,
       unitOfWork: db,
       parserRegistry: parserRegistry
+    });
+
+  const performanceContractService =
+    options.performanceContractService ||
+    new PerformanceContractService({
+      projectRepository: projectRepo,
+      intelligenceRepository: intelligenceRepo,
+      sourceRepository: sourceRepo,
+      extractionRepository: extractionRepo,
+      checklistRepository: checklistRepo,
+      membershipRepository: membershipRepo
     });
 
   const isProduction = process.env.NODE_ENV === 'production';
@@ -2193,6 +2206,24 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       reply.status(status).send({
         error: {
           code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/performance-contract', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+
+    try {
+      const result = await performanceContractService.compileProjectPerformanceContract(projectId, principal);
+      return result;
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
           message: err.message
         }
       });

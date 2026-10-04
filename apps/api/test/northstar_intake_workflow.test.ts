@@ -270,6 +270,18 @@ describe('M5.2 End-to-End Northstar Intake & Provenance Workflow', () => {
     expect(conflictingItem.candidates).toHaveLength(2);
     expect(conflictingItem.revision).toBe(2);
 
+    // Step E2: Verify competing 30,000 orders/hr assertion blocks compilation while CONFLICTING (Requirement 7.2)
+    const contractBlockedRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${northstarProjectId}/performance-contract`,
+      headers: erinEngineerAuth
+    });
+    expect(contractBlockedRes.statusCode).toBe(200);
+    const contractBlocked = contractBlockedRes.json();
+    expect(contractBlocked.status).toBe('BLOCKED');
+    expect(contractBlocked.isCompileReady).toBe(false);
+    expect(contractBlocked.blockingIssues.some((i: any) => i.issueType === 'CONFLICTING_SOURCE')).toBe(true);
+
     // Step F: Verify unapproved item cannot be approved while in CONFLICTING state
     const prematureApproveRes = await app.inject({
       method: 'POST',
@@ -303,6 +315,29 @@ describe('M5.2 End-to-End Northstar Intake & Provenance Workflow', () => {
     expect(resolvedItem.revision).toBe(3);
     expect(resolvedItem.activeApprovalSnapshot).toBeDefined();
     expect(resolvedItem.activeApprovalSnapshot.value).toBe(24000);
+
+    // Step G2: Verify approved 24,000 orders/hr compiles into canonical performance contract with complete provenance (Requirement 7.1, 7.3, 7.6)
+    const contractApprovedRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${northstarProjectId}/performance-contract`,
+      headers: erinEngineerAuth
+    });
+    expect(contractApprovedRes.statusCode).toBe(200);
+    const contractApproved = contractApprovedRes.json();
+    expect(contractApproved.status).toBe('READY_FOR_APPROVAL');
+    expect(contractApproved.isCompileReady).toBe(true);
+    expect(contractApproved.compiledValues['peak_orders_per_hr'].value).toBe(24000);
+    expect(contractApproved.compiledValues['peak_orders_per_hr'].unit).toBe('orders/hr');
+    expect(contractApproved.contract.workloadCalculations[0].outputValue).toBeCloseTo(24000 / 3600, 3);
+    const approvedProv = contractApproved.compiledValues['peak_orders_per_hr'].provenance;
+    expect(approvedProv.sourceId).toBe(csvSourceId);
+    expect(approvedProv.sourceVersionId).toBe(csvVersionId);
+    expect(approvedProv.sourceVersionNumber).toBe(1);
+    expect(approvedProv.locator).toBe(peakItem.sourceLocation || 'row:1,col:2');
+    expect(approvedProv.approvalRevision).toBe(3);
+    expect(approvedProv.approvedBy).toBe('Peter Lead');
+    expect(approvedProv.sourceSha256).toBeDefined();
+    const approvedFingerprint = contractApproved.fingerprint;
 
     // Step H: Source Replacement (Upload v2 of forecast CSV)
     // In v2, the file has been revised
@@ -346,6 +381,18 @@ describe('M5.2 End-to-End Northstar Intake & Provenance Workflow', () => {
     expect(invalidatedItem.activeApprovalSnapshot).toBeUndefined();
     expect(invalidatedItem.revision).toBe(4); // Incremented due to invalidation
 
+    // Step I2: Verify replacing/superseding bound source invalidates approval to STALE and blocks contract (Requirement 7.4)
+    const contractStaleRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${northstarProjectId}/performance-contract`,
+      headers: erinEngineerAuth
+    });
+    expect(contractStaleRes.statusCode).toBe(200);
+    const contractStale = contractStaleRes.json();
+    expect(contractStale.status).toBe('BLOCKED');
+    expect(contractStale.isCompileReady).toBe(false);
+    expect(contractStale.blockingIssues.some((i: any) => i.issueType === 'STALE_SOURCE')).toBe(true);
+
     // Step J: Stale Revision Rejection
     // Attempting to approve using old revision 3 should fail with 409 Conflict
     const staleApproveRes = await app.inject({
@@ -372,6 +419,66 @@ describe('M5.2 End-to-End Northstar Intake & Provenance Workflow', () => {
     expect(summary.extractedSuccessCount).toBe(1); // 1 uploaded file currently in SUCCESS
     expect(summary.extractionFailedCount).toBe(0);
 
+    // Step K2: Reapproval against the current source/revision restores compile readiness (Requirement 7.5)
+    // Query versions of csvSource to get the new v2 version ID
+    const csvVersionsRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${northstarProjectId}/sources/${csvSourceId}/versions`,
+      headers: erinEngineerAuth
+    });
+    expect(csvVersionsRes.statusCode).toBe(200);
+    const versionsList = csvVersionsRes.json().items || csvVersionsRes.json().versions;
+    const csvV2Version = versionsList.find((v: any) => v.versionNumber === 2);
+    expect(csvV2Version).toBeDefined();
+
+    // Re-bind intelligence item to v2 source
+    const patchBindingRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/projects/${northstarProjectId}/intelligence/${peakItem.id}`,
+      headers: erinEngineerAuth,
+      payload: {
+        expectedRevision: 4,
+        sourceBinding: {
+          sourceId: csvSourceId,
+          sourceVersionId: csvV2Version.id,
+          locator: 'row:1,col:2'
+        }
+      }
+    });
+    expect(patchBindingRes.statusCode).toBe(200);
+    const patchedItem = patchBindingRes.json();
+    expect(patchedItem.canonicalState).toBe('IMPORTED');
+    expect(patchedItem.reviewStatus).toBe('FOUND');
+    expect(patchedItem.revision).toBe(5);
+
+    // Formally re-approve against current revision with Peter Lead
+    const reapproveRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/projects/${northstarProjectId}/intelligence/${peakItem.id}/approve`,
+      headers: peterLeadAuth,
+      payload: {
+        expectedRevision: 5
+      }
+    });
+    expect(reapproveRes.statusCode).toBe(200);
+    const reapprovedItem = reapproveRes.json();
+    expect(reapprovedItem.canonicalState).toBe('APPROVED');
+    expect(reapprovedItem.revision).toBe(6);
+
+    // Verify contract compile readiness is restored with updated v2 provenance
+    const contractRestoredRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${northstarProjectId}/performance-contract`,
+      headers: erinEngineerAuth
+    });
+    expect(contractRestoredRes.statusCode).toBe(200);
+    const contractRestored = contractRestoredRes.json();
+    expect(contractRestored.status).toBe('READY_FOR_APPROVAL');
+    expect(contractRestored.isCompileReady).toBe(true);
+    expect(contractRestored.compiledValues['peak_orders_per_hr'].value).toBe(24000);
+    expect(contractRestored.compiledValues['peak_orders_per_hr'].provenance.sourceVersionNumber).toBe(2);
+    const restoredFingerprint = contractRestored.fingerprint;
+
     // Step L: Persistence Restart & Reference Verification
     // Close db and fastify server, create fresh instance pointing to same file
     await app.close();
@@ -391,11 +498,24 @@ describe('M5.2 End-to-End Northstar Intake & Provenance Workflow', () => {
     expect(restartedItemRes.statusCode).toBe(200);
     const restartedItem = restartedItemRes.json();
     expect(restartedItem.id).toBe(peakItem.id);
-    expect(restartedItem.revision).toBe(4);
-    expect(restartedItem.canonicalState).toBe('STALE');
-    expect(restartedItem.reviewStatus).toBe('STALE');
-    expect(restartedItem.approvalState).toBe('UNREVIEWED');
+    expect(restartedItem.revision).toBe(6);
+    expect(restartedItem.canonicalState).toBe('APPROVED');
+    expect(restartedItem.approvalState).toBe('APPROVED');
     expect(restartedItem.history.length).toBeGreaterThan(1);
+
+    // Step L2: Database restart preserves same canonical compilation result and semantic fingerprint (Requirement 7.7)
+    const restartedContractRes = await app2.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${northstarProjectId}/performance-contract`,
+      headers: aliceAdminAuth
+    });
+    expect(restartedContractRes.statusCode).toBe(200);
+    const restartedContract = restartedContractRes.json();
+    expect(restartedContract.status).toBe('READY_FOR_APPROVAL');
+    expect(restartedContract.isCompileReady).toBe(true);
+    expect(restartedContract.fingerprint).toBe(restoredFingerprint);
+    expect(restartedContract.compiledValues['peak_orders_per_hr'].value).toBe(24000);
+    expect(restartedContract.contract.workloadCalculations[0].outputValue).toBeCloseTo(24000 / 3600, 3);
 
     await app2.close();
     db2.close();

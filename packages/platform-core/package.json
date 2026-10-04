@@ -13,6 +13,7 @@
     }
   },
   "dependencies": {
-    "@pecp/pe-domain": "*"
+    "@pecp/pe-domain": "*",
+    "@pecp/workload-engine": "*"
   }
 }

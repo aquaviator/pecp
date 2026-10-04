@@ -1,7 +1,7 @@
 // M5.2 Real Intelligence Intake, Source Provenance & Review Types
 // Defined according to docs/work-packages/M5_2_REAL_INTELLIGENCE_INTAKE_SOURCE_PROVENANCE.md
 
-import { CanonicalState, IntelligenceCategory, ReviewStatus } from './index.js';
+import { CanonicalState, IntelligenceCategory, ReviewStatus, EngineeringIntent } from './index.js';
 
 export type SourceKind = 'BRIEF' | 'MANUAL_ASSERTION' | 'UPLOAD';
 
@@ -259,4 +259,71 @@ export function parseCsvRows(input: string): string[][] {
   }
 
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Governed Intelligence-to-Performance Contract Compilation Models
+// ---------------------------------------------------------------------------
+
+export type FieldEligibilityStatus =
+  | 'USABLE'
+  | 'MISSING'
+  | 'CONFLICTING'
+  | 'AMBIGUOUS'
+  | 'STALE'
+  | 'UNAPPROVED'
+  | 'INVALID_TYPE'
+  | 'INVALID_OR_MISSING_UNIT'
+  | 'INVALID_PROVENANCE';
+
+export interface ContractFieldProvenance {
+  fieldKey: string;
+  intelligenceItemId: string;
+  intelligenceRevision: number;
+  canonicalState: CanonicalState;
+  reviewStatus: ReviewStatus;
+  approvalRevision?: number;
+  approvedBy?: string;
+  approvedAt?: string;
+  decisionNote?: string;
+  sourceId?: string;
+  sourceVersionId?: string;
+  sourceVersionNumber?: number;
+  sourceSha256?: string;
+  locator?: string;
+  excerpt?: string;
+  value: string | number;
+  unit?: string;
+}
+
+export interface ContractBlockingIssue {
+  fieldKey: string;
+  title: string;
+  issueType: string;
+  reason: string;
+  severity: 'BLOCKING' | 'WARNING';
+  remediationGuidance: string;
+  intelligenceItemId?: string;
+}
+
+export interface CompiledFieldValue {
+  key: string;
+  title: string;
+  value: string | number;
+  unit?: string;
+  provenance: ContractFieldProvenance;
+}
+
+export interface PerformanceContractCompilationResult {
+  projectId: string;
+  projectName: string;
+  engineeringIntent: EngineeringIntent;
+  status: 'DRAFT' | 'BLOCKED' | 'READY_FOR_APPROVAL' | 'APPROVED' | 'SUPERSEDED';
+  isCompileReady: boolean;
+  fingerprint: string;
+  contract: any;
+  compiledValues: Record<string, CompiledFieldValue>;
+  blockingIssues: ContractBlockingIssue[];
+  provenance: ContractFieldProvenance[];
+  compiledAt: string;
 }

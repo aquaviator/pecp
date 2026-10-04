@@ -25,3 +25,4 @@ export * from './services/LocalAuthenticationProvider.js';
 export * from './services/AuditService.js';
 export * from './services/IdentityAdministrationService.js';
 export * from './services/IntakeService.js';
+export * from './services/PerformanceContractService.js';

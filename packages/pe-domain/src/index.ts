@@ -96,7 +96,7 @@ export interface IntelligenceItemHistory {
   note?: string;
 }
 
-import type { SourceBindingReference, IntelligenceApprovalSnapshot } from './intake.js';
+import type { SourceBindingReference, IntelligenceApprovalSnapshot, ContractFieldProvenance } from './intake.js';
 
 export interface IntelligenceItem {
   id: string;
@@ -220,6 +220,13 @@ export interface WorkloadInput {
   sourceDocument?: string;
   sourceLocation?: string;
   notes?: string;
+  revision?: number;
+  approvalRevision?: number;
+  sourceVersionId?: string;
+  sourceVersionNumber?: number;
+  sourceSha256?: string;
+  locator?: string;
+  excerpt?: string;
 }
 
 export interface ThroughputConversion {
@@ -361,6 +368,8 @@ export interface PerformanceContract {
   approvalReadiness: ContractApprovalReadiness;
   approvedBy?: string;
   approvedAt?: string;
+  fingerprint?: string;
+  provenance?: ContractFieldProvenance[];
 }
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,8 @@ import {
   AcceptanceCriterion,
   CalculationLineage,
   BlockedCalculation,
-  WorkloadInput
+  WorkloadInput,
+  computeContractFingerprint
 } from '@pecp/pe-domain';
 import { convertThroughput } from './throughput';
 import { evaluateSessionConcurrency } from './littlesLaw';
@@ -126,30 +127,47 @@ export function compileDraftPerformanceContract(
     (item) => item.category === 'WORKLOAD'
   );
 
-  const workloadInputs: WorkloadInput[] = workloadItems.map((item) => ({
-    id: item.id,
-    key: item.key,
-    title: item.title,
-    value: item.value ?? (item.candidates && item.candidates.length > 0 ? 'UNRESOLVED_CANDIDATES' : 'UNSPECIFIED'),
-    unit: item.unit || '',
-    canonicalState: item.canonicalState,
-    reviewStatus: item.reviewStatus,
-    sourceId: item.id,
-    sourceDocument: item.sourceDocument,
-    sourceLocation: item.sourceLocation,
-    notes: item.notes
-  }));
+  const workloadInputs: WorkloadInput[] = workloadItems.map((item) => {
+    const primaryBinding = item.sourceBindings && item.sourceBindings.length > 0 ? item.sourceBindings[0] : undefined;
+    return {
+      id: item.id,
+      key: item.key,
+      title: item.title,
+      value: item.value ?? (item.candidates && item.candidates.length > 0 ? 'UNRESOLVED_CANDIDATES' : 'UNSPECIFIED'),
+      unit: item.unit || '',
+      canonicalState: item.canonicalState,
+      reviewStatus: item.reviewStatus,
+      sourceId: item.id,
+      sourceDocument: item.sourceDocument,
+      sourceLocation: item.sourceLocation,
+      notes: item.notes,
+      revision: item.revision,
+      approvalRevision: item.activeApprovalSnapshot?.revision,
+      sourceVersionId: primaryBinding?.sourceVersionId,
+      sourceVersionNumber: primaryBinding?.sourceVersionNumber,
+      sourceSha256: primaryBinding?.originalSha256,
+      locator: primaryBinding?.locator,
+      excerpt: primaryBinding?.excerpt
+    };
+  });
 
   // 2. Perform deterministic throughput calculations if peak orders exist and is approved
   const peakOrdersItem = intelligenceItems.find(
-    (item) => item.key === 'peak_hourly_orders' || item.key === 'peak_orders'
+    (item) => item.key === 'peak_hourly_orders' || item.key === 'peak_orders' || item.key === 'peak_orders_per_hr'
   );
 
   const calculations: CalculationLineage[] = [];
   const blockedCalculations: BlockedCalculation[] = [];
 
+  const isPeakOrdersStale = Boolean(
+    peakOrdersItem &&
+      (peakOrdersItem.canonicalState === 'STALE' ||
+        peakOrdersItem.reviewStatus === 'STALE')
+  );
+
   const isPeakOrdersConflicting = Boolean(
     peakOrdersItem &&
+      !isPeakOrdersStale &&
       (peakOrdersItem.canonicalState === 'CONFLICTING' ||
         peakOrdersItem.reviewStatus === 'CONFLICTING' ||
         (peakOrdersItem.candidates &&
@@ -161,6 +179,7 @@ export function compileDraftPerformanceContract(
   const isPeakOrdersApproved = Boolean(
     peakOrdersItem &&
       !isPeakOrdersConflicting &&
+      !isPeakOrdersStale &&
       (peakOrdersItem.canonicalState === 'APPROVED' ||
         peakOrdersItem.approvalState === 'APPROVED')
   );
@@ -168,24 +187,29 @@ export function compileDraftPerformanceContract(
   let numericPeakOrders: number | undefined;
 
   if (peakOrdersItem) {
-    if (isPeakOrdersConflicting || !isPeakOrdersApproved) {
-      // Constitution §3 & M1.1 §2: Unresolved conflicting items must NOT become authoritative calculations.
+    if (isPeakOrdersConflicting || isPeakOrdersStale || !isPeakOrdersApproved) {
+      // Constitution §3 & M1.1 §2: Unresolved conflicting or stale items must NOT become authoritative calculations.
+      let blockReason = 'Peak hourly order volume has not been formally approved as an authoritative workload input.';
+      if (isPeakOrdersStale) {
+        blockReason = 'Peak hourly order volume is in a STALE state because its bound source was modified or replaced. Re-approval against the current source revision is required before compilation.';
+      } else if (isPeakOrdersConflicting) {
+        blockReason = 'Peak hourly order volume is in a CONFLICTING state across multiple competing candidates. An authoritative candidate must be formally selected and approved before compilation.';
+      }
+
       blockedCalculations.push({
         calculationId: `calc-blocked-throughput-${peakOrdersItem.id}`,
         outputParameter: 'order_throughput_per_second',
         status: 'BLOCKED',
         calculated: false,
         formulaIdentifier: 'throughput_time_unit_conversion',
-        reason: isPeakOrdersConflicting
-          ? 'Peak hourly order volume is in a CONFLICTING state across multiple competing candidates. An authoritative candidate must be formally selected and approved before compilation.'
-          : 'Peak hourly order volume has not been formally approved as an authoritative workload input.',
+        reason: blockReason,
         requiredIntelligence: [
           'Formal approval and resolution of peak_hourly_orders candidate to an authoritative value'
         ],
         missingPrerequisites: ['approved_peak_hourly_orders'],
         availableInputs: [
           {
-            parameter: 'peak_hourly_orders',
+            parameter: peakOrdersItem.key || 'peak_hourly_orders',
             value: peakOrdersItem.value ?? 'UNSPECIFIED',
             unit: peakOrdersItem.unit || 'orders/hour',
             sourceId: peakOrdersItem.id,
@@ -221,7 +245,7 @@ export function compileDraftPerformanceContract(
     calculations.push(throughputConversion.lineage);
   }
 
-  // 3. Evaluate session concurrency (Little's Law)
+  // 3. Evaluate session concurrency (Little's Law) if session items are declared
   const sessionDurationItem = intelligenceItems.find(
     (i) =>
       i.key === 'avg_session_duration' ||
@@ -236,33 +260,35 @@ export function compileDraftPerformanceContract(
       i.key === 'session_arrivals'
   );
 
-  const sessionConcurrencyEval = evaluateSessionConcurrency({
-    hasSessionArrivalRate: Boolean(sessionArrivalItem && sessionArrivalItem.value !== undefined),
-    sessionArrivalRate:
-      sessionArrivalItem && typeof sessionArrivalItem.value === 'number'
-        ? sessionArrivalItem.value
-        : undefined,
-    sessionArrivalRateUnit: (sessionArrivalItem?.unit as any) || 'per_hour',
-    sourceSessionArrivalId: sessionArrivalItem?.id,
-    hasSessionDuration: Boolean(sessionDurationItem && sessionDurationItem.value !== undefined),
-    sessionDuration:
-      sessionDurationItem && typeof sessionDurationItem.value === 'number'
-        ? sessionDurationItem.value
-        : undefined,
-    sessionDurationUnit: (sessionDurationItem?.unit as any) || 'minutes',
-    sourceSessionDurationId: sessionDurationItem?.id,
-    hasOrderThroughput: Boolean(numericPeakOrders !== undefined),
-    orderThroughput: numericPeakOrders,
-    orderThroughputUnit: 'per_hour',
-    sourceOrderThroughputId: peakOrdersItem?.id,
-    calculationId: 'calc-littles-law-sessions',
-    timestamp: timestampStr
-  });
+  if (sessionDurationItem || sessionArrivalItem) {
+    const sessionConcurrencyEval = evaluateSessionConcurrency({
+      hasSessionArrivalRate: Boolean(sessionArrivalItem && sessionArrivalItem.value !== undefined),
+      sessionArrivalRate:
+        sessionArrivalItem && typeof sessionArrivalItem.value === 'number'
+          ? sessionArrivalItem.value
+          : undefined,
+      sessionArrivalRateUnit: (sessionArrivalItem?.unit as any) || 'per_hour',
+      sourceSessionArrivalId: sessionArrivalItem?.id,
+      hasSessionDuration: Boolean(sessionDurationItem && sessionDurationItem.value !== undefined),
+      sessionDuration:
+        sessionDurationItem && typeof sessionDurationItem.value === 'number'
+          ? sessionDurationItem.value
+          : undefined,
+      sessionDurationUnit: (sessionDurationItem?.unit as any) || 'minutes',
+      sourceSessionDurationId: sessionDurationItem?.id,
+      hasOrderThroughput: Boolean(numericPeakOrders !== undefined),
+      orderThroughput: numericPeakOrders,
+      orderThroughputUnit: 'per_hour',
+      sourceOrderThroughputId: peakOrdersItem?.id,
+      calculationId: 'calc-littles-law-sessions',
+      timestamp: timestampStr
+    });
 
-  if (sessionConcurrencyEval.canCalculate && sessionConcurrencyEval.calculation) {
-    calculations.push(sessionConcurrencyEval.calculation);
-  } else if (sessionConcurrencyEval.blocked) {
-    blockedCalculations.push(sessionConcurrencyEval.blocked);
+    if (sessionConcurrencyEval.canCalculate && sessionConcurrencyEval.calculation) {
+      calculations.push(sessionConcurrencyEval.calculation);
+    } else if (sessionConcurrencyEval.blocked) {
+      blockedCalculations.push(sessionConcurrencyEval.blocked);
+    }
   }
 
   // 4. Evaluate workload readiness
@@ -365,7 +391,7 @@ export function compileDraftPerformanceContract(
     status = 'READY_FOR_APPROVAL';
   }
 
-  return {
+  const contract: PerformanceContract = {
     id: `contract-${projectSummary.id}-${version}`,
     projectId: projectSummary.id,
     projectName: projectSummary.name,
@@ -394,4 +420,7 @@ export function compileDraftPerformanceContract(
       unresolvedIssuesCount: blockingReasons.length
     }
   };
+
+  contract.fingerprint = computeContractFingerprint(contract);
+  return contract;
 }

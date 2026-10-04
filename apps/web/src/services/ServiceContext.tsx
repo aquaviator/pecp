@@ -6,6 +6,7 @@ import { IIntegrationService } from './interfaces/IIntegrationService';
 import { IExecutionEvidenceService } from './interfaces/IExecutionEvidenceService';
 import { IAuthService } from './interfaces/IAuthService';
 import { IAdminService } from './interfaces/IAdminService';
+import { IPerformanceContractService } from './interfaces/IPerformanceContractService';
 import { MockProjectService } from './mock/MockProjectService';
 import { MockIntelligenceService } from './mock/MockIntelligenceService';
 import { MockSourceService } from './mock/MockSourceService';
@@ -13,6 +14,7 @@ import { MockIntegrationService } from './mock/MockIntegrationService';
 import { MockExecutionEvidenceService } from './mock/MockExecutionEvidenceService';
 import { MockAuthService } from './mock/MockAuthService';
 import { MockAdminService } from './mock/MockAdminService';
+import { MockPerformanceContractService } from './mock/MockPerformanceContractService';
 import {
   ApiProjectService,
   ApiIntelligenceService,
@@ -22,6 +24,7 @@ import {
 import { ApiSourceService } from './api/ApiSourceService';
 import { ApiAuthService } from './api/ApiAuthService';
 import { ApiAdminService } from './api/ApiAdminService';
+import { ApiPerformanceContractService } from './api/ApiPerformanceContractService';
 
 export type ServiceMode = 'MOCK' | 'API';
 
@@ -35,6 +38,7 @@ export interface ServiceContainer {
   executionEvidenceService: IExecutionEvidenceService;
   authService: IAuthService;
   adminService: IAdminService;
+  performanceContractService: IPerformanceContractService;
 }
 
 const ServiceContext = createContext<ServiceContainer | null>(null);
@@ -63,6 +67,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
     let executionEvidenceService = overrideServices?.executionEvidenceService;
     let authService = overrideServices?.authService;
     let adminService = overrideServices?.adminService;
+    let performanceContractService = overrideServices?.performanceContractService;
 
     if (effectiveMode === 'API') {
       if (!projectService) projectService = new ApiProjectService();
@@ -72,6 +77,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       if (!executionEvidenceService) executionEvidenceService = new ApiUnavailableExecutionEvidenceService();
       if (!authService) authService = new ApiAuthService();
       if (!adminService) adminService = new ApiAdminService();
+      if (!performanceContractService) performanceContractService = new ApiPerformanceContractService();
     } else {
       if (!projectService) projectService = new MockProjectService();
       if (!intelligenceService) intelligenceService = new MockIntelligenceService();
@@ -80,6 +86,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       if (!executionEvidenceService) executionEvidenceService = new MockExecutionEvidenceService();
       if (!authService) authService = new MockAuthService();
       if (!adminService) adminService = new MockAdminService();
+      if (!performanceContractService) performanceContractService = new MockPerformanceContractService(projectService, intelligenceService);
     }
 
     return {
@@ -91,7 +98,8 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       integrationService,
       executionEvidenceService,
       authService,
-      adminService
+      adminService,
+      performanceContractService
     };
   }, [overrideServices, effectiveMode]);
 

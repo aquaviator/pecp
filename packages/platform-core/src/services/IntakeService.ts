@@ -1389,11 +1389,20 @@ export class IntakeService {
       if (input.sourceBinding) {
         const validatedBinding = await this.validateSourceBinding(projectId, input.sourceBinding);
         if (!item.sourceBindings) item.sourceBindings = [];
-        item.sourceBindings.push(validatedBinding);
+        item.sourceBindings = [
+          validatedBinding,
+          ...item.sourceBindings.filter((b) => b.sourceId !== validatedBinding.sourceId)
+        ];
         const sMeta = await this.sourceRepo.getSource(projectId, validatedBinding.sourceId);
         item.source = sMeta?.title || 'Linked Source';
         item.sourceDocument = sMeta?.title || 'Linked Source';
         item.sourceLocation = validatedBinding.locator;
+        if (item.canonicalState === 'STALE') {
+          item.canonicalState = 'IMPORTED';
+        }
+        if (item.reviewStatus === 'STALE') {
+          item.reviewStatus = item.ambiguityReason ? 'AMBIGUOUS' : 'FOUND';
+        }
       }
 
       // Material change invalidates current approval (§7 [I05])
