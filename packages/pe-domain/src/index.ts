@@ -494,6 +494,41 @@ export interface ArtefactStalenessResult {
   artefactContractFingerprint: string;
 }
 
+export interface GenerateArtefactInput {
+  artefactType: ArtefactType;
+  expectedContractFingerprint?: string;
+  expectedInputRevision?: number;
+  author?: string;
+  idempotencyKey?: string;
+}
+
+export interface ArtefactRevisionSummary {
+  id: string;
+  revisionNumber: number;
+  status: ArtefactStatus;
+  recordedAt: string;
+  actorDisplayName: string;
+  sourceContractFingerprint: string;
+}
+
+export interface ArtefactDetailResponse {
+  artefact: EngineeringArtefact;
+  staleness: ArtefactStalenessResult;
+  currentRevisionNumber: number;
+  revisions: ArtefactRevisionSummary[];
+}
+
+export interface ArtefactListItem {
+  id: string;
+  projectId: string;
+  artefactType: ArtefactType;
+  title: string;
+  currentRevisionNumber: number;
+  status: ArtefactStatus;
+  staleness: ArtefactStalenessResult;
+  updatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Canonical Test Definition & Executable Test Models (M3)
 // Engine-neutral domain contracts according to Constitution §10 and M3.0

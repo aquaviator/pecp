@@ -164,7 +164,10 @@ const AppContent: React.FC = () => {
                   />
                 )}
                 {projectTab === 'PERFORMANCE_CONTRACT' && (
-                  <ContractPage project={activeProject} />
+                  <ContractPage
+                    project={activeProject}
+                    onNavigateToTab={(tab) => setProjectTab(tab)}
+                  />
                 )}
                 {projectTab === 'STRATEGY' && (
                   <StrategyPage project={activeProject} />

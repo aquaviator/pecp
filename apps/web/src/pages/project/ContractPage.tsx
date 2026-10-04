@@ -14,7 +14,10 @@ import {
   Fingerprint,
   Link,
   FileText,
-  UserCheck
+  UserCheck,
+  Compass,
+  ClipboardList,
+  ExternalLink
 } from 'lucide-react';
 import { ProjectSummary, IntelligenceItem } from '../../types';
 import { useServices } from '../../services/ServiceContext';
@@ -26,18 +29,21 @@ import {
   computeContractFingerprint,
   ContractFieldProvenance,
   BlockedCalculation,
-  AcceptanceCriterion
+  AcceptanceCriterion,
+  ArtefactListItem
 } from '@pecp/pe-domain';
 
 interface ContractPageProps {
   project: ProjectSummary;
   initialItems?: IntelligenceItem[];
+  onNavigateToTab?: (tab: 'STRATEGY' | 'TEST_PLAN') => void;
 }
 
-export const ContractPage: React.FC<ContractPageProps> = ({ project, initialItems }) => {
-  const { intelligenceService, performanceContractService } = useServices();
+export const ContractPage: React.FC<ContractPageProps> = ({ project, initialItems, onNavigateToTab }) => {
+  const { intelligenceService, performanceContractService, artefactService } = useServices();
   const [items, setItems] = useState<IntelligenceItem[]>(initialItems || []);
   const [contractResult, setContractResult] = useState<PerformanceContractCompilationResult | null>(null);
+  const [artefacts, setArtefacts] = useState<ArtefactListItem[]>([]);
   const [viewJson, setViewJson] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -46,6 +52,12 @@ export const ContractPage: React.FC<ContractPageProps> = ({ project, initialItem
       intelligenceService.getIntelligenceItems(project.id).then(setItems).catch(console.error);
     }
   }, [project.id, initialItems, intelligenceService]);
+
+  useEffect(() => {
+    if (artefactService) {
+      artefactService.listArtefacts(project.id).then(setArtefacts).catch(() => {});
+    }
+  }, [project.id, artefactService]);
 
   useEffect(() => {
     if (performanceContractService) {
@@ -445,29 +457,101 @@ export const ContractPage: React.FC<ContractPageProps> = ({ project, initialItem
             </div>
           </div>
 
-          {/* Section 3: Governance Metadata & Downstream Consumers */}
+          {/* Section 3: Governance Metadata & Downstream Artefacts */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <Layers className="w-4 h-4 text-sky-400" />
-              <span>Section 3: Downstream Execution &amp; Traceability</span>
+              <span>Section 3: Downstream Engineering Artefacts &amp; Traceability</span>
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                <span className="text-slate-400 font-mono text-[11px] block">Downstream Test Plans:</span>
-                <span className="text-white font-semibold block">M2 Performance Strategy</span>
-                <span className="text-slate-500 text-[11px]">Requires approved contract baseline before code generation.</span>
-              </div>
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                <span className="text-slate-400 font-mono text-[11px] block">Testing Engine Targets:</span>
-                <span className="text-white font-semibold block">k6 Suite &amp; Thresholds</span>
-                <span className="text-slate-500 text-[11px]">Directly consumes SLA thresholds once percentiles are disambiguated.</span>
-              </div>
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1">
-                <span className="text-slate-400 font-mono text-[11px] block">Lineage Audit:</span>
-                <span className="text-emerald-400 font-semibold block">100% Traceable</span>
-                <span className="text-slate-500 text-[11px]">Every target points directly to ADO items or architectural documents.</span>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              {/* Performance Strategy Card */}
+              {(() => {
+                const strat = artefacts.find((a) => a.artefactType === 'PERFORMANCE_STRATEGY');
+                return (
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Compass className="w-4 h-4 text-sky-400" />
+                        <span className="text-white font-bold">Performance Strategy</span>
+                      </div>
+                      {strat ? (
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${
+                            strat.status === 'BLOCKED'
+                              ? 'bg-rose-950 text-rose-300 border-rose-800'
+                              : strat.status === 'STALE'
+                              ? 'bg-amber-950 text-amber-300 border-amber-800'
+                              : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                          }`}
+                        >
+                          Rev {strat.currentRevisionNumber} ({strat.status})
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-800">
+                          Not Generated
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-400 text-[11px] leading-relaxed">
+                      Governs workload requirements, architectural risk mitigations, and execution boundaries.
+                    </p>
+                    {onNavigateToTab && (
+                      <button
+                        onClick={() => onNavigateToTab('STRATEGY')}
+                        className="text-sky-400 hover:text-sky-300 font-medium text-xs flex items-center gap-1 transition pt-1"
+                      >
+                        <span>{strat ? 'Open Performance Strategy' : 'Generate Performance Strategy'}</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Performance Test Plan Card */}
+              {(() => {
+                const plan = artefacts.find((a) => a.artefactType === 'PERFORMANCE_TEST_PLAN');
+                return (
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ClipboardList className="w-4 h-4 text-emerald-400" />
+                        <span className="text-white font-bold">Performance Test Plan</span>
+                      </div>
+                      {plan ? (
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${
+                            plan.status === 'BLOCKED'
+                              ? 'bg-rose-950 text-rose-300 border-rose-800'
+                              : plan.status === 'STALE'
+                              ? 'bg-amber-950 text-amber-300 border-amber-800'
+                              : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                          }`}
+                        >
+                          Rev {plan.currentRevisionNumber} ({plan.status})
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-800">
+                          Not Generated
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-400 text-[11px] leading-relaxed">
+                      Defines target demand rates, pass/fail thresholds, test schedules, and observability criteria.
+                    </p>
+                    {onNavigateToTab && (
+                      <button
+                        onClick={() => onNavigateToTab('TEST_PLAN')}
+                        className="text-emerald-400 hover:text-emerald-300 font-medium text-xs flex items-center gap-1 transition pt-1"
+                      >
+                        <span>{plan ? 'Open Performance Test Plan' : 'Generate Performance Test Plan'}</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

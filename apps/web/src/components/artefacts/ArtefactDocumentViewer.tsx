@@ -22,7 +22,9 @@ import {
   EngineeringArtefact,
   ArtefactSection,
   ArtefactTable,
-  ArtefactCallout
+  ArtefactCallout,
+  ArtefactStalenessResult,
+  ArtefactRevisionSummary
 } from '@pecp/pe-domain';
 import { exportArtefactToMarkdown } from '@pecp/artefact-engine';
 
@@ -30,12 +32,30 @@ interface ArtefactDocumentViewerProps {
   artefact: EngineeringArtefact;
   icon?: React.ComponentType<{ className?: string }>;
   accentColor?: 'emerald' | 'sky' | 'indigo';
+  staleness?: ArtefactStalenessResult;
+  revisions?: ArtefactRevisionSummary[];
+  currentRevisionNumber?: number;
+  selectedRevisionNumber?: number;
+  onSelectRevision?: (rev: number) => void;
+  onRegenerate?: () => void;
+  isRegenerating?: boolean;
+  canRegenerate?: boolean;
+  onDownloadMarkdown?: () => void;
 }
 
 export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
   artefact,
   icon: IconComponent = FileText,
-  accentColor = 'sky'
+  accentColor = 'sky',
+  staleness,
+  revisions,
+  currentRevisionNumber,
+  selectedRevisionNumber,
+  onSelectRevision,
+  onRegenerate,
+  isRegenerating = false,
+  canRegenerate = false,
+  onDownloadMarkdown
 }) => {
   const [copiedMd, setCopiedMd] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
@@ -56,6 +76,10 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
   };
 
   const handleDownloadMarkdown = () => {
+    if (onDownloadMarkdown) {
+      onDownloadMarkdown();
+      return;
+    }
     const md = exportArtefactToMarkdown(artefact);
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -121,6 +145,23 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {revisions && revisions.length > 1 && (
+              <div className="flex items-center gap-1.5 mr-2">
+                <span className="text-[11px] text-slate-400 font-mono">Revision:</span>
+                <select
+                  aria-label="Select Artefact Revision"
+                  value={selectedRevisionNumber || currentRevisionNumber || revisions[0]?.revisionNumber}
+                  onChange={(e) => onSelectRevision && onSelectRevision(Number(e.target.value))}
+                  className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-sky-500 focus:outline-none"
+                >
+                  {revisions.map((rev) => (
+                    <option key={rev.revisionNumber} value={rev.revisionNumber}>
+                      Rev {rev.revisionNumber} ({rev.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <span className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-sky-950 text-sky-300 border border-sky-800">
               Intent: {artefact.engineeringIntent}
             </span>
@@ -170,6 +211,18 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
               <span>Export .md</span>
             </button>
 
+            {canRegenerate && onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                disabled={isRegenerating}
+                className="px-3 py-1.5 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded-lg transition disabled:opacity-50 flex items-center gap-1.5 font-medium"
+                title="Regenerate document revision from live contract"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                <span>{isRegenerating ? 'Regenerating...' : 'Regenerate'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => setViewJson(!viewJson)}
               className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-lg border border-slate-800 transition flex items-center gap-1.5"
@@ -195,6 +248,62 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
             Constitution §5 & §8 Compiled View
           </div>
         </div>
+
+        {/* Staleness Notice Banner if Upstream Contract or Intelligence Drifted */}
+        {staleness?.isStale && (
+          <div className="p-4 bg-amber-950/30 border border-amber-800/80 rounded-xl text-xs space-y-2 text-amber-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-amber-300 text-sm">
+                    ⚠️ Upstream Contract Drift Detected (Stale Artefact)
+                  </h4>
+                  <p className="text-amber-200/90 text-xs mt-0.5">
+                    Governing intelligence, approved decisions, or source documents have changed since this revision was generated.
+                  </p>
+                </div>
+              </div>
+              {canRegenerate && onRegenerate && (
+                <button
+                  onClick={onRegenerate}
+                  disabled={isRegenerating}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition disabled:opacity-50 text-xs shrink-0 flex items-center gap-1.5 shadow"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{isRegenerating ? 'Regenerating...' : 'Regenerate Current Revision'}</span>
+                </button>
+              )}
+            </div>
+            {staleness.reasons.length > 0 && (
+              <ul className="list-disc list-inside space-y-1 text-amber-300/80 pl-1 pt-1 border-t border-amber-900/60">
+                {staleness.reasons.map((r, idx) => (
+                  <li key={idx}>{r}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* Historical Revision Notice Banner */}
+        {selectedRevisionNumber && currentRevisionNumber && selectedRevisionNumber < currentRevisionNumber && (
+          <div className="p-3.5 bg-slate-950 border border-sky-900/60 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-slate-300">
+            <div className="flex items-center gap-2">
+              <Info className="w-4 h-4 text-sky-400 shrink-0" />
+              <span>
+                Viewing historical revision <strong className="text-white">v{selectedRevisionNumber}.0</strong> (Latest: <strong className="text-white">v{currentRevisionNumber}.0</strong>). This historical document is read-only.
+              </span>
+            </div>
+            {onSelectRevision && (
+              <button
+                onClick={() => onSelectRevision(currentRevisionNumber)}
+                className="px-3 py-1 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded-lg text-xs font-medium transition shrink-0"
+              >
+                Switch to Latest Revision (v{currentRevisionNumber}.0)
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Approval Readiness Banner */}
         <div

@@ -18,6 +18,7 @@ import {
   IdentityAdministrationService,
   IntakeService,
   PerformanceContractService,
+  ArtefactService,
   OrganisationRole,
   Permission
 } from '@pecp/platform-core';
@@ -35,6 +36,7 @@ import { SqliteSourceRepository } from './persistence/sqlite/SqliteSourceReposit
 import { SqliteExtractionRepository } from './persistence/sqlite/SqliteExtractionRepository.js';
 import { SqliteChecklistRepository } from './persistence/sqlite/SqliteChecklistRepository.js';
 import { SqliteIdempotencyRepository } from './persistence/sqlite/SqliteIdempotencyRepository.js';
+import { SqliteArtefactRepository } from './persistence/sqlite/SqliteArtefactRepository.js';
 import { DocumentParserRegistry } from './intake/parsers/DocumentParserRegistry.js';
 
 declare module 'fastify' {
@@ -49,6 +51,7 @@ export interface ApiAppOptions {
   platformService?: PlatformApplicationService;
   intakeService?: IntakeService;
   performanceContractService?: PerformanceContractService;
+  artefactService?: ArtefactService;
   identityAdminService?: IdentityAdministrationService;
   sessionService?: SessionService;
   localAuthProvider?: LocalAuthenticationProvider;
@@ -160,6 +163,7 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
   const extractionRepo = new SqliteExtractionRepository(db);
   const checklistRepo = new SqliteChecklistRepository(db);
   const idempotencyRepo = new SqliteIdempotencyRepository(db);
+  const artefactRepo = new SqliteArtefactRepository(db);
   const parserRegistry = new DocumentParserRegistry();
 
   const ttlHours = process.env.PECP_SESSION_TTL_HOURS ? Number(process.env.PECP_SESSION_TTL_HOURS) : 12;
@@ -214,6 +218,19 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       extractionRepository: extractionRepo,
       checklistRepository: checklistRepo,
       membershipRepository: membershipRepo
+    });
+
+  const artefactService =
+    options.artefactService ||
+    new ArtefactService({
+      artefactRepository: artefactRepo,
+      performanceContractService,
+      projectRepository: projectRepo,
+      intelligenceRepository: intelligenceRepo,
+      membershipRepository: membershipRepo,
+      idempotencyRepository: idempotencyRepo,
+      auditService,
+      unitOfWork: db
     });
 
   const isProduction = process.env.NODE_ENV === 'production';
@@ -2219,6 +2236,129 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     try {
       const result = await performanceContractService.compileProjectPerformanceContract(projectId, principal);
       return result;
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  // --- Engineering Artefacts API (Strategy & Test Plan) ---
+
+  app.post('/api/v1/projects/:projectId/artefacts', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+    const body = (request.body as any) || {};
+
+    const idempotencyKey =
+      (request.headers['idempotency-key'] as string) ||
+      (request.headers['x-idempotency-key'] as string) ||
+      body.idempotencyKey;
+
+    try {
+      const result = await artefactService.generateArtefact(
+        projectId,
+        {
+          artefactType: body.artefactType,
+          expectedContractFingerprint: body.expectedContractFingerprint,
+          expectedInputRevision: body.expectedInputRevision,
+          author: body.author,
+          idempotencyKey
+        },
+        principal
+      );
+      reply.status(201).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code:
+            status === 409
+              ? 'CONFLICT'
+              : status === 403
+              ? 'FORBIDDEN'
+              : status === 404
+              ? 'NOT_FOUND'
+              : status === 400
+              ? 'VALIDATION_ERROR'
+              : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/artefacts', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId } = request.params as { projectId: string };
+
+    try {
+      const items = await artefactService.listArtefacts(projectId, principal);
+      return { items };
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/artefacts/:artefactId', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, artefactId } = request.params as { projectId: string; artefactId: string };
+    const query = (request.query as any) || {};
+    const revisionNumber = query.revision ? Number(query.revision) : undefined;
+
+    try {
+      const detail = await artefactService.getArtefact(
+        projectId,
+        artefactId,
+        revisionNumber,
+        principal
+      );
+      return detail;
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/artefacts/:artefactId/export', async (request, reply) => {
+    const principal = request.principal!;
+    const { projectId, artefactId } = request.params as { projectId: string; artefactId: string };
+    const query = (request.query as any) || {};
+    const revisionNumber = query.revision ? Number(query.revision) : undefined;
+    const format = query.format || 'markdown';
+
+    try {
+      const exported = await artefactService.exportArtefactMarkdown(
+        projectId,
+        artefactId,
+        revisionNumber,
+        principal
+      );
+
+      const acceptHeader = request.headers['accept'] || '';
+      if (acceptHeader.includes('application/json') && format !== 'raw' && format !== 'markdown') {
+        return exported;
+      }
+
+      reply
+        .header('Content-Type', 'text/markdown; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${exported.filename}"`)
+        .send(exported.markdown);
     } catch (err: any) {
       const status = err.statusCode || 500;
       reply.status(status).send({

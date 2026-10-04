@@ -5,7 +5,11 @@ import {
   EngineeringIntent,
   ProjectCreationMethod,
   ProjectSummary,
-  IntelligenceItem
+  IntelligenceItem,
+  ArtefactType,
+  ArtefactStatus,
+  EngineeringArtefact,
+  ArtefactStalenessResult
 } from '@pecp/pe-domain';
 
 export type OrganisationStatus = 'ACTIVE' | 'ARCHIVED';
@@ -178,6 +182,8 @@ export type AuditAction =
   | 'INTELLIGENCE_IMPORT'
   | 'INTELLIGENCE_CHECKLIST_UPDATE'
   | 'INTELLIGENCE_APPROVAL_INVALIDATE'
+  | 'ARTEFACT_GENERATE'
+  | 'ARTEFACT_REGENERATE'
   | 'AUTHORIZATION_DENIED';
 
 export type AuditOutcome = 'SUCCESS' | 'DENIED' | 'FAILURE';
@@ -219,3 +225,75 @@ export interface CreateMembershipInput {
   role: OrganisationRole;
   createdByUserId: string;
 }
+
+// --- Real Strategy and Test Plan Workflow Models ---
+
+export interface SavedArtefactRecord {
+  id: string;
+  projectId: string;
+  organisationId: string;
+  artefactType: ArtefactType;
+  title: string;
+  currentRevisionNumber: number;
+  currentRevisionId: string;
+  createdAt: string;
+  updatedAt: string;
+  createdByUserId: string;
+  createdByUserDisplayName: string;
+}
+
+export interface SavedArtefactRevisionRecord {
+  id: string;
+  artefactId: string;
+  projectId: string;
+  organisationId: string;
+  artefactType: ArtefactType;
+  revisionNumber: number;
+  status: ArtefactStatus;
+  sourceContractId: string;
+  sourceContractVersion: string;
+  sourceContractFingerprint: string;
+  inputRevisionDigest: string;
+  generationMetadataJson: string;
+  contentJson: string;
+  markdownExport: string;
+  recordedAt: string;
+  actorUserId: string;
+  actorDisplayName: string;
+}
+
+export interface GenerateArtefactInput {
+  artefactType: ArtefactType;
+  expectedContractFingerprint?: string;
+  expectedInputRevision?: number;
+  author?: string;
+  idempotencyKey?: string;
+}
+
+export interface ArtefactRevisionSummary {
+  id: string;
+  revisionNumber: number;
+  status: ArtefactStatus;
+  recordedAt: string;
+  actorDisplayName: string;
+  sourceContractFingerprint: string;
+}
+
+export interface ArtefactDetailResponse {
+  artefact: EngineeringArtefact;
+  staleness: ArtefactStalenessResult;
+  currentRevisionNumber: number;
+  revisions: ArtefactRevisionSummary[];
+}
+
+export interface ArtefactListItem {
+  id: string;
+  projectId: string;
+  artefactType: ArtefactType;
+  title: string;
+  currentRevisionNumber: number;
+  status: ArtefactStatus;
+  staleness: ArtefactStalenessResult;
+  updatedAt: string;
+}
+

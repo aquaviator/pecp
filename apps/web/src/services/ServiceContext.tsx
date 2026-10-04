@@ -7,6 +7,7 @@ import { IExecutionEvidenceService } from './interfaces/IExecutionEvidenceServic
 import { IAuthService } from './interfaces/IAuthService';
 import { IAdminService } from './interfaces/IAdminService';
 import { IPerformanceContractService } from './interfaces/IPerformanceContractService';
+import { IArtefactService } from './interfaces/IArtefactService';
 import { MockProjectService } from './mock/MockProjectService';
 import { MockIntelligenceService } from './mock/MockIntelligenceService';
 import { MockSourceService } from './mock/MockSourceService';
@@ -15,16 +16,18 @@ import { MockExecutionEvidenceService } from './mock/MockExecutionEvidenceServic
 import { MockAuthService } from './mock/MockAuthService';
 import { MockAdminService } from './mock/MockAdminService';
 import { MockPerformanceContractService } from './mock/MockPerformanceContractService';
+import { MockArtefactService } from './mock/MockArtefactService';
 import {
   ApiProjectService,
   ApiIntelligenceService,
   ApiUnavailableIntegrationService,
-  ApiUnavailableExecutionEvidenceService
+  ApiUnavailableExecutionEvidenceService,
+  ApiPerformanceContractService,
+  ApiArtefactService
 } from './api';
 import { ApiSourceService } from './api/ApiSourceService';
 import { ApiAuthService } from './api/ApiAuthService';
 import { ApiAdminService } from './api/ApiAdminService';
-import { ApiPerformanceContractService } from './api/ApiPerformanceContractService';
 
 export type ServiceMode = 'MOCK' | 'API';
 
@@ -39,6 +42,7 @@ export interface ServiceContainer {
   authService: IAuthService;
   adminService: IAdminService;
   performanceContractService: IPerformanceContractService;
+  artefactService: IArtefactService;
 }
 
 const ServiceContext = createContext<ServiceContainer | null>(null);
@@ -68,6 +72,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
     let authService = overrideServices?.authService;
     let adminService = overrideServices?.adminService;
     let performanceContractService = overrideServices?.performanceContractService;
+    let artefactService = overrideServices?.artefactService;
 
     if (effectiveMode === 'API') {
       if (!projectService) projectService = new ApiProjectService();
@@ -78,6 +83,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       if (!authService) authService = new ApiAuthService();
       if (!adminService) adminService = new ApiAdminService();
       if (!performanceContractService) performanceContractService = new ApiPerformanceContractService();
+      if (!artefactService) artefactService = new ApiArtefactService();
     } else {
       if (!projectService) projectService = new MockProjectService();
       if (!intelligenceService) intelligenceService = new MockIntelligenceService();
@@ -87,6 +93,7 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       if (!authService) authService = new MockAuthService();
       if (!adminService) adminService = new MockAdminService();
       if (!performanceContractService) performanceContractService = new MockPerformanceContractService(projectService, intelligenceService);
+      if (!artefactService) artefactService = new MockArtefactService(projectService, intelligenceService);
     }
 
     return {
@@ -99,7 +106,8 @@ export const ServiceProvider: React.FC<ServiceProviderProps> = ({
       executionEvidenceService,
       authService,
       adminService,
-      performanceContractService
+      performanceContractService,
+      artefactService
     };
   }, [overrideServices, effectiveMode]);
 

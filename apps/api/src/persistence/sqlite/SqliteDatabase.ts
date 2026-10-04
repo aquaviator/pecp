@@ -360,6 +360,56 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_idempotency_project ON idempotency_records(project_id);
       `);
     }
+  },
+  {
+    version: 5,
+    name: '005_project_artefacts',
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_artefacts (
+          id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          artefact_type TEXT NOT NULL CHECK(artefact_type IN ('PERFORMANCE_STRATEGY', 'PERFORMANCE_TEST_PLAN')),
+          title TEXT NOT NULL,
+          current_revision_number INTEGER NOT NULL,
+          current_revision_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by_user_id TEXT NOT NULL,
+          created_by_user_display_name TEXT NOT NULL,
+          PRIMARY KEY (project_id, id),
+          UNIQUE (project_id, artefact_type),
+          FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_artefact_revisions (
+          id TEXT NOT NULL,
+          artefact_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          artefact_type TEXT NOT NULL,
+          revision_number INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          source_contract_id TEXT NOT NULL,
+          source_contract_version TEXT NOT NULL,
+          source_contract_fingerprint TEXT NOT NULL,
+          input_revision_digest TEXT NOT NULL,
+          generation_metadata_json TEXT NOT NULL,
+          content_json TEXT NOT NULL,
+          markdown_export TEXT NOT NULL,
+          recorded_at TEXT NOT NULL,
+          actor_user_id TEXT NOT NULL,
+          actor_display_name TEXT NOT NULL,
+          PRIMARY KEY (project_id, artefact_id, revision_number),
+          UNIQUE (project_id, id),
+          FOREIGN KEY (project_id, artefact_id) REFERENCES project_artefacts(project_id, id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_artefacts_project ON project_artefacts(project_id);
+        CREATE INDEX IF NOT EXISTS idx_artefact_revisions_artefact ON project_artefact_revisions(project_id, artefact_id);
+      `);
+    }
   }
 ];
 
