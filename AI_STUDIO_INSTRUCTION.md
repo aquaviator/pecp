@@ -1,18 +1,77 @@
-# AI Studio Instruction: Build Contract and Artefact Approval Workflow
+# AI Studio Instruction: Resume Contract and Artefact Approval Workflow
 
 ## Active task
 
 - Repository: `aquaviator/pecp`
 - Target branch after Andy's manual transfer: `master`
 - Task identifier: `BUILD-CONTRACT-ARTEFACT-APPROVALS`
-- Instruction revision: `1`
-- Task mode: `IMPLEMENT PRODUCT CODE`
+- Instruction revision: `2`
+- Task mode: `RESUME AND COMPLETE PRODUCT CODE`
 
 Build persisted, version-specific human approval for the Performance Contract, Performance Strategy and Performance Test Plan in the existing product UI and governed API.
 
-This is the NEW development task. It replaces the completed Strategy/Test Plan generation instruction and the subsequent workflow-acknowledgement request. Do not respond only with "Understood". Read the relevant code, implement this slice, test it, and leave the working changes ready for Andy's manual push.
+This is a CONTINUATION of the interrupted approvals implementation, not a new feature or an instruction to rebuild completed work. Do not respond only with "Understood". Once workspace access is available, inspect the retained implementation, finish this slice, test it, and leave the working changes ready for Andy's manual push.
 
 Product approval controls are functionality for PECP customers. This task is NOT a development PM audit, milestone review, reporting exercise or request to reopen M5.2.
+
+## Resume checkpoint: interrupted workspace and failing partial implementation
+
+### What is actually on GitHub
+
+The remote partial implementation inspected on 5 October 2026 is:
+
+`5f9f28921fc73fc21edee8586387c0f375fa2f02`
+
+Commit message: `feat: add governance decisions and contract reviews`.
+
+Its parent is the original approvals instruction commit `084f2bb1a3b52481e98af829476ea7ca1511651b`. This partial implementation is retained on GitHub; do not reset to the earlier Strategy/Test Plan or M5.2 state. This instruction-only change does not repair product code or certify the partial implementation.
+
+The worker reported migration 6, contract-review and governance-decision repositories, domain/permission extensions, artefact-to-contract revision storage, and contract review/decision service methods. Treat these as existing work to inspect and reuse, NOT as independently verified finished functionality. Preserve any additional legitimate local changes not included in the remote checkpoint.
+
+### Workspace recovery boundary
+
+The worker reported a Studio applet filesystem failure containing `java.lang.IllegalStateException: Timed out waiting for applet file system condition to be met` with a 180,000 ms timeout. That report does not establish that the outage is still present, what caused it, or that a refresh will fix it.
+
+After Andy has restored access and safely transferred this instruction, perform one small workspace file read and one minimal terminal check. If access works, continue implementation immediately without asking for another development approval. If access still fails with the same infrastructure error, stop repeating long failing operations; return the exact remaining access blocker without claiming that files changed or tests ran.
+
+Do not recreate the project, reset the workspace, clear customer data or discard unpushed changes to work around the outage. Do not attempt terminal Git synchronization. Andy handles any refresh/reopen and manual transfer; do not claim to have repaired Google's applet environment. Before a manual pull that would replace local files, any additional local work must be preserved or reconciled, not overwritten. If this instruction cannot yet be read in the workspace, preserve the existing work and identify the missing transfer rather than inventing the task contents.
+
+### Concrete remote CI failures to fix first
+
+GitHub Actions run `37286869706`, job `111687728411`, ran against `5f9f28921fc73fc21edee8586387c0f375fa2f02`:
+
+- Deterministic dependency install: SUCCESS.
+- TypeScript typecheck: FAILURE, exit code 2.
+- Unit tests: SKIPPED.
+- Production build: SKIPPED.
+
+The inspected job logs contain these failures. Locations refer to the partial implementation and may move during the repair:
+
+1. `apps/api/src/persistence/sqlite/SqliteContractRevisionRepository.ts`, lines 51, 88, 99 and 112: TS2339, `getRawDb` does not exist on `SqliteDatabase`.
+2. `apps/api/src/persistence/sqlite/SqliteGovernanceDecisionRepository.ts`, lines 54, 93, 116 and 135: the same TS2339 error.
+3. `packages/platform-core/src/services/PerformanceContractService.ts`, lines 306, 343 and 633: TS2322, `string | undefined` assigned to required `string`.
+4. The same service, lines 324 and 651: TS2322, a synthesized principal with `platformRole: 'USER'` and potentially absent organisation ID is not an `AuthenticatedPrincipal`.
+
+Inspect `SqliteDatabase` and an existing working SQLite repository, then use the supported database access/transaction pattern. Do not mask missing methods with `any`, bypass Unit of Work isolation, weaken TypeScript checks or expose an unrestricted raw database API just to silence these errors.
+
+Validate real project organisation ownership before constructing persisted records. Reject invalid/missing required ownership explicitly; do not invent an organisation ID, empty-string tenant, or a type assertion in place of validation.
+
+The inspected contract-save path contains a fallback `principal || { userId: 'system-actor', ... role: 'PERFORMANCE_LEAD' }`; CI also reports a synthetic reviewer path. Remove synthetic authority from production review-save, approve and withdraw mutations. Require a real authenticated principal and recheck current permission in the protected transaction. Do not merely replace `'USER'` with another enum value to make the invented actor compile. Test fixtures may supply explicit test principals through the supported test boundary; they must not create a production authentication bypass.
+
+Fix these integration failures, then continue the remaining product implementation in this same task. Do not stop after restoring typecheck or create a separate audit cycle. The historical 632-test baseline is NOT a successful test result for this partial commit.
+
+### Remaining implementation to complete
+
+Inspect local state first because some work may have survived beyond the reported checkpoint. Complete only missing or incorrect paths:
+
+1. Finish `ArtefactService.submitArtefactDecision` (or the equivalent production method), exact saved-contract revision binding, parent decision lineage, withdrawal and current-validity projection.
+2. Wire the new repositories, membership/identity checks, audit service and Unit of Work into the actual application composition. Verify migrations on both a new database and an existing database upgraded without data loss. Do not duplicate migration 6 or rewrite an already-applied migration to repair it; use an additive migration when a schema correction is necessary.
+3. Implement authenticated contract review save/list/read/decision routes and revision-scoped artefact decision routes specified below. Keep CSRF, required preconditions, current authority and safe idempotency behaviour.
+4. Wire API service adapters and the actual Contract, Strategy, Test Plan and document-viewer controls: Save for Review, exact-revision selection, rationale/confirmation, approve, withdraw, history and validity banners.
+5. Preserve generation/regeneration, revision history, complete document previews and Markdown downloads. Finish invalidation and historical/current-status behaviour across all reads and exports.
+6. Execute the acceptance scenarios below, including real persisted API and DOM tests; run the full install/typecheck/test/build sequence and leave the completed workspace ready for Andy's manual push.
+
+The full original acceptance scope follows. The resume checkpoint changes the starting state and order of work, not the required behaviour.
 
 ## Manual transfer workflow
 
@@ -26,17 +85,22 @@ Andy performs BOTH transfers manually through AI Studio:
 
 Do not run terminal `git fetch`, `git pull` or `git push`. Do not request GitHub credentials, change remotes, force-push, reset the workspace, delete data or discard legitimate local changes. Local Git inspection is permitted. Any local commit SHA must be labelled LOCAL; it is not proof of the remote SHA created by Andy's later push.
 
-A pending manual push is a handoff state, not a product defect. Remote CI for new work is unverified until that push and subsequent inspection. Preserve the workspace and finish with "Ready for Andy's manual push" when local verification succeeds.
+A pending manual push is a handoff state, not a product defect. Remote CI for new work is unverified until that push and subsequent inspection. Preserve the workspace and finish with "Ready for Andy's manual push" only when this slice is implemented and local verification succeeds. If interrupted again, distinguish completed, incomplete and unverified work rather than claiming completion.
 
 ## Starting point and delivered work to preserve
 
-Repository state inspected when this instruction was prepared:
+Current partial implementation to preserve and complete:
 
-- `67b17ecaef61e44e65a7cad636947a101055fa64`: manual-transfer instruction update; preparation base, not a new product implementation.
+- `5f9f28921fc73fc21edee8586387c0f375fa2f02`: interrupted approvals implementation, with the failing CI described above.
+
+Earlier delivered work and instructions:
+
+- `084f2bb1a3b52481e98af829476ea7ca1511651b`: original approvals build instruction, not a product implementation.
+- `67b17ecaef61e44e65a7cad636947a101055fa64`: manual-transfer instruction update, not a product implementation.
 - `0a3c61d71605da80bf1d99ec78a8edbe5c3dd5f1`: delivered Strategy/Test Plan workflow, including artefact persistence, API routes, portal generation, history, Markdown export and freshness projection.
 - `4a82fc7a431bc3757b360528b4168d5f04218171`: delivered persisted intelligence-to-contract compilation slice.
 
-Remote CI run `37204286038`, job `111442128394`, completed successfully for `0a3c61d...`, with dependency installation, TypeScript checks, tests and production web build passing. The implementation handoff reported a local baseline of 496 web + 126 API + 10 Reference Lab = 632 tests; remeasure the actual totals locally rather than copying them as new execution evidence.
+Remote CI run `37204286038`, job `111442128394`, completed successfully for `0a3c61d...`, with dependency installation, TypeScript checks, tests and production web build passing. Its implementation handoff reported a local baseline of 496 web + 126 API + 10 Reference Lab = 632 tests; remeasure actual totals locally rather than copying them as new execution evidence.
 
 Do not reset to these SHAs. Work from the state Andy has pulled, preserving later work. Do not rebuild the delivered generators, source intake or document pages from scratch. Inspect the actual local implementation and extend its missing approval paths.
 
@@ -59,7 +123,7 @@ Read only the code needed for this implementation, including:
 - `packages/platform-core/src/services/ArtefactService.ts`
 - `packages/platform-core/src/services/AuthorizationPolicy.ts`, `AuditService.ts` and the applicable intake approval/revision patterns
 - `packages/platform-core/src/types.ts`, existing repository interfaces, idempotency and Unit-of-Work contracts
-- `apps/api/src/persistence/sqlite/SqliteDatabase.ts` and `SqliteArtefactRepository.ts`
+- `apps/api/src/persistence/sqlite/SqliteDatabase.ts`, `SqliteArtefactRepository.ts`, `SqliteContractRevisionRepository.ts` and `SqliteGovernanceDecisionRepository.ts`
 - `apps/api/src/app.ts` and existing authentication/CSRF handling
 - `packages/artefact-engine/src/staleness.ts`, the generators and Markdown exporter
 - `apps/web/src/pages/project/ContractPage.tsx`, `StrategyPage.tsx`, `TestPlanPage.tsx`
@@ -170,7 +234,7 @@ Add focused service/API/persistence and DOM interaction tests, preserving the ex
 5. Same-number/new-source-version changes and relevant narrative/checklist changes invalidate affected approvals. Unrelated project changes do not invalidate another project's approvals.
 6. Rebinding intelligence, generating a new document revision and explicitly reapproving produce the correct new chain; prior content/decisions remain unchanged. Withdrawal and later parent reapproval do not resurrect child decisions.
 7. Refresh and full API/database restart preserve revision history, decisions, input hashes and current validity. Different request clocks do not change semantic input identity.
-8. Role-matrix, CSRF, cross-tenant/project and revoked-membership cases are enforced for approve, withdraw, history and replay. REVIEWER can decide but cannot generate; PERFORMANCE_ENGINEER can generate/save but cannot approve.
+8. Role-matrix, CSRF, cross-tenant/project and revoked-membership cases are enforced for approve, withdraw, history and replay. REVIEWER can decide but cannot generate; PERFORMANCE_ENGINEER can generate/save but cannot approve. Production mutation service calls without an authenticated principal fail rather than constructing a synthetic actor.
 9. Same-key retries and concurrent duplicate submissions cause one mutation and one successful audit event; changed-key-payload collisions fail. Simulated audit/persistence failure rolls back the protected mutation.
 10. DOM tests drive saving/opening a revision, rationale/confirmation, success/error/409, withdrawal, stale banners, revision switching and out-of-order project responses. Cover API-mode service wiring as well as real persisted API integration.
 
@@ -182,6 +246,6 @@ Implement this coherent approval slice now. Do not stop at an implementation pla
 
 Out of scope: k6 execution, new Test Definition/bundle delivery, CI runner connectors, external publishing, BYOAI/LLMs, notifications/email approval routing, rich-text editing, billing, deployment-platform changes and unrelated dependency upgrades. Existing business approval audit events and small API/operator notes necessary to use this feature are allowed.
 
-Run `npm ci`, `npm run lint`, `npm test` and `npm run build`. Exercise the real persisted API workflow; use browser tooling when available or accurately identify DOM/API tests as the execution evidence. Report the actual test totals and any genuine incomplete behaviour. Never call local verification remote CI.
+Run `npm ci`, `npm run lint`, `npm test` and `npm run build`. Exercise the real persisted API workflow; use browser tooling when available or accurately identify DOM/API tests as the execution evidence. Report the actual test totals and any genuine incomplete behaviour. Never call local verification remote CI. The failing remote checkpoint is not repaired until the implementation changes pass the checks; this instruction update alone changes no product code.
 
 Preserve the finished workspace for Andy's manual push. Return only a short implementation handoff: exact UI steps and API routes now working; local verification totals/results; any LOCAL commit SHA if created; readiness for manual push; and genuine unresolved implementation blockers. No terminal pull/push, credential request, report cycle or permission request to begin this assigned build.
