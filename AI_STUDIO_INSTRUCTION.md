@@ -1,251 +1,140 @@
-# AI Studio Instruction: Resume Contract and Artefact Approval Workflow
+# AI Studio Instruction: Complete Approval Transaction and Revision Safety
 
 ## Active task
 
 - Repository: `aquaviator/pecp`
-- Target branch after Andy's manual transfer: `master`
 - Task identifier: `BUILD-CONTRACT-ARTEFACT-APPROVALS`
-- Instruction revision: `2`
-- Task mode: `RESUME AND COMPLETE PRODUCT CODE`
+- Instruction revision: `3`
+- Task mode: `IMPLEMENT TARGETED PRODUCT FIXES`
+- Preparation date: 5 October 2026
 
-Build persisted, version-specific human approval for the Performance Contract, Performance Strategy and Performance Test Plan in the existing product UI and governed API.
+Continue the delivered approval workflow. Implement the remaining transaction, exact-revision binding, replay and UI retry safeguards below. This is product-code work, not a PM audit, report, acknowledgement, milestone closure or instruction to rebuild the feature. Preserve the implemented Contract, Strategy and Test Plan screens, persistence, decision history and withdrawal functionality.
 
-This is a CONTINUATION of the interrupted approvals implementation, not a new feature or an instruction to rebuild completed work. Do not respond only with "Understood". Once workspace access is available, inspect the retained implementation, finish this slice, test it, and leave the working changes ready for Andy's manual push.
-
-Product approval controls are functionality for PECP customers. This task is NOT a development PM audit, milestone review, reporting exercise or request to reopen M5.2.
-
-## Resume checkpoint: interrupted workspace and failing partial implementation
-
-### What is actually on GitHub
-
-The remote partial implementation inspected on 5 October 2026 is:
-
-`5f9f28921fc73fc21edee8586387c0f375fa2f02`
-
-Commit message: `feat: add governance decisions and contract reviews`.
-
-Its parent is the original approvals instruction commit `084f2bb1a3b52481e98af829476ea7ca1511651b`. This partial implementation is retained on GitHub; do not reset to the earlier Strategy/Test Plan or M5.2 state. This instruction-only change does not repair product code or certify the partial implementation.
-
-The worker reported migration 6, contract-review and governance-decision repositories, domain/permission extensions, artefact-to-contract revision storage, and contract review/decision service methods. Treat these as existing work to inspect and reuse, NOT as independently verified finished functionality. Preserve any additional legitimate local changes not included in the remote checkpoint.
-
-### Workspace recovery boundary
-
-The worker reported a Studio applet filesystem failure containing `java.lang.IllegalStateException: Timed out waiting for applet file system condition to be met` with a 180,000 ms timeout. That report does not establish that the outage is still present, what caused it, or that a refresh will fix it.
-
-After Andy has restored access and safely transferred this instruction, perform one small workspace file read and one minimal terminal check. If access works, continue implementation immediately without asking for another development approval. If access still fails with the same infrastructure error, stop repeating long failing operations; return the exact remaining access blocker without claiming that files changed or tests ran.
-
-Do not recreate the project, reset the workspace, clear customer data or discard unpushed changes to work around the outage. Do not attempt terminal Git synchronization. Andy handles any refresh/reopen and manual transfer; do not claim to have repaired Google's applet environment. Before a manual pull that would replace local files, any additional local work must be preserved or reconciled, not overwritten. If this instruction cannot yet be read in the workspace, preserve the existing work and identify the missing transfer rather than inventing the task contents.
-
-### Concrete remote CI failures to fix first
-
-GitHub Actions run `37286869706`, job `111687728411`, ran against `5f9f28921fc73fc21edee8586387c0f375fa2f02`:
-
-- Deterministic dependency install: SUCCESS.
-- TypeScript typecheck: FAILURE, exit code 2.
-- Unit tests: SKIPPED.
-- Production build: SKIPPED.
-
-The inspected job logs contain these failures. Locations refer to the partial implementation and may move during the repair:
-
-1. `apps/api/src/persistence/sqlite/SqliteContractRevisionRepository.ts`, lines 51, 88, 99 and 112: TS2339, `getRawDb` does not exist on `SqliteDatabase`.
-2. `apps/api/src/persistence/sqlite/SqliteGovernanceDecisionRepository.ts`, lines 54, 93, 116 and 135: the same TS2339 error.
-3. `packages/platform-core/src/services/PerformanceContractService.ts`, lines 306, 343 and 633: TS2322, `string | undefined` assigned to required `string`.
-4. The same service, lines 324 and 651: TS2322, a synthesized principal with `platformRole: 'USER'` and potentially absent organisation ID is not an `AuthenticatedPrincipal`.
-
-Inspect `SqliteDatabase` and an existing working SQLite repository, then use the supported database access/transaction pattern. Do not mask missing methods with `any`, bypass Unit of Work isolation, weaken TypeScript checks or expose an unrestricted raw database API just to silence these errors.
-
-Validate real project organisation ownership before constructing persisted records. Reject invalid/missing required ownership explicitly; do not invent an organisation ID, empty-string tenant, or a type assertion in place of validation.
-
-The inspected contract-save path contains a fallback `principal || { userId: 'system-actor', ... role: 'PERFORMANCE_LEAD' }`; CI also reports a synthetic reviewer path. Remove synthetic authority from production review-save, approve and withdraw mutations. Require a real authenticated principal and recheck current permission in the protected transaction. Do not merely replace `'USER'` with another enum value to make the invented actor compile. Test fixtures may supply explicit test principals through the supported test boundary; they must not create a production authentication bypass.
-
-Fix these integration failures, then continue the remaining product implementation in this same task. Do not stop after restoring typecheck or create a separate audit cycle. The historical 632-test baseline is NOT a successful test result for this partial commit.
-
-### Remaining implementation to complete
-
-Inspect local state first because some work may have survived beyond the reported checkpoint. Complete only missing or incorrect paths:
-
-1. Finish `ArtefactService.submitArtefactDecision` (or the equivalent production method), exact saved-contract revision binding, parent decision lineage, withdrawal and current-validity projection.
-2. Wire the new repositories, membership/identity checks, audit service and Unit of Work into the actual application composition. Verify migrations on both a new database and an existing database upgraded without data loss. Do not duplicate migration 6 or rewrite an already-applied migration to repair it; use an additive migration when a schema correction is necessary.
-3. Implement authenticated contract review save/list/read/decision routes and revision-scoped artefact decision routes specified below. Keep CSRF, required preconditions, current authority and safe idempotency behaviour.
-4. Wire API service adapters and the actual Contract, Strategy, Test Plan and document-viewer controls: Save for Review, exact-revision selection, rationale/confirmation, approve, withdraw, history and validity banners.
-5. Preserve generation/regeneration, revision history, complete document previews and Markdown downloads. Finish invalidation and historical/current-status behaviour across all reads and exports.
-6. Execute the acceptance scenarios below, including real persisted API and DOM tests; run the full install/typecheck/test/build sequence and leave the completed workspace ready for Andy's manual push.
-
-The full original acceptance scope follows. The resume checkpoint changes the starting state and order of work, not the required behaviour.
+Do not begin test-definition generation, k6 bundle delivery or test execution in this task. Those are the next product direction, not authority to skip these existing approval requirements.
 
 ## Manual transfer workflow
 
-Andy performs BOTH transfers manually through AI Studio:
+Andy manually pulls instructions from GitHub into AI Studio and manually pushes finished changes back. ChatGPT maintains this handover and checks the resulting remote implementation and CI.
 
-1. ChatGPT puts the full build handover in GitHub and supplies a short paragraph pointing to it.
-2. Andy manually pulls the changes into AI Studio.
-3. AI Studio reads this file from its workspace, implements the active task and runs local verification.
-4. Andy manually pushes the implementation back to GitHub.
-5. ChatGPT inspects the delivered remote code and CI before issuing another task.
+Read the instruction already present in your workspace. Do not run terminal `git fetch`, `git pull` or `git push`; request credentials; change remotes; reset the workspace; delete customer data; or discard legitimate local changes. Local Git inspection is permitted. Label any local commit SHA LOCAL, never as proof of remote delivery. Preserve additional work Andy has not pushed. A pending manual push is a handoff state, not a product defect.
 
-Do not run terminal `git fetch`, `git pull` or `git push`. Do not request GitHub credentials, change remotes, force-push, reset the workspace, delete data or discard legitimate local changes. Local Git inspection is permitted. Any local commit SHA must be labelled LOCAL; it is not proof of the remote SHA created by Andy's later push.
+If the workspace is inaccessible, make one small access check and report the exact infrastructure blocker without repeating long failing operations or claiming execution. Otherwise implement immediately without another permission or acknowledgement round.
 
-A pending manual push is a handoff state, not a product defect. Remote CI for new work is unverified until that push and subsequent inspection. Preserve the workspace and finish with "Ready for Andy's manual push" only when this slice is implemented and local verification succeeds. If interrupted again, distinguish completed, incomplete and unverified work rather than claiming completion.
+## Delivered checkpoint
 
-## Starting point and delivered work to preserve
+Remote implementation inspected: `fd28ad77d9f9dfb6758932b88ec5866a43be4ca8`.
 
-Current partial implementation to preserve and complete:
+Commit message: `feat: implement contract revision and governance tracking`.
 
-- `5f9f28921fc73fc21edee8586387c0f375fa2f02`: interrupted approvals implementation, with the failing CI described above.
+Its parent is the revision-2 instruction commit `efe888864cccbdea736150c2b8eafe1014d9ea86`. The earlier interrupted partial commit `5f9f28921fc73fc21edee8586387c0f375fa2f02` is not the current delivery baseline. Do not reset to any of these SHAs.
 
-Earlier delivered work and instructions:
+Remote CI run `37293561661`, job `111709414913`, completed successfully for `fd28ad77...`. Inspected logs show:
 
-- `084f2bb1a3b52481e98af829476ea7ca1511651b`: original approvals build instruction, not a product implementation.
-- `67b17ecaef61e44e65a7cad636947a101055fa64`: manual-transfer instruction update, not a product implementation.
-- `0a3c61d71605da80bf1d99ec78a8edbe5c3dd5f1`: delivered Strategy/Test Plan workflow, including artefact persistence, API routes, portal generation, history, Markdown export and freshness projection.
-- `4a82fc7a431bc3757b360528b4168d5f04218171`: delivered persisted intelligence-to-contract compilation slice.
+- Web: 34 test files, 499 passed.
+- API: 23 test files, 132 passed.
+- Reference Lab: 10 passed.
+- Total: 641 passed.
+- Deterministic install, TypeScript checks and production web build: passed.
 
-Remote CI run `37204286038`, job `111442128394`, completed successfully for `0a3c61d...`, with dependency installation, TypeScript checks, tests and production web build passing. Its implementation handoff reported a local baseline of 496 web + 126 API + 10 Reference Lab = 632 tests; remeasure actual totals locally rather than copying them as new execution evidence.
+These are observed regression results, not proof that every concurrency and validity requirement is implemented. This instruction-only update does not repair product code. Work from Andy's pulled state and retain later legitimate changes.
 
-Do not reset to these SHAs. Work from the state Andy has pulled, preserving later work. Do not rebuild the delivered generators, source intake or document pages from scratch. Inspect the actual local implementation and extend its missing approval paths.
+## Source observations motivating this continuation
 
-## User-visible outcome
+These observations refer to the inspected commit, not a claim that a live exploit or failing race test was executed by ChatGPT. First capture the affected behaviour in focused regression tests, then fix the implementation in this run.
 
-An engineer saves a reviewable revision of the live Performance Contract. An authorised reviewer opens that exact revision, sees its values, provenance and blocking reasons, records a rationale and explicitly approves it. The user then generates or opens a Strategy and Test Plan bound to that contract revision and approves each exact document revision separately.
+1. In `packages/platform-core/src/services/ArtefactService.ts`, `submitArtefactDecision` reads the target revision, live compilation, intelligence, parent approval and existing decisions before `unitOfWork.execute(executeDecision)`. The closure inserts the previously constructed decision and success audit. Rechecking a permission against the same principal object inside that closure does not refresh membership or the target's state.
+2. In that method, expected target revision, content fingerprint and decision revision are checked only when supplied. The content check also accepts `revRecord.sourceContractFingerprint` in place of the document content hash. Two different documents bound to the same contract must not be treated as identical reviewed content. The approval integration test currently exercises successful document approval without a content/input binding.
+3. Idempotency lookup is before the protected transaction, and its saved response is written after the decision transaction. Replays return cached detail JSON, including the old validity projection, without recomputing present validity. These patterns do not establish atomic concurrent retries or a truthful current approved badge after withdrawal.
+4. `getArtefact` evaluates the selected target's validity using input staleness, but only adds an older-revision check when evaluating other history entries. `submitArtefactDecision` does not compare the target to the artefact's current revision before approving. Test the selected-old-revision detail and approval paths explicitly.
+5. In `apps/web/src/pages/project/StrategyPage.tsx`, the shared error banner's Retry button invokes `handleGenerate()` even when the error came from an approval/withdrawal action. The decision callbacks guard completion by project ID, not by the full project/entity/revision/request target. The shown withdrawal payload sends the parent contract fingerprint as the expected document fingerprint. Correct the corresponding Test Plan/Contract paths where they share the pattern.
 
-The screens retain who approved what and when across refresh and API restart. A material source/input change, contract supersession or approval withdrawal removes current approval validity for affected downstream documents without rewriting historical content. The UI explains what needs review, re-binding or regeneration.
+Relevant evidence paths:
 
-This slice stops at reliable product approvals. Do NOT implement new test generation, k6 bundle delivery, runner execution or release certification here. Approval of a contract or document must never be displayed as proof that an executable test is ready or that a performance test passed.
-
-## Existing architecture to inspect and reuse
-
-Read only the code needed for this implementation, including:
-
-- `docs/PRODUCT_CONSTITUTION.md`
-- `packages/pe-domain/src/index.ts` and `packages/pe-domain/src/intake.ts`
-- `packages/workload-engine/src/contractCompiler.ts`
-- `packages/platform-core/src/services/PerformanceContractService.ts`
 - `packages/platform-core/src/services/ArtefactService.ts`
-- `packages/platform-core/src/services/AuthorizationPolicy.ts`, `AuditService.ts` and the applicable intake approval/revision patterns
-- `packages/platform-core/src/types.ts`, existing repository interfaces, idempotency and Unit-of-Work contracts
-- `apps/api/src/persistence/sqlite/SqliteDatabase.ts`, `SqliteArtefactRepository.ts`, `SqliteContractRevisionRepository.ts` and `SqliteGovernanceDecisionRepository.ts`
-- `apps/api/src/app.ts` and existing authentication/CSRF handling
-- `packages/artefact-engine/src/staleness.ts`, the generators and Markdown exporter
-- `apps/web/src/pages/project/ContractPage.tsx`, `StrategyPage.tsx`, `TestPlanPage.tsx`
-- `apps/web/src/components/artefacts/ArtefactDocumentViewer.tsx`, ServiceContext, relevant interfaces and API adapters
-- Northstar intake, performance-contract, artefact-workflow, RBAC and DOM interaction tests.
+- `packages/platform-core/src/services/PerformanceContractService.ts`
+- `apps/api/test/contract_artefact_approval_workflow.test.ts`
+- `apps/web/src/pages/project/StrategyPage.tsx`
 
-Reuse existing canonical models, generators and fingerprints. Do not build a parallel contract schema, approval engine in React, new design system or client-only source of authority.
+Read the actual API route validation and repository/Unit-of-Work implementations too. Do not treat a method comment or a test named "atomic" as evidence of a race having been exercised.
 
-## 1. Persist immutable contract review revisions
+## 1. Make the protected operation atomic, not just the final INSERT
 
-The current live compilation is a read model. Add the smallest persistent review-revision capability in platform-core and the existing SQLite provider, reusing any equivalent repository already present. Use additive migrations; do not drop or recreate customer tables.
+Reuse the existing serialized Unit of Work, repository interfaces, authentication and audit infrastructure. Require the production dependencies necessary for correctness. Do not fall back to a non-transactional protected write when a dependency is missing.
 
-Provide an explicit user mutation such as "Save for Review" that records the current server-compiled contract as an immutable numbered revision. GET compilation/read/history routes must not create revisions as a side effect. Do not persist every page refresh as a new version.
+For contract review saving, contract decisions, document generation/revision allocation and document decisions, fix the same pattern wherever it is present on the shared approval path. Within one serialized operation, or an equivalent fully revision-checked atomic boundary:
 
-A review revision must include project/organisation ownership, revision identity, frozen canonical content, full relevant input/provenance binding, creation metadata and the compiler/binding version where applicable. Source values come from server repositories, not a submitted contract JSON or client approval flag. Saving a blocked draft for inspection may be supported, but approval must remain impossible while its required prerequisites are unresolved.
+- resolve the real project and organisation;
+- validate the current authenticated actor/account, session and membership authority through the existing supported repositories/services;
+- check the scoped idempotency record;
+- read the exact saved target and current revision pointer;
+- read consistent governing inputs, checklist, source bindings and parent decision state;
+- validate required client expectations, readiness and current-use eligibility;
+- allocate the next revision/decision number;
+- write the revision or decision, its mandatory success audit and idempotency receipt together.
 
-Expose the exact reviewed revision, content fingerprint and input binding to the UI. Keep the live working compilation distinct from the saved revision so a reviewer cannot unknowingly approve content different from what is displayed. Newly saved changed content is not automatically approved. Superseded revisions remain accessible as historical records but cannot be newly approved for current use.
+Do not hold one database connection in a transaction and accidentally perform the decision write on a different connection or bypass the existing mutex. Preserve reentrant Unit-of-Work behaviour for legitimate nested service calls; do not introduce a deadlock. Repository uniqueness constraints should reinforce the application checks.
 
-## 2. Store approval decisions separately from immutable content
+Keep all genuine historical decisions and immutable content. Use additive schema changes only when necessary; do not rewrite an applied migration or recreate existing tables/data to make tests pass. Database access must use the existing supported provider interface.
 
-Implement explicit approve and withdraw-approval actions for:
+## 2. Require the exact reviewed binding
 
-- a saved Performance Contract revision;
-- a saved Performance Strategy revision;
-- a saved Performance Test Plan revision.
+For APPROVE and WITHDRAW, require a valid expected target revision, current decision revision (including explicit 0 for no decision), and exact target content/input binding. Expose these values in the real detail response so the client can submit what the user actually viewed. Use existing fields where appropriate, extending shared types only as necessary.
 
-Decisions must record the authenticated actor ID and display name, server decision time, a required non-blank rationale, target project/entity/revision, exact content/input binding and a monotonic decision revision or equivalent optimistic concurrency token. Keep an append-only decision history; withdrawal creates another decision and never deletes the original approval.
+Reject missing, null, blank, malformed or wrong-type preconditions explicitly with 400; well-formed stale/mismatching expectations return 409 with refresh guidance and no successful mutation. Reject unknown decision actions. Do not silently populate missing expectations with server-current state.
 
-The API must not trust submitted approver identity, approval time, readiness, permissions, document contents or status. Use existing audit infrastructure for successful/denied/failed mutations as appropriate. Approval write, active-decision update and success-audit event must be atomic. Failures must not leave a phantom approval.
+A document's parent contract fingerprint is not a substitute for that document's content fingerprint. Bind the decision to the immutable document revision, complete generation-input binding and parent revision/decision dependency. Continue using existing canonical hash/lineage utilities; keep semantic/content/input identity separate from presentation status, decision identity and request-time timestamps. Do not create a hash that changes merely because the approval itself was added.
 
-Preserve the distinctions between canonical state, review status, readiness, the historical decision and present approval validity. `READY_FOR_APPROVAL` is not `APPROVED`. Existing ContractStatus does not include STALE; use compatible freshness/validity metadata and existing states rather than casually adding an incompatible status. A historical approved snapshot can remain historically approved while its current-use validity is stale, superseded or withdrawn.
+On contract saving and document generation, validate the expected input/revision binding consistently where the operation establishes a review target. Do not permit missing preconditions as a general legacy bypass. Older stored revisions remain readable; require an explicit new revision/regeneration when a safe binding cannot be established instead of retroactively inventing lineage.
 
-Never update saved document bodies or old contract payloads just to make a current approval label look correct. Detail/history/export responses should distinguish the immutable generated content from current approval/freshness metadata. An export must not present a historically approved but now invalid revision as currently approved.
+An APPROVE action may only approve a current, unsuperseded target whose existing readiness and source-eligibility rules pass. Do not auto-approve, fabricate missing engineering inputs, weaken blocked-state rules or change the role matrix to obtain success. Historical decisions remain visible, but cannot authorise present use of a superseded revision. Preserve the ability to explicitly withdraw an existing historical approval where the established product policy permits it; withdrawal must not promote a historical target to current.
 
-## 3. Bind each decision to the exact evidence reviewed
+## 3. Make retries safe and current validity truthful
 
-Use the canonical fingerprinting/lineage path, extending it minimally with a clearly versioned review/input binding where needed. Approval validity must cover the actual reviewed content and its governing inputs, including typed values, units, relevant checklist definitions, intelligence revisions, selected candidates, active intelligence decisions, and source IDs/version IDs/digests/locators/excerpts where present. Include supplementary architecture/environment/test-data/observability inputs actually used by document generation.
+Scope idempotency to the real actor, organisation/project, operation, target revision and canonical request payload. Concurrent delivery of the same operation/key must commit one mutation, one decision/revision increment and one success audit. Changed payload/target/actor reuse must not replay another operation.
 
-Do not invent provenance or timestamps. Store actual save/decision times separately from semantic hashes. Attach relevant provenance BEFORE calculating a content binding intended to cover it. Do not create a hash cycle in which approval changes its own input digest and instantly invalidates itself. Status/version presentation and approval overlays must not be mistaken for changed engineering inputs; retain separate input/content and decision bindings as necessary. Preserve existing stored fingerprints rather than silently relabelling historical records with a new algorithm.
+Check/reserve/store the receipt atomically with the protected mutation. An idempotency or success-audit persistence failure must roll back the operation rather than leave an approval that the caller believes failed. Do not suppress the exception or weaken rollback tests.
 
-On approval, re-read current project authority, the exact persisted target, governing inputs, active decisions and readiness within the same serialized Unit of Work as the protected write. Require both the expected target/decision revision and the expected input/content binding observed by the client. Missing/malformed preconditions are rejected; stale or conflicting expectations return 409 with refresh guidance and no partial write.
+Reauthorise every replay using current authority. Return the original operation receipt without creating a new decision, but clearly separate it from recomputed present approval validity. An approval receipt replayed after source change, withdrawal or supersession must not return a fresh-looking CURRENTLY_VALID result. Immutable receipt/history and live validity are distinct parts of the response.
 
-A contract can only be approved when its saved content still corresponds to current eligible governed intelligence and the existing approval readiness rules permit it. A document can only be approved when its exact saved revision is current, passes its own readiness rules, and is bound to an exact currently valid approved contract revision. Matching only a project ID, title, numeric workload or the latest contract flag is insufficient.
+Use a consistent validity evaluation for list, selected detail, history, export and protected writes. Selecting an older revision must not make its approval currently valid when the same revision is shown as superseded in history. Export notices and badges must agree.
 
-Keep pre-approval draft generation available as the existing product supports it. For an approvable document, generation must save the exact governing contract revision and complete input binding. Older documents without the necessary immutable binding remain readable; require regeneration rather than retroactively claiming they were generated from a saved approved revision. If a document was generated from an explicitly saved review revision before that same revision was approved, its original binding must remain intact and be validated, not replaced with a newer contract.
+Preserve the delivered no-resurrection rule: parent withdrawal/reapproval, source replacement with the same number, re-binding intelligence or regenerating identical text cannot revive the child's old approval decision. New explicit decisions are required for the correct current chain. Relevant narrative/checklist inputs and source/candidate/decision lineage must remain in validity checks, not just final numeric workload equality.
 
-Some integration paths in the starting code compute contract/input state before entering the save transaction. Move or revision-check all relevant reads, permission checks and writes needed by this slice within the actual atomic boundary. Merely adding a transaction around the final INSERT is not sufficient. Make these targeted product fixes as part of the build, not another audit/report cycle.
+## 4. Finish the UI integration for the stricter contract
 
-Do not pass ineligible narrative intelligence into generators as accepted facts. Fix that integration where necessary for approval: excluded assertions must remain visibly unresolved/blocked according to existing rules. An unsafe previously generated document must not be approved solely because its stored status says READY_FOR_APPROVAL; validate its generation binding and require regeneration if needed.
+Update the existing Contract, Strategy, Test Plan, document viewer, API adapters and explicit mock implementations together. Preserve full previews, saved revision selection, generation, downloads and provenance.
 
-## 4. Implement durable invalidation without automatic reapproval
+Use the exact content/input binding returned for the displayed revision. Send initial expected decision revision 0 explicitly. Do not substitute a parent hash or locally invented approval metadata.
 
-Re-evaluate current validity on live contract, document list/detail/history/export and each protected approval action. Correctness must not depend on a browser page being open.
+Separate load, generation, approval, withdrawal and export error recovery. Retrying a failed approval must not generate a document or save another contract revision. A 409 must refresh the review information and require the user to inspect/reconfirm the intended target; do not automatically approve a newer revision.
 
-Material changes to governing intelligence, selected candidates, source versions, relevant checklist requirements or document inputs invalidate affected current approvals. A new source version with the SAME number still represents different evidence and must not inherit the old decision. Preserve the original evidence and decision history.
+Guard asynchronous results using project, entity/type, target revision and request identity, including A-to-B-to-A navigation. Clear abandoned rationale/confirmation state when the target changes. A late result may not approve, replace or unlock controls on another selected revision. Do not rely solely on matching the project ID.
 
-Withdrawing a contract approval removes the validity of dependent document approvals for current use. Saving a genuinely changed superseding contract revision or generating a replacement document revision must not copy approvals to the new revision. Regenerating identical document text also does not approve a new revision automatically.
+Keep the established role policy: engineers may save/generate but not decide; reviewers may decide but not generate; viewers remain read-only; lead/admin privileges stay as defined in the central policy. Server enforcement remains authoritative, including CSRF on cookie mutations and revoked session/membership checks. No synthetic system actor or role fallback in production.
 
-Rebinding/reapproving intelligence does not revive an old contract or document approval. Restoring an identical numeric value or undoing an edit must not silently resurrect a previous decision. Use durable revision/decision lineage or recorded invalidation, not equality of the final number alone. New explicit decisions are required against the correct current revisions. Track document dependency on the governing contract decision/binding so withdrawing and later reapproving the parent does not automatically reactivate the child's earlier approval.
+## 5. Executable regression cases
 
-Expose a clear status/reason and remediation in the UI. Preserve old bytes, exact source bindings and historical decisions; do not erase history or silently regenerate on reads.
+Extend the existing approval integration and DOM suites with focused cases that fail for the observed gaps. Preserve the 641-test behaviour baseline, adjusting existing requests to supply newly required truthful preconditions rather than removing assertions. Do not duplicate the generators or manufacture complete Test Plan inputs.
 
-## 5. Use explicit permissions, authenticated APIs and safe retries
+Prove, with real SQLite integration and controlled ordering rather than timing guesses:
 
-Extend the existing central Permission/AuthorizationPolicy contracts minimally for contract review writes and contract/document approval; keep frontend capability display aligned with the same policy. Do not use a broad "not VIEWER" shortcut for approval.
+1. Missing/malformed expected target, decision, content and input bindings are rejected for both contract and document mutations; the exact current bindings succeed. A parent fingerprint alone cannot approve a different document.
+2. Two identical concurrent approval requests with one idempotency key yield one decision and one success audit. Two competing requests with different keys but the same expected decision revision produce one winner and a deterministic conflict, not two successful decisions or an uncaught uniqueness exception.
+3. Source/input replacement, parent withdrawal, target supersession and membership revocation that commit while an approval waits for the write boundary are observed before it writes. Add barrier-controlled tests that force the ordering. When approval legitimately commits first, the later upstream mutation invalidates it; do not write a test asserting that both serial orderings must fail.
+4. Failure of decision/revision storage, required success audit or idempotency persistence leaves no partial protected operation. A valid retry can then succeed once.
+5. Replay after withdrawal/drift returns the original receipt plus invalid present validity, not a renewed approval. A revoked actor cannot replay it. Foreign project/actor/operation collisions remain rejected.
+6. After revision 2 exists, directly fetching revision 1 cannot label it currently valid; newly approving revision 1 is rejected. List, detail, history and Markdown export remain consistent without modifying old bytes. Verify after database restart.
+7. Parent withdrawal followed by reapproval does not resurrect a child decision. Re-binding the same numerical value to a new source requires the new explicit review chain.
+8. DOM tests simulate an approval error followed by Retry and assert that generation/save is NOT called. Simulate 409 and revision/project changes, then resolve old requests out of order. The selected target, rationale, decision token and badge remain correct. Exercise actual page/service wiring, not only a standalone modal.
 
-Role policy for this slice:
+Use existing dependency-injection seams or narrowly scoped test barriers; do not add public production endpoints for test control. A passing general concurrency suite is not a substitute for driving these approval operations.
 
-- PLATFORM_ADMIN follows the existing platform-admin policy.
-- ORG_ADMIN and PERFORMANCE_LEAD may save contract review revisions and make contract/document approval or withdrawal decisions in their organisation.
-- PERFORMANCE_ENGINEER may save review revisions and generate documents but may NOT approve or withdraw approvals.
-- REVIEWER may read and approve/withdraw within their organisation, but gains no document-generation or general project-edit permission. This follows the existing distinction between review decisions and generation rights.
-- VIEWER is read-only and may NOT save or approve/withdraw.
+## Completion and scope
 
-Do not introduce mandatory dual-approval or unrelated role redesign. Refresh current account/membership/session authority at protected writes and idempotent replay boundaries; stale principal membership data must not authorise a revoked reviewer. Deny unauthenticated and foreign-project access. Cookie mutations retain CSRF protection. Unrelated existing permissions must not be widened or removed.
+Implement the fixes and tests in this run. Do not stop after writing a plan, listing issues or acknowledging the handover. This continuation fulfils the existing approval task; it does not reopen M5.2 or authorise a new PM reporting cycle.
 
-Use current API conventions. Reuse equivalent routes if present; otherwise a suitable family is:
+Run `npm ci`, `npm run lint`, `npm test` and `npm run build`. Verify the persisted API workflow and actual DOM interactions. Report actual outcomes, not the historical 641 count as though it were a new run. Keep remote CI separate from local verification.
 
-- `POST /api/v1/projects/:projectId/performance-contract/revisions`
-- `GET /api/v1/projects/:projectId/performance-contract/revisions`
-- `GET /api/v1/projects/:projectId/performance-contract/revisions/:revisionNumber`
-- `POST /api/v1/projects/:projectId/performance-contract/revisions/:revisionNumber/decisions`
-- `POST /api/v1/projects/:projectId/artefacts/:artefactId/revisions/:revisionNumber/decisions`
-- revision-scoped decision-history reads, or history included in the existing detail responses.
+Out of scope: test-definition/bundle features, load execution, new connectors, BYOAI, billing, deployment redesign, unrelated dependency upgrades, new approval roles or mandatory dual approval. Keep other previously specified governance, provenance, human-attribution and zero-invention requirements intact.
 
-These route shapes guide the implementation; do not duplicate working equivalents. Approval and withdrawal are explicit decision actions, not client-controlled status PATCHes. Generation/list/read/export APIs already delivered must remain working and reflect current approval validity.
-
-Scope idempotency records to actor, organisation/project, operation, target revision and canonical payload. Same-key same-operation retries must not duplicate approval/audit events or revisions. A changed payload/target/actor must not replay someone else's operation. Reauthorise every replay. Reserve/check/write the idempotency result atomically with the protected mutation so concurrent identical requests cannot double-approve. If an original decision is replayed after invalidation, make clear that it is a historical receipt; never advertise renewed current validity.
-
-## 6. Wire the actual Contract, Strategy and Test Plan screens
-
-Use the existing components and services in API mode against durable data. Add focused controls for Save for Review, review-revision selection, Approve Revision and Withdraw Approval with a rationale field and explicit confirmation identifying the target revision. A confirmation is a customer-product action, not a request to Andy for development permission.
-
-Display the exact revision being inspected, current versus historical state, readiness/blocking reasons, active approval validity, approver/time/rationale and decision history. An approved badge may appear only after server confirmation. Disable unavailable actions with useful reasons, including missing approved parent contract and stale/historical target state; server enforcement remains authoritative.
-
-Support loading, errors, retry and 409 refresh. Do not silently retry an approval against a newer revision after conflict: refresh and require the user to inspect and explicitly confirm the new target. A delayed response after project/revision switching must not apply to a different document or preserve an approval button/rationale for an abandoned target.
-
-Keep full document previews, history, generation/regeneration and Markdown downloads functional. Preserve explicit reference/mock mode, but never fall back to fixtures on an API failure. Do not use a homepage HTTP 200 or a success toast as evidence of the whole workflow.
-
-## 7. Executable acceptance scenarios
-
-Add focused service/API/persistence and DOM interaction tests, preserving the existing suite. Prove at least:
-
-1. A real persisted Northstar project obtains eligible approved intelligence through the governed intake path, saves a contract review revision and approves that exact revision as an authorised reviewer. All needed fixture inputs are explicit test data, not production defaults.
-2. Both document types bind to the approved contract revision, preserve full content/provenance, accept separate explicit approval decisions and show consistent status/history/export metadata.
-3. Missing, conflicting, stale, invalid-provenance or required unapproved inputs cannot be bypassed with forged status/identity/content fields. An approved 24,000 orders/hr alone is not an invented complete Test Plan.
-4. Missing expected bindings fail; changed source/input/target/decision revisions return 409 without a partial decision, including source replacement racing approval and approval racing supersession.
-5. Same-number/new-source-version changes and relevant narrative/checklist changes invalidate affected approvals. Unrelated project changes do not invalidate another project's approvals.
-6. Rebinding intelligence, generating a new document revision and explicitly reapproving produce the correct new chain; prior content/decisions remain unchanged. Withdrawal and later parent reapproval do not resurrect child decisions.
-7. Refresh and full API/database restart preserve revision history, decisions, input hashes and current validity. Different request clocks do not change semantic input identity.
-8. Role-matrix, CSRF, cross-tenant/project and revoked-membership cases are enforced for approve, withdraw, history and replay. REVIEWER can decide but cannot generate; PERFORMANCE_ENGINEER can generate/save but cannot approve. Production mutation service calls without an authenticated principal fail rather than constructing a synthetic actor.
-9. Same-key retries and concurrent duplicate submissions cause one mutation and one successful audit event; changed-key-payload collisions fail. Simulated audit/persistence failure rolls back the protected mutation.
-10. DOM tests drive saving/opening a revision, rationale/confirmation, success/error/409, withdrawal, stale banners, revision switching and out-of-order project responses. Cover API-mode service wiring as well as real persisted API integration.
-
-Use genuine fixtures and real SQLite transactions for integration tests, not hard-coded successful response objects as a substitute. Do not weaken assertions, skip failing tests or bypass readiness to complete the task.
-
-## Build boundaries and completion
-
-Implement this coherent approval slice now. Do not stop at an implementation plan or protocol acknowledgement. Keep M5.2 intake and the completed artefact workflow intact, making only the necessary approval/integrity integration fixes. Do not create PM reports, new milestone IDs, audit/closure documents or speculative roadmap files.
-
-Out of scope: k6 execution, new Test Definition/bundle delivery, CI runner connectors, external publishing, BYOAI/LLMs, notifications/email approval routing, rich-text editing, billing, deployment-platform changes and unrelated dependency upgrades. Existing business approval audit events and small API/operator notes necessary to use this feature are allowed.
-
-Run `npm ci`, `npm run lint`, `npm test` and `npm run build`. Exercise the real persisted API workflow; use browser tooling when available or accurately identify DOM/API tests as the execution evidence. Report the actual test totals and any genuine incomplete behaviour. Never call local verification remote CI. The failing remote checkpoint is not repaired until the implementation changes pass the checks; this instruction update alone changes no product code.
-
-Preserve the finished workspace for Andy's manual push. Return only a short implementation handoff: exact UI steps and API routes now working; local verification totals/results; any LOCAL commit SHA if created; readiness for manual push; and genuine unresolved implementation blockers. No terminal pull/push, credential request, report cycle or permission request to begin this assigned build.
+Leave the working changes ready for Andy's manual push. Return only a compact handoff: product behaviour corrected, API/client contract changes, focused tests and full local verification results, exact LOCAL SHA if one exists, and any genuine unfinished behaviour. Do not create PM reports, audit documents, completion reports or closure files.
