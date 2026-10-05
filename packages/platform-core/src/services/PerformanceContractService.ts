@@ -14,7 +14,14 @@ import {
   computeContractFingerprint,
   IntelligenceCategory,
   CanonicalState,
-  ReviewStatus
+  ReviewStatus,
+  ContractReviewRevision,
+  ContractReviewRevisionSummary,
+  SaveContractReviewRevisionInput,
+  SubmitDecisionInput,
+  GovernanceDecisionRecord,
+  GovernanceDecisionSummary,
+  ApprovalValidity
 } from '@pecp/pe-domain';
 import { compileDraftPerformanceContract } from '@pecp/workload-engine';
 import {
@@ -24,9 +31,17 @@ import {
   IExtractionRepository,
   IChecklistRepository,
   IOrganisationMembershipRepository,
+  IContractRevisionRepository,
+  ContractRevisionRecord,
+  IGovernanceDecisionRepository,
+  IIdempotencyRepository,
+  IUnitOfWork,
   AuthenticatedPrincipal,
-  AuthorizationPolicy
+  AuthorizationPolicy,
+  AuditService,
+  Permission
 } from '../index.js';
+import * as crypto from 'node:crypto';
 
 export interface PerformanceContractServiceDependencies {
   projectRepository: IProjectRepository;
@@ -35,6 +50,11 @@ export interface PerformanceContractServiceDependencies {
   extractionRepository?: IExtractionRepository;
   checklistRepository?: IChecklistRepository;
   membershipRepository?: IOrganisationMembershipRepository;
+  contractRevisionRepository?: IContractRevisionRepository;
+  governanceDecisionRepository?: IGovernanceDecisionRepository;
+  auditService?: AuditService;
+  idempotencyRepository?: IIdempotencyRepository;
+  unitOfWork?: IUnitOfWork;
 }
 
 export type FieldEligibilityStatus =
@@ -68,6 +88,12 @@ export class PerformanceContractService {
   private readonly checklistRepo?: IChecklistRepository;
   private readonly membershipRepo?: IOrganisationMembershipRepository;
 
+  private readonly contractRevisionRepo?: IContractRevisionRepository;
+  private readonly governanceDecisionRepo?: IGovernanceDecisionRepository;
+  private readonly auditService?: AuditService;
+  private readonly idempotencyRepo?: IIdempotencyRepository;
+  private readonly unitOfWork?: IUnitOfWork;
+
   constructor(deps: PerformanceContractServiceDependencies) {
     this.projectRepo = deps.projectRepository;
     this.intelligenceRepo = deps.intelligenceRepository;
@@ -75,6 +101,616 @@ export class PerformanceContractService {
     this.extractionRepo = deps.extractionRepository;
     this.checklistRepo = deps.checklistRepository;
     this.membershipRepo = deps.membershipRepository;
+    this.contractRevisionRepo = deps.contractRevisionRepository;
+    this.governanceDecisionRepo = deps.governanceDecisionRepository;
+    this.auditService = deps.auditService;
+    this.idempotencyRepo = deps.idempotencyRepository;
+    this.unitOfWork = deps.unitOfWork;
+  }
+
+  private async assertProjectAccess(
+    projectId: string,
+    principal: AuthenticatedPrincipal | undefined,
+    permission: Permission
+  ): Promise<ProjectSummary> {
+    const project = await this.projectRepo.getById(projectId);
+    if (!project) {
+      const err = new Error(`Project '${projectId}' not found`);
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    if (principal) {
+      const hasPerm = AuthorizationPolicy.hasPermission(
+        principal,
+        permission,
+        project.organisationId
+      );
+      if (!hasPerm) {
+        if (this.auditService) {
+          await this.auditService.record({
+            actor: principal,
+            projectId,
+            organisationId: project.organisationId,
+            action: 'AUTHORIZATION_DENIED',
+            targetType: 'PERFORMANCE_CONTRACT',
+            targetId: projectId,
+            outcome: 'DENIED',
+            reason: `${permission} permission required`,
+            metadata: { attemptedPermission: permission }
+          });
+        }
+        const err = new Error(`${permission} permission required`);
+        (err as any).statusCode = 403;
+        throw err;
+      }
+    }
+
+    return project;
+  }
+
+  computeInputRevisionDigest(
+    contractFingerprint: string,
+    intelligenceItems: IntelligenceItem[]
+  ): string {
+    const payload = {
+      fingerprint: contractFingerprint,
+      items: intelligenceItems
+        .map((item) => ({
+          id: item.id,
+          key: item.key,
+          revision: item.revision,
+          canonicalState: item.canonicalState,
+          reviewStatus: item.reviewStatus,
+          value: item.value,
+          unit: item.unit,
+          approved: item.activeApprovalSnapshot?.revision ?? null,
+          bindings: (item.sourceBindings || []).map((b) => ({
+            sourceId: b.sourceId,
+            versionId: b.sourceVersionId,
+            versionNumber: b.sourceVersionNumber,
+            sha: b.originalSha256
+          }))
+        }))
+        .sort((a, b) => a.key.localeCompare(b.key))
+    };
+    return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  private evaluateRevisionApprovalValidity(
+    rev: ContractRevisionRecord,
+    liveFingerprint: string,
+    liveDigest: string,
+    latestDecision: GovernanceDecisionRecord | null
+  ): ApprovalValidity {
+    if (!latestDecision) {
+      return {
+        isValid: false,
+        state: 'NOT_APPROVED',
+        reasons: ['Contract review revision has not been approved.'],
+        activeDecision: null
+      };
+    }
+
+    const decisionSummary: GovernanceDecisionSummary = {
+      id: latestDecision.id,
+      decisionType: latestDecision.decisionType,
+      rationale: latestDecision.rationale,
+      actorDisplayName: latestDecision.actorDisplayName,
+      actorUserId: latestDecision.actorUserId,
+      decidedAt: latestDecision.decidedAt,
+      targetContentFingerprint: latestDecision.targetContentFingerprint,
+      targetInputDigest: latestDecision.targetInputDigest,
+      decisionRevision: latestDecision.decisionRevision
+    };
+
+    if (latestDecision.decisionType === 'WITHDRAW') {
+      return {
+        isValid: false,
+        state: 'WITHDRAWN',
+        reasons: [`Approval was withdrawn: ${latestDecision.rationale}`],
+        activeDecision: decisionSummary
+      };
+    }
+
+    const hasDrifted = rev.fingerprint !== liveFingerprint || rev.inputRevisionDigest !== liveDigest;
+    if (hasDrifted) {
+      return {
+        isValid: false,
+        state: 'STALE',
+        reasons: [
+          'Governing project intelligence, source versions, or requirements have drifted since this contract revision was approved.'
+        ],
+        activeDecision: decisionSummary
+      };
+    }
+
+    return {
+      isValid: true,
+      state: 'CURRENTLY_VALID',
+      reasons: [],
+      activeDecision: decisionSummary
+    };
+  }
+
+  async saveContractReviewRevision(
+    projectId: string,
+    input: SaveContractReviewRevisionInput = {},
+    principal?: AuthenticatedPrincipal
+  ): Promise<ContractReviewRevision> {
+    const project = await this.assertProjectAccess(projectId, principal, 'CONTRACT_REVIEW_WRITE');
+
+    if (!this.contractRevisionRepo) {
+      throw new Error('Contract revision repository not configured');
+    }
+
+    const actor = principal || {
+      userId: 'system-actor',
+      displayName: 'System User',
+      email: 'system@pecp.internal',
+      platformRole: 'USER',
+      memberships: [{ organisationId: project.organisationId, role: 'PERFORMANCE_LEAD' }],
+      sessionId: 'session-sys',
+      authenticatedAt: new Date().toISOString()
+    };
+
+    // Idempotency Check
+    let payloadHash = '';
+    if (input.idempotencyKey && this.idempotencyRepo) {
+      payloadHash = crypto
+        .createHash('sha256')
+        .update(JSON.stringify({ projectId, ...input }))
+        .digest('hex');
+
+      const existing = await this.idempotencyRepo.get(input.idempotencyKey);
+      if (existing) {
+        if (existing.projectId !== projectId || existing.actorUserId !== actor.userId) {
+          const err = new Error('Idempotency key belongs to another context or actor');
+          (err as any).statusCode = 403;
+          throw err;
+        }
+        if (existing.payloadSha256 !== payloadHash) {
+          const err = new Error('Idempotency key mismatch: request payload differs from original execution');
+          (err as any).statusCode = 409;
+          throw err;
+        }
+        return JSON.parse(existing.responseJson);
+      }
+    }
+
+    // Compile current live contract
+    const liveCompilation = await this.compileProjectPerformanceContract(projectId, principal);
+    if (input.expectedFingerprint && input.expectedFingerprint !== liveCompilation.fingerprint) {
+      const err = new Error(
+        `Contract compilation fingerprint mismatch. Stale client expectation (${input.expectedFingerprint} vs live ${liveCompilation.fingerprint})`
+      );
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
+    const liveIntelligence = await this.intelligenceRepo.listByProject(projectId);
+    const inputRevisionDigest = this.computeInputRevisionDigest(
+      liveCompilation.fingerprint,
+      liveIntelligence
+    );
+
+    let createdRevision: ContractReviewRevision | null = null;
+
+    const executeSave = async () => {
+      const latest = await this.contractRevisionRepo!.getLatestRevision(projectId);
+      const nextRevNumber = (latest?.revisionNumber || 0) + 1;
+
+      const record: ContractRevisionRecord = {
+        id: crypto.randomUUID(),
+        projectId,
+        organisationId: project.organisationId,
+        revisionNumber: nextRevNumber,
+        status: liveCompilation.contract.status,
+        contractId: liveCompilation.contract.id,
+        version: liveCompilation.contract.version,
+        fingerprint: liveCompilation.fingerprint,
+        inputRevisionDigest,
+        contentJson: JSON.stringify(liveCompilation.contract),
+        provenanceJson: JSON.stringify(liveCompilation.provenance),
+        recordedAt: new Date().toISOString(),
+        actorUserId: actor.userId,
+        actorDisplayName: actor.displayName
+      };
+
+      await this.contractRevisionRepo!.createRevision(record);
+
+      if (this.auditService) {
+        await this.auditService.record({
+          actor,
+          projectId,
+          organisationId: project.organisationId,
+          action: 'CONTRACT_REVISION_SAVE',
+          targetType: 'PERFORMANCE_CONTRACT_REVISION',
+          targetId: record.id,
+          outcome: 'SUCCESS',
+          reason: input.notes || 'Saved Performance Contract review revision',
+          metadata: {
+            revisionNumber: nextRevNumber,
+            fingerprint: record.fingerprint,
+            status: record.status
+          }
+        });
+      }
+
+      createdRevision = {
+        id: record.id,
+        projectId,
+        organisationId: project.organisationId,
+        revisionNumber: nextRevNumber,
+        status: record.status,
+        contractId: record.contractId,
+        version: record.version,
+        fingerprint: record.fingerprint,
+        inputRevisionDigest: record.inputRevisionDigest,
+        contract: liveCompilation.contract,
+        provenance: liveCompilation.provenance,
+        recordedAt: record.recordedAt,
+        actorUserId: record.actorUserId,
+        actorDisplayName: record.actorDisplayName,
+        activeDecision: null,
+        approvalValidity: {
+          isValid: false,
+          state: 'NOT_APPROVED',
+          reasons: ['Contract review revision has not been approved.'],
+          activeDecision: null
+        }
+      };
+
+      if (input.idempotencyKey && this.idempotencyRepo) {
+        await this.idempotencyRepo.save({
+          key: input.idempotencyKey,
+          projectId,
+          actorUserId: actor.userId,
+          operation: 'CONTRACT_REVISION_SAVE',
+          payloadSha256: payloadHash,
+          responseStatus: 201,
+          responseJson: JSON.stringify(createdRevision),
+          createdAt: new Date().toISOString()
+        });
+      }
+    };
+
+    if (this.unitOfWork) {
+      await this.unitOfWork.execute(executeSave);
+    } else {
+      await executeSave();
+    }
+
+    return createdRevision!;
+  }
+
+  async listContractReviewRevisions(
+    projectId: string,
+    principal?: AuthenticatedPrincipal
+  ): Promise<ContractReviewRevisionSummary[]> {
+    await this.assertProjectAccess(projectId, principal, 'PROJECT_READ');
+
+    if (!this.contractRevisionRepo) {
+      return [];
+    }
+
+    const records = await this.contractRevisionRepo.listRevisions(projectId);
+    if (records.length === 0) {
+      return [];
+    }
+
+    const liveCompilation = await this.compileProjectPerformanceContract(projectId, principal);
+    const liveIntelligence = await this.intelligenceRepo.listByProject(projectId);
+    const liveDigest = this.computeInputRevisionDigest(
+      liveCompilation.fingerprint,
+      liveIntelligence
+    );
+
+    const summaries: ContractReviewRevisionSummary[] = [];
+    for (const rec of records) {
+      let latestDecision: GovernanceDecisionRecord | null = null;
+      if (this.governanceDecisionRepo) {
+        latestDecision = await this.governanceDecisionRepo.getLatestDecisionForTarget(
+          projectId,
+          'PERFORMANCE_CONTRACT',
+          rec.contractId,
+          rec.revisionNumber
+        );
+      }
+
+      const validity = this.evaluateRevisionApprovalValidity(
+        rec,
+        liveCompilation.fingerprint,
+        liveDigest,
+        latestDecision
+      );
+
+      summaries.push({
+        id: rec.id,
+        projectId: rec.projectId,
+        revisionNumber: rec.revisionNumber,
+        status: rec.status,
+        contractId: rec.contractId,
+        version: rec.version,
+        fingerprint: rec.fingerprint,
+        recordedAt: rec.recordedAt,
+        actorDisplayName: rec.actorDisplayName,
+        activeDecision: validity.activeDecision,
+        approvalValidity: validity
+      });
+    }
+
+    return summaries;
+  }
+
+  async getContractReviewRevision(
+    projectId: string,
+    revisionNumber: number,
+    principal?: AuthenticatedPrincipal
+  ): Promise<ContractReviewRevision> {
+    await this.assertProjectAccess(projectId, principal, 'PROJECT_READ');
+
+    if (!this.contractRevisionRepo) {
+      throw new Error('Contract revision repository not configured');
+    }
+
+    const record = await this.contractRevisionRepo.getByRevisionNumber(projectId, revisionNumber);
+    if (!record) {
+      const err = new Error(
+        `Contract review revision ${revisionNumber} not found for project '${projectId}'`
+      );
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const liveCompilation = await this.compileProjectPerformanceContract(projectId, principal);
+    const liveIntelligence = await this.intelligenceRepo.listByProject(projectId);
+    const liveDigest = this.computeInputRevisionDigest(
+      liveCompilation.fingerprint,
+      liveIntelligence
+    );
+
+    let latestDecision: GovernanceDecisionRecord | null = null;
+    if (this.governanceDecisionRepo) {
+      latestDecision = await this.governanceDecisionRepo.getLatestDecisionForTarget(
+        projectId,
+        'PERFORMANCE_CONTRACT',
+        record.contractId,
+        record.revisionNumber
+      );
+    }
+
+    const validity = this.evaluateRevisionApprovalValidity(
+      record,
+      liveCompilation.fingerprint,
+      liveDigest,
+      latestDecision
+    );
+
+    return {
+      id: record.id,
+      projectId: record.projectId,
+      organisationId: record.organisationId,
+      revisionNumber: record.revisionNumber,
+      status: record.status,
+      contractId: record.contractId,
+      version: record.version,
+      fingerprint: record.fingerprint,
+      inputRevisionDigest: record.inputRevisionDigest,
+      contract: JSON.parse(record.contentJson),
+      provenance: JSON.parse(record.provenanceJson),
+      recordedAt: record.recordedAt,
+      actorUserId: record.actorUserId,
+      actorDisplayName: record.actorDisplayName,
+      activeDecision: validity.activeDecision,
+      approvalValidity: validity
+    };
+  }
+
+  async submitContractDecision(
+    projectId: string,
+    revisionNumber: number,
+    input: SubmitDecisionInput,
+    principal?: AuthenticatedPrincipal
+  ): Promise<ContractReviewRevision> {
+    const project = await this.assertProjectAccess(projectId, principal, 'CONTRACT_APPROVE');
+
+    if (!this.contractRevisionRepo || !this.governanceDecisionRepo) {
+      throw new Error('Repositories not fully configured for governance decisions');
+    }
+
+    if (!input.rationale || input.rationale.trim().length === 0) {
+      const err = new Error('A non-blank rationale is required for approval decisions');
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    const actor = principal || {
+      userId: 'system-reviewer',
+      displayName: 'System Reviewer',
+      email: 'reviewer@pecp.internal',
+      platformRole: 'USER',
+      memberships: [{ organisationId: project.organisationId, role: 'REVIEWER' }],
+      sessionId: 'session-rev',
+      authenticatedAt: new Date().toISOString()
+    };
+
+    // Idempotency check
+    let payloadHash = '';
+    if (input.idempotencyKey && this.idempotencyRepo) {
+      payloadHash = crypto
+        .createHash('sha256')
+        .update(JSON.stringify({ projectId, revisionNumber, ...input }))
+        .digest('hex');
+
+      const existing = await this.idempotencyRepo.get(input.idempotencyKey);
+      if (existing) {
+        if (existing.projectId !== projectId || existing.actorUserId !== actor.userId) {
+          const err = new Error('Idempotency key belongs to another context or actor');
+          (err as any).statusCode = 403;
+          throw err;
+        }
+        if (existing.payloadSha256 !== payloadHash) {
+          const err = new Error('Idempotency key mismatch: request payload differs from original execution');
+          (err as any).statusCode = 409;
+          throw err;
+        }
+        return JSON.parse(existing.responseJson);
+      }
+    }
+
+    let updatedRevision: ContractReviewRevision | null = null;
+
+    const executeDecision = async () => {
+      const record = await this.contractRevisionRepo!.getByRevisionNumber(projectId, revisionNumber);
+      if (!record) {
+        const err = new Error(`Contract review revision ${revisionNumber} not found`);
+        (err as any).statusCode = 404;
+        throw err;
+      }
+
+      if (input.expectedRevisionNumber !== undefined && input.expectedRevisionNumber !== revisionNumber) {
+        const err = new Error(
+          `Precondition Failed: expected revision ${input.expectedRevisionNumber} does not match target ${revisionNumber}`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      if (input.expectedContentFingerprint && input.expectedContentFingerprint !== record.fingerprint) {
+        const err = new Error(
+          `Precondition Failed: expected content fingerprint ${input.expectedContentFingerprint} does not match recorded ${record.fingerprint}`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      const liveCompilation = await this.compileProjectPerformanceContract(projectId, principal);
+      const liveIntelligence = await this.intelligenceRepo.listByProject(projectId);
+      const liveDigest = this.computeInputRevisionDigest(
+        liveCompilation.fingerprint,
+        liveIntelligence
+      );
+
+      if (input.decisionType === 'APPROVE') {
+        if (record.status === 'BLOCKED') {
+          const err = new Error(
+            'Cannot approve contract revision: Document is BLOCKED by unresolved governance issues (Constitution §5 & §8)'
+          );
+          (err as any).statusCode = 400;
+          throw err;
+        }
+
+        const hasDrifted = record.fingerprint !== liveCompilation.fingerprint || record.inputRevisionDigest !== liveDigest;
+        if (hasDrifted) {
+          const err = new Error(
+            'Precondition Failed: Governing project intelligence has drifted since revision was saved. Save a new review revision before approving.'
+          );
+          (err as any).statusCode = 409;
+          throw err;
+        }
+      }
+
+      const existingDecisions = await this.governanceDecisionRepo!.listDecisionsForTarget(
+        projectId,
+        'PERFORMANCE_CONTRACT',
+        record.contractId,
+        revisionNumber
+      );
+      const nextDecisionRev = existingDecisions.length + 1;
+
+      if (input.expectedDecisionRevision !== undefined && input.expectedDecisionRevision !== nextDecisionRev - 1) {
+        const err = new Error(
+          `Optimistic concurrency failure: expectedDecisionRevision is ${input.expectedDecisionRevision}, current is ${nextDecisionRev - 1}`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      const decisionRecord: GovernanceDecisionRecord = {
+        id: crypto.randomUUID(),
+        projectId,
+        organisationId: project.organisationId,
+        targetType: 'PERFORMANCE_CONTRACT',
+        targetId: record.contractId,
+        targetRevisionNumber: revisionNumber,
+        decisionType: input.decisionType,
+        rationale: input.rationale.trim(),
+        actorUserId: actor.userId,
+        actorDisplayName: actor.displayName,
+        targetContentFingerprint: record.fingerprint,
+        targetInputDigest: record.inputRevisionDigest,
+        decidedAt: new Date().toISOString(),
+        decisionRevision: nextDecisionRev
+      };
+
+      await this.governanceDecisionRepo!.recordDecision(decisionRecord);
+
+      if (this.auditService) {
+        await this.auditService.record({
+          actor,
+          projectId,
+          organisationId: project.organisationId,
+          action: input.decisionType === 'APPROVE' ? 'CONTRACT_APPROVE' : 'CONTRACT_APPROVAL_WITHDRAW',
+          targetType: 'PERFORMANCE_CONTRACT_REVISION',
+          targetId: record.id,
+          outcome: 'SUCCESS',
+          reason: input.rationale.trim(),
+          metadata: {
+            revisionNumber,
+            decisionRevision: nextDecisionRev,
+            decisionType: input.decisionType
+          }
+        });
+      }
+
+      const validity = this.evaluateRevisionApprovalValidity(
+        record,
+        liveCompilation.fingerprint,
+        liveDigest,
+        decisionRecord
+      );
+
+      updatedRevision = {
+        id: record.id,
+        projectId: record.projectId,
+        organisationId: record.organisationId,
+        revisionNumber: record.revisionNumber,
+        status: record.status,
+        contractId: record.contractId,
+        version: record.version,
+        fingerprint: record.fingerprint,
+        inputRevisionDigest: record.inputRevisionDigest,
+        contract: JSON.parse(record.contentJson),
+        provenance: JSON.parse(record.provenanceJson),
+        recordedAt: record.recordedAt,
+        actorUserId: record.actorUserId,
+        actorDisplayName: record.actorDisplayName,
+        activeDecision: validity.activeDecision,
+        approvalValidity: validity
+      };
+
+      if (input.idempotencyKey && this.idempotencyRepo) {
+        await this.idempotencyRepo.save({
+          key: input.idempotencyKey,
+          projectId,
+          actorUserId: actor.userId,
+          operation: 'CONTRACT_DECISION',
+          payloadSha256: payloadHash,
+          responseStatus: 200,
+          responseJson: JSON.stringify(updatedRevision),
+          createdAt: new Date().toISOString()
+        });
+      }
+    };
+
+    if (this.unitOfWork) {
+      await this.unitOfWork.execute(executeDecision);
+    } else {
+      await executeDecision();
+    }
+
+    return updatedRevision!;
   }
 
   /**

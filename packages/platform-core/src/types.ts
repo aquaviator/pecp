@@ -9,7 +9,9 @@ import {
   ArtefactType,
   ArtefactStatus,
   EngineeringArtefact,
-  ArtefactStalenessResult
+  ArtefactStalenessResult,
+  GovernanceDecisionSummary,
+  ApprovalValidity
 } from '@pecp/pe-domain';
 
 export type OrganisationStatus = 'ACTIVE' | 'ARCHIVED';
@@ -134,7 +136,11 @@ export type Permission =
   | 'INTELLIGENCE_APPROVE'
   | 'SOURCE_WRITE'
   | 'INTELLIGENCE_WRITE'
-  | 'AUDIT_READ';
+  | 'AUDIT_READ'
+  | 'CONTRACT_REVIEW_WRITE'
+  | 'CONTRACT_APPROVE'
+  | 'ARTEFACT_GENERATE'
+  | 'ARTEFACT_APPROVE';
 
 export interface Session {
   id: string;
@@ -184,6 +190,11 @@ export type AuditAction =
   | 'INTELLIGENCE_APPROVAL_INVALIDATE'
   | 'ARTEFACT_GENERATE'
   | 'ARTEFACT_REGENERATE'
+  | 'CONTRACT_REVISION_SAVE'
+  | 'CONTRACT_APPROVE'
+  | 'CONTRACT_APPROVAL_WITHDRAW'
+  | 'ARTEFACT_APPROVE'
+  | 'ARTEFACT_APPROVAL_WITHDRAW'
   | 'AUTHORIZATION_DENIED';
 
 export type AuditOutcome = 'SUCCESS' | 'DENIED' | 'FAILURE';
@@ -253,6 +264,7 @@ export interface SavedArtefactRevisionRecord {
   sourceContractId: string;
   sourceContractVersion: string;
   sourceContractFingerprint: string;
+  sourceContractRevisionNumber?: number;
   inputRevisionDigest: string;
   generationMetadataJson: string;
   contentJson: string;
@@ -266,6 +278,7 @@ export interface GenerateArtefactInput {
   artefactType: ArtefactType;
   expectedContractFingerprint?: string;
   expectedInputRevision?: number;
+  contractRevisionNumber?: number;
   author?: string;
   idempotencyKey?: string;
 }
@@ -277,6 +290,9 @@ export interface ArtefactRevisionSummary {
   recordedAt: string;
   actorDisplayName: string;
   sourceContractFingerprint: string;
+  sourceContractRevisionNumber?: number;
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
 }
 
 export interface ArtefactDetailResponse {
@@ -284,6 +300,9 @@ export interface ArtefactDetailResponse {
   staleness: ArtefactStalenessResult;
   currentRevisionNumber: number;
   revisions: ArtefactRevisionSummary[];
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
+  decisionHistory?: GovernanceDecisionSummary[];
 }
 
 export interface ArtefactListItem {
@@ -295,5 +314,7 @@ export interface ArtefactListItem {
   status: ArtefactStatus;
   staleness: ArtefactStalenessResult;
   updatedAt: string;
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
 }
 

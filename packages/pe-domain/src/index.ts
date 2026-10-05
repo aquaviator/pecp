@@ -502,6 +502,107 @@ export interface GenerateArtefactInput {
   idempotencyKey?: string;
 }
 
+// Governance Decisions & Contract Review Revisions
+export type GovernanceTargetType =
+  | 'PERFORMANCE_CONTRACT'
+  | 'PERFORMANCE_STRATEGY'
+  | 'PERFORMANCE_TEST_PLAN';
+
+export type GovernanceDecisionType = 'APPROVE' | 'WITHDRAW';
+
+export interface GovernanceDecisionRecord {
+  id: string;
+  projectId: string;
+  organisationId: string;
+  targetType: GovernanceTargetType;
+  targetId: string;
+  targetRevisionNumber: number;
+  decisionType: GovernanceDecisionType;
+  rationale: string;
+  actorUserId: string;
+  actorDisplayName: string;
+  targetContentFingerprint: string;
+  targetInputDigest: string;
+  decidedAt: string;
+  decisionRevision: number;
+}
+
+export interface GovernanceDecisionSummary {
+  id: string;
+  decisionType: GovernanceDecisionType;
+  rationale: string;
+  actorDisplayName: string;
+  actorUserId: string;
+  decidedAt: string;
+  targetContentFingerprint: string;
+  targetInputDigest: string;
+  decisionRevision: number;
+}
+
+export type ApprovalValidityState =
+  | 'CURRENTLY_VALID'
+  | 'WITHDRAWN'
+  | 'STALE'
+  | 'NOT_APPROVED'
+  | 'PARENT_UNAPPROVED';
+
+export interface ApprovalValidity {
+  isValid: boolean;
+  state: ApprovalValidityState;
+  reasons: string[];
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvedContractRevisionNumber?: number;
+}
+
+export interface SubmitDecisionInput {
+  decisionType: GovernanceDecisionType;
+  rationale: string;
+  expectedRevisionNumber: number;
+  expectedContentFingerprint: string;
+  expectedInputDigest?: string;
+  expectedDecisionRevision?: number;
+  idempotencyKey?: string;
+}
+
+export interface SaveContractReviewRevisionInput {
+  expectedFingerprint?: string;
+  notes?: string;
+  idempotencyKey?: string;
+}
+
+export interface ContractReviewRevision {
+  id: string;
+  projectId: string;
+  organisationId: string;
+  revisionNumber: number;
+  status: ContractStatus;
+  contractId: string;
+  version: string;
+  fingerprint: string;
+  inputRevisionDigest: string;
+  contract: PerformanceContract;
+  provenance: ContractFieldProvenance[];
+  recordedAt: string;
+  actorUserId: string;
+  actorDisplayName: string;
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
+}
+
+export interface ContractReviewRevisionSummary {
+  id: string;
+  projectId: string;
+  revisionNumber: number;
+  status: ContractStatus;
+  contractId: string;
+  version: string;
+  fingerprint: string;
+  recordedAt: string;
+  actorDisplayName: string;
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
+}
+
 export interface ArtefactRevisionSummary {
   id: string;
   revisionNumber: number;
@@ -509,6 +610,9 @@ export interface ArtefactRevisionSummary {
   recordedAt: string;
   actorDisplayName: string;
   sourceContractFingerprint: string;
+  sourceContractRevisionNumber?: number;
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
 }
 
 export interface ArtefactDetailResponse {
@@ -516,6 +620,9 @@ export interface ArtefactDetailResponse {
   staleness: ArtefactStalenessResult;
   currentRevisionNumber: number;
   revisions: ArtefactRevisionSummary[];
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
+  decisionHistory?: GovernanceDecisionSummary[];
 }
 
 export interface ArtefactListItem {
@@ -527,6 +634,8 @@ export interface ArtefactListItem {
   status: ArtefactStatus;
   staleness: ArtefactStalenessResult;
   updatedAt: string;
+  activeDecision?: GovernanceDecisionSummary | null;
+  approvalValidity?: ApprovalValidity;
 }
 
 // ---------------------------------------------------------------------------

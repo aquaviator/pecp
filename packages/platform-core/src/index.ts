@@ -16,6 +16,8 @@ export * from './repositories/IExtractionRepository.js';
 export * from './repositories/IChecklistRepository.js';
 export * from './repositories/IIdempotencyRepository.js';
 export * from './repositories/IArtefactRepository.js';
+export * from './repositories/IContractRevisionRepository.js';
+export * from './repositories/IGovernanceDecisionRepository.js';
 export * from './transactions/IUnitOfWork.js';
 export * from './services/PlatformApplicationService.js';
 export * from './services/AuthorizationPolicy.js';

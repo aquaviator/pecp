@@ -33,6 +33,7 @@ interface ArtefactRevisionRow {
   source_contract_id: string;
   source_contract_version: string;
   source_contract_fingerprint: string;
+  source_contract_revision_number?: number | null;
   input_revision_digest: string;
   generation_metadata_json: string;
   content_json: string;
@@ -73,6 +74,11 @@ export class SqliteArtefactRepository implements IArtefactRepository {
       sourceContractId: row.source_contract_id,
       sourceContractVersion: row.source_contract_version,
       sourceContractFingerprint: row.source_contract_fingerprint,
+      sourceContractRevisionNumber:
+        row.source_contract_revision_number !== null &&
+        row.source_contract_revision_number !== undefined
+          ? Number(row.source_contract_revision_number)
+          : undefined,
       inputRevisionDigest: row.input_revision_digest,
       generationMetadataJson: row.generation_metadata_json,
       contentJson: row.content_json,
@@ -188,10 +194,10 @@ export class SqliteArtefactRepository implements IArtefactRepository {
         INSERT INTO project_artefact_revisions (
           id, artefact_id, project_id, organisation_id, artefact_type,
           revision_number, status, source_contract_id, source_contract_version,
-          source_contract_fingerprint, input_revision_digest,
+          source_contract_fingerprint, source_contract_revision_number, input_revision_digest,
           generation_metadata_json, content_json, markdown_export,
           recorded_at, actor_user_id, actor_display_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         revision.id,
@@ -204,6 +210,7 @@ export class SqliteArtefactRepository implements IArtefactRepository {
         revision.sourceContractId,
         revision.sourceContractVersion,
         revision.sourceContractFingerprint,
+        revision.sourceContractRevisionNumber ?? null,
         revision.inputRevisionDigest,
         revision.generationMetadataJson,
         revision.contentJson,

@@ -410,6 +410,61 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_artefact_revisions_artefact ON project_artefact_revisions(project_id, artefact_id);
       `);
     }
+  },
+  {
+    version: 6,
+    name: '006_contract_revisions_and_governance_decisions',
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_contract_revisions (
+          id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          revision_number INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          contract_id TEXT NOT NULL,
+          version TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          input_revision_digest TEXT NOT NULL,
+          content_json TEXT NOT NULL,
+          provenance_json TEXT NOT NULL,
+          recorded_at TEXT NOT NULL,
+          actor_user_id TEXT NOT NULL,
+          actor_display_name TEXT NOT NULL,
+          PRIMARY KEY (project_id, revision_number),
+          UNIQUE (project_id, id),
+          FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS governance_decisions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          organisation_id TEXT NOT NULL,
+          target_type TEXT NOT NULL CHECK(target_type IN ('PERFORMANCE_CONTRACT', 'PERFORMANCE_STRATEGY', 'PERFORMANCE_TEST_PLAN')),
+          target_id TEXT NOT NULL,
+          target_revision_number INTEGER NOT NULL,
+          decision_type TEXT NOT NULL CHECK(decision_type IN ('APPROVE', 'WITHDRAW')),
+          rationale TEXT NOT NULL,
+          actor_user_id TEXT NOT NULL,
+          actor_display_name TEXT NOT NULL,
+          target_content_fingerprint TEXT NOT NULL,
+          target_input_digest TEXT NOT NULL,
+          decided_at TEXT NOT NULL,
+          decision_revision INTEGER NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_contract_revisions_project ON project_contract_revisions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_gov_decisions_target ON governance_decisions(project_id, target_type, target_id, target_revision_number);
+        CREATE INDEX IF NOT EXISTS idx_gov_decisions_timeline ON governance_decisions(project_id, decided_at);
+      `);
+
+      try {
+        db.exec(`ALTER TABLE project_artefact_revisions ADD COLUMN source_contract_revision_number INTEGER;`);
+      } catch {
+        // Column may already exist
+      }
+    }
   }
 ];
 

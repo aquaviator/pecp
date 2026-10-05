@@ -15,7 +15,11 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   'INTELLIGENCE_APPROVE',
   'SOURCE_WRITE',
   'INTELLIGENCE_WRITE',
-  'AUDIT_READ'
+  'AUDIT_READ',
+  'CONTRACT_REVIEW_WRITE',
+  'CONTRACT_APPROVE',
+  'ARTEFACT_GENERATE',
+  'ARTEFACT_APPROVE'
 ] as const;
 
 export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> = {
@@ -31,7 +35,11 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'INTELLIGENCE_APPROVE',
     'SOURCE_WRITE',
     'INTELLIGENCE_WRITE',
-    'AUDIT_READ'
+    'AUDIT_READ',
+    'CONTRACT_REVIEW_WRITE',
+    'CONTRACT_APPROVE',
+    'ARTEFACT_GENERATE',
+    'ARTEFACT_APPROVE'
   ],
   PERFORMANCE_LEAD: [
     'ORGANISATION_READ',
@@ -44,7 +52,11 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'INTELLIGENCE_APPROVE',
     'SOURCE_WRITE',
     'INTELLIGENCE_WRITE',
-    'AUDIT_READ'
+    'AUDIT_READ',
+    'CONTRACT_REVIEW_WRITE',
+    'CONTRACT_APPROVE',
+    'ARTEFACT_GENERATE',
+    'ARTEFACT_APPROVE'
   ],
   PERFORMANCE_ENGINEER: [
     'ORGANISATION_READ',
@@ -53,7 +65,9 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'PROJECT_UPDATE',
     'INTELLIGENCE_READ',
     'SOURCE_WRITE',
-    'INTELLIGENCE_WRITE'
+    'INTELLIGENCE_WRITE',
+    'CONTRACT_REVIEW_WRITE',
+    'ARTEFACT_GENERATE'
   ],
   REVIEWER: [
     'ORGANISATION_READ',
@@ -61,7 +75,9 @@ export const ROLE_PERMISSIONS: Record<OrganisationRole, readonly Permission[]> =
     'INTELLIGENCE_READ',
     'INTELLIGENCE_RESOLVE',
     'INTELLIGENCE_APPROVE',
-    'AUDIT_READ'
+    'AUDIT_READ',
+    'CONTRACT_APPROVE',
+    'ARTEFACT_APPROVE'
   ],
   VIEWER: [
     'ORGANISATION_READ',
