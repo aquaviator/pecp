@@ -25,6 +25,8 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
   const [error, setError] = useState<string | null>(null);
   const [contractResult, setContractResult] = useState<PerformanceContractCompilationResult | null>(null);
   const [canGenerate, setCanGenerate] = useState<boolean>(true);
+  const [canApprove, setCanApprove] = useState<boolean>(true);
+  const [isSubmittingDecision, setIsSubmittingDecision] = useState<boolean>(false);
 
   const activeProjectRef = useRef<string>(project.id);
 
@@ -54,18 +56,32 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
           if (!principal) return;
           if (principal.platformRole === 'PLATFORM_ADMIN') {
             setCanGenerate(true);
+            setCanApprove(true);
             return;
           }
           const membership = principal.memberships?.find(
             (m: { organisationId: string; role: string }) => m.organisationId === project.organisationId
           );
-          if (membership && (membership.role === 'VIEWER' || membership.role === 'REVIEWER')) {
-            setCanGenerate(false);
-          } else {
-            setCanGenerate(true);
+          if (membership) {
+            if (membership.role === 'VIEWER') {
+              setCanGenerate(false);
+              setCanApprove(false);
+            } else if (membership.role === 'PERFORMANCE_ENGINEER') {
+              setCanGenerate(true);
+              setCanApprove(false);
+            } else if (membership.role === 'REVIEWER') {
+              setCanGenerate(false);
+              setCanApprove(true);
+            } else {
+              setCanGenerate(true);
+              setCanApprove(true);
+            }
           }
         })
-        .catch(() => setCanGenerate(true));
+        .catch(() => {
+          setCanGenerate(true);
+          setCanApprove(true);
+        });
     }
   }, [authService, project.organisationId]);
 
@@ -197,6 +213,66 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
     }
   };
 
+  const handleApproveRevision = async (rationale: string) => {
+    if (!artefactService?.submitArtefactDecision || !detail) return;
+    setIsSubmittingDecision(true);
+    setError(null);
+    const targetRev = selectedRevision || detail.currentRevisionNumber || 1;
+
+    try {
+      const updated = await artefactService.submitArtefactDecision(
+        project.id,
+        'PERFORMANCE_TEST_PLAN',
+        targetRev,
+        {
+          decisionType: 'APPROVE',
+          rationale,
+          expectedRevisionNumber: targetRev,
+          expectedContentFingerprint: detail.artefact.sourceContractFingerprint,
+          expectedDecisionRevision: detail.activeDecision?.decisionRevision
+        }
+      );
+      if (activeProjectRef.current === project.id) {
+        setDetail(updated);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to approve Performance Test Plan');
+      throw err;
+    } finally {
+      setIsSubmittingDecision(false);
+    }
+  };
+
+  const handleWithdrawApproval = async (rationale: string) => {
+    if (!artefactService?.submitArtefactDecision || !detail) return;
+    setIsSubmittingDecision(true);
+    setError(null);
+    const targetRev = selectedRevision || detail.currentRevisionNumber || 1;
+
+    try {
+      const updated = await artefactService.submitArtefactDecision(
+        project.id,
+        'PERFORMANCE_TEST_PLAN',
+        targetRev,
+        {
+          decisionType: 'WITHDRAW',
+          rationale,
+          expectedRevisionNumber: targetRev,
+          expectedContentFingerprint: detail.artefact.sourceContractFingerprint,
+          expectedDecisionRevision: detail.activeDecision?.decisionRevision
+        }
+      );
+      if (activeProjectRef.current === project.id) {
+        setDetail(updated);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to withdraw approval');
+      throw err;
+    } finally {
+      setIsSubmittingDecision(false);
+    }
+  };
+
   const displayedArtefact = detail?.artefact || localFallbackArtefact;
 
   if (displayedArtefact) {
@@ -230,6 +306,13 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
           isRegenerating={isGenerating}
           canRegenerate={canGenerate}
           onDownloadMarkdown={handleDownloadMarkdown}
+          activeDecision={detail?.activeDecision}
+          approvalValidity={detail?.approvalValidity}
+          decisionHistory={detail?.decisionHistory}
+          canApprove={canApprove}
+          onApproveRevision={handleApproveRevision}
+          onWithdrawApproval={handleWithdrawApproval}
+          isSubmittingDecision={isSubmittingDecision}
         />
       </div>
     );

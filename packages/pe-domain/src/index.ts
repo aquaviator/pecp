@@ -477,6 +477,7 @@ export interface EngineeringArtefact {
   sourceContractId: string;
   sourceContractVersion: string;
   sourceContractFingerprint: string;
+  sourceContractRevisionNumber?: number;
   sourceIntelligenceReferences: ArtefactSourceReference[];
   generationTimestamp: string;
   sections: ArtefactSection[];
@@ -587,6 +588,7 @@ export interface ContractReviewRevision {
   actorDisplayName: string;
   activeDecision?: GovernanceDecisionSummary | null;
   approvalValidity?: ApprovalValidity;
+  decisionHistory?: GovernanceDecisionSummary[];
 }
 
 export interface ContractReviewRevisionSummary {

@@ -37,6 +37,8 @@ import { SqliteExtractionRepository } from './persistence/sqlite/SqliteExtractio
 import { SqliteChecklistRepository } from './persistence/sqlite/SqliteChecklistRepository.js';
 import { SqliteIdempotencyRepository } from './persistence/sqlite/SqliteIdempotencyRepository.js';
 import { SqliteArtefactRepository } from './persistence/sqlite/SqliteArtefactRepository.js';
+import { SqliteContractRevisionRepository } from './persistence/sqlite/SqliteContractRevisionRepository.js';
+import { SqliteGovernanceDecisionRepository } from './persistence/sqlite/SqliteGovernanceDecisionRepository.js';
 import { DocumentParserRegistry } from './intake/parsers/DocumentParserRegistry.js';
 
 declare module 'fastify' {
@@ -164,6 +166,8 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
   const checklistRepo = new SqliteChecklistRepository(db);
   const idempotencyRepo = new SqliteIdempotencyRepository(db);
   const artefactRepo = new SqliteArtefactRepository(db);
+  const contractRevisionRepo = new SqliteContractRevisionRepository(db);
+  const governanceDecisionRepo = new SqliteGovernanceDecisionRepository(db);
   const parserRegistry = new DocumentParserRegistry();
 
   const ttlHours = process.env.PECP_SESSION_TTL_HOURS ? Number(process.env.PECP_SESSION_TTL_HOURS) : 12;
@@ -217,7 +221,12 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       sourceRepository: sourceRepo,
       extractionRepository: extractionRepo,
       checklistRepository: checklistRepo,
-      membershipRepository: membershipRepo
+      membershipRepository: membershipRepo,
+      contractRevisionRepository: contractRevisionRepo,
+      governanceDecisionRepository: governanceDecisionRepo,
+      auditService: auditService,
+      idempotencyRepository: idempotencyRepo,
+      unitOfWork: db
     });
 
   const artefactService =
@@ -229,6 +238,8 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       intelligenceRepository: intelligenceRepo,
       membershipRepository: membershipRepo,
       idempotencyRepository: idempotencyRepo,
+      contractRevisionRepository: contractRevisionRepo,
+      governanceDecisionRepository: governanceDecisionRepo,
       auditService,
       unitOfWork: db
     });
@@ -2247,10 +2258,158 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     }
   });
 
+  // --- Performance Contract Review Revisions & Decisions API ---
+
+  app.post('/api/v1/projects/:projectId/performance-contract/revisions', async (request, reply) => {
+    const principal = request.principal;
+    if (!principal) {
+      return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    }
+    const { projectId } = request.params as { projectId: string };
+    const body = (request.body as any) || {};
+
+    const idempotencyKey =
+      (request.headers['idempotency-key'] as string) ||
+      (request.headers['x-idempotency-key'] as string) ||
+      body.idempotencyKey;
+
+    try {
+      const result = await performanceContractService.saveContractReviewRevision(
+        projectId,
+        {
+          expectedFingerprint: body.expectedFingerprint,
+          notes: body.notes,
+          idempotencyKey
+        },
+        principal
+      );
+      reply.status(201).send(result);
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code:
+            status === 409
+              ? 'CONFLICT'
+              : status === 403
+              ? 'FORBIDDEN'
+              : status === 404
+              ? 'NOT_FOUND'
+              : status === 400
+              ? 'VALIDATION_ERROR'
+              : status === 401
+              ? 'UNAUTHORIZED'
+              : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/performance-contract/revisions', async (request, reply) => {
+    const principal = request.principal;
+    if (!principal) {
+      return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    }
+    const { projectId } = request.params as { projectId: string };
+
+    try {
+      const revisions = await performanceContractService.listContractReviewRevisions(projectId, principal);
+      return { revisions };
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.get('/api/v1/projects/:projectId/performance-contract/revisions/:revisionNumber', async (request, reply) => {
+    const principal = request.principal;
+    if (!principal) {
+      return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    }
+    const { projectId, revisionNumber } = request.params as { projectId: string; revisionNumber: string };
+
+    try {
+      const revision = await performanceContractService.getContractReviewRevision(
+        projectId,
+        Number(revisionNumber),
+        principal
+      );
+      return revision;
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/performance-contract/revisions/:revisionNumber/decisions', async (request, reply) => {
+    const principal = request.principal;
+    if (!principal) {
+      return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    }
+    const { projectId, revisionNumber } = request.params as { projectId: string; revisionNumber: string };
+    const body = (request.body as any) || {};
+
+    const idempotencyKey =
+      (request.headers['idempotency-key'] as string) ||
+      (request.headers['x-idempotency-key'] as string) ||
+      body.idempotencyKey;
+
+    try {
+      const result = await performanceContractService.submitContractDecision(
+        projectId,
+        Number(revisionNumber),
+        {
+          decisionType: body.decisionType,
+          rationale: body.rationale,
+          expectedRevisionNumber: body.expectedRevisionNumber ?? Number(revisionNumber),
+          expectedContentFingerprint: body.expectedContentFingerprint,
+          expectedInputDigest: body.expectedInputDigest,
+          expectedDecisionRevision: body.expectedDecisionRevision,
+          idempotencyKey
+        },
+        principal
+      );
+      return result;
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code:
+            status === 409
+              ? 'CONFLICT'
+              : status === 403
+              ? 'FORBIDDEN'
+              : status === 404
+              ? 'NOT_FOUND'
+              : status === 400
+              ? 'VALIDATION_ERROR'
+              : status === 401
+              ? 'UNAUTHORIZED'
+              : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
   // --- Engineering Artefacts API (Strategy & Test Plan) ---
 
   app.post('/api/v1/projects/:projectId/artefacts', async (request, reply) => {
-    const principal = request.principal!;
+    const principal = request.principal;
+    if (!principal) {
+      return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    }
     const { projectId } = request.params as { projectId: string };
     const body = (request.body as any) || {};
 
@@ -2266,6 +2425,7 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
           artefactType: body.artefactType,
           expectedContractFingerprint: body.expectedContractFingerprint,
           expectedInputRevision: body.expectedInputRevision,
+          contractRevisionNumber: body.contractRevisionNumber,
           author: body.author,
           idempotencyKey
         },
@@ -2285,6 +2445,8 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
               ? 'NOT_FOUND'
               : status === 400
               ? 'VALIDATION_ERROR'
+              : status === 401
+              ? 'UNAUTHORIZED'
               : 'INTERNAL_ERROR',
           message: err.message
         }
@@ -2364,6 +2526,62 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       reply.status(status).send({
         error: {
           code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
+          message: err.message
+        }
+      });
+    }
+  });
+
+  app.post('/api/v1/projects/:projectId/artefacts/:artefactId/revisions/:revisionNumber/decisions', async (request, reply) => {
+    const principal = request.principal;
+    if (!principal) {
+      return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    }
+    const { projectId, artefactId, revisionNumber } = request.params as {
+      projectId: string;
+      artefactId: string;
+      revisionNumber: string;
+    };
+    const body = (request.body as any) || {};
+
+    const idempotencyKey =
+      (request.headers['idempotency-key'] as string) ||
+      (request.headers['x-idempotency-key'] as string) ||
+      body.idempotencyKey;
+
+    try {
+      const result = await artefactService.submitArtefactDecision(
+        projectId,
+        artefactId,
+        Number(revisionNumber),
+        {
+          decisionType: body.decisionType,
+          rationale: body.rationale,
+          expectedRevisionNumber: body.expectedRevisionNumber ?? Number(revisionNumber),
+          expectedContentFingerprint: body.expectedContentFingerprint,
+          expectedInputDigest: body.expectedInputDigest,
+          expectedDecisionRevision: body.expectedDecisionRevision,
+          idempotencyKey
+        },
+        principal
+      );
+      return result;
+    } catch (err: any) {
+      const status = err.statusCode || 500;
+      reply.status(status).send({
+        error: {
+          code:
+            status === 409
+              ? 'CONFLICT'
+              : status === 403
+              ? 'FORBIDDEN'
+              : status === 404
+              ? 'NOT_FOUND'
+              : status === 400
+              ? 'VALIDATION_ERROR'
+              : status === 401
+              ? 'UNAUTHORIZED'
+              : 'INTERNAL_ERROR',
           message: err.message
         }
       });

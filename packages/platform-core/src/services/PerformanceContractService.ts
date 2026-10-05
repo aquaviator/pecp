@@ -112,11 +112,17 @@ export class PerformanceContractService {
     projectId: string,
     principal: AuthenticatedPrincipal | undefined,
     permission: Permission
-  ): Promise<ProjectSummary> {
+  ): Promise<ProjectSummary & { organisationId: string }> {
     const project = await this.projectRepo.getById(projectId);
     if (!project) {
       const err = new Error(`Project '${projectId}' not found`);
       (err as any).statusCode = 404;
+      throw err;
+    }
+
+    if (!project.organisationId) {
+      const err = new Error(`Project '${projectId}' has no valid organisation ownership`);
+      (err as any).statusCode = 400;
       throw err;
     }
 
@@ -146,7 +152,7 @@ export class PerformanceContractService {
       }
     }
 
-    return project;
+    return project as ProjectSummary & { organisationId: string };
   }
 
   computeInputRevisionDigest(
@@ -233,26 +239,38 @@ export class PerformanceContractService {
     };
   }
 
+  private toDecisionSummary(record: GovernanceDecisionRecord): GovernanceDecisionSummary {
+    return {
+      id: record.id,
+      decisionType: record.decisionType,
+      rationale: record.rationale,
+      actorDisplayName: record.actorDisplayName,
+      actorUserId: record.actorUserId,
+      decidedAt: record.decidedAt,
+      targetContentFingerprint: record.targetContentFingerprint,
+      targetInputDigest: record.targetInputDigest,
+      decisionRevision: record.decisionRevision
+    };
+  }
+
   async saveContractReviewRevision(
     projectId: string,
     input: SaveContractReviewRevisionInput = {},
     principal?: AuthenticatedPrincipal
   ): Promise<ContractReviewRevision> {
+    if (!principal) {
+      const err = new Error('Authentication required to save contract review revisions');
+      (err as any).statusCode = 401;
+      throw err;
+    }
+
     const project = await this.assertProjectAccess(projectId, principal, 'CONTRACT_REVIEW_WRITE');
 
     if (!this.contractRevisionRepo) {
       throw new Error('Contract revision repository not configured');
     }
 
-    const actor = principal || {
-      userId: 'system-actor',
-      displayName: 'System User',
-      email: 'system@pecp.internal',
-      platformRole: 'USER',
-      memberships: [{ organisationId: project.organisationId, role: 'PERFORMANCE_LEAD' }],
-      sessionId: 'session-sys',
-      authenticatedAt: new Date().toISOString()
-    };
+    const actor = principal;
 
     // Idempotency Check
     let payloadHash = '';
@@ -297,6 +315,12 @@ export class PerformanceContractService {
     let createdRevision: ContractReviewRevision | null = null;
 
     const executeSave = async () => {
+      if (!AuthorizationPolicy.hasPermission(actor, 'CONTRACT_REVIEW_WRITE', project.organisationId)) {
+        const err = new Error('CONTRACT_REVIEW_WRITE permission required');
+        (err as any).statusCode = 403;
+        throw err;
+      }
+
       const latest = await this.contractRevisionRepo!.getLatestRevision(projectId);
       const nextRevNumber = (latest?.revisionNumber || 0) + 1;
 
@@ -358,7 +382,8 @@ export class PerformanceContractService {
           state: 'NOT_APPROVED',
           reasons: ['Contract review revision has not been approved.'],
           activeDecision: null
-        }
+        },
+        decisionHistory: []
       };
 
       if (input.idempotencyKey && this.idempotencyRepo) {
@@ -487,6 +512,16 @@ export class PerformanceContractService {
       latestDecision
     );
 
+    const allDecisions = this.governanceDecisionRepo
+      ? await this.governanceDecisionRepo.listDecisionsForTarget(
+          projectId,
+          'PERFORMANCE_CONTRACT',
+          record.contractId,
+          record.revisionNumber
+        )
+      : [];
+    const decisionHistory = allDecisions.map((d) => this.toDecisionSummary(d));
+
     return {
       id: record.id,
       projectId: record.projectId,
@@ -503,7 +538,8 @@ export class PerformanceContractService {
       actorUserId: record.actorUserId,
       actorDisplayName: record.actorDisplayName,
       activeDecision: validity.activeDecision,
-      approvalValidity: validity
+      approvalValidity: validity,
+      decisionHistory
     };
   }
 
@@ -513,6 +549,12 @@ export class PerformanceContractService {
     input: SubmitDecisionInput,
     principal?: AuthenticatedPrincipal
   ): Promise<ContractReviewRevision> {
+    if (!principal) {
+      const err = new Error('Authentication required to submit contract decisions');
+      (err as any).statusCode = 401;
+      throw err;
+    }
+
     const project = await this.assertProjectAccess(projectId, principal, 'CONTRACT_APPROVE');
 
     if (!this.contractRevisionRepo || !this.governanceDecisionRepo) {
@@ -525,15 +567,7 @@ export class PerformanceContractService {
       throw err;
     }
 
-    const actor = principal || {
-      userId: 'system-reviewer',
-      displayName: 'System Reviewer',
-      email: 'reviewer@pecp.internal',
-      platformRole: 'USER',
-      memberships: [{ organisationId: project.organisationId, role: 'REVIEWER' }],
-      sessionId: 'session-rev',
-      authenticatedAt: new Date().toISOString()
-    };
+    const actor = principal;
 
     // Idempotency check
     let payloadHash = '';
@@ -562,6 +596,12 @@ export class PerformanceContractService {
     let updatedRevision: ContractReviewRevision | null = null;
 
     const executeDecision = async () => {
+      if (!AuthorizationPolicy.hasPermission(actor, 'CONTRACT_APPROVE', project.organisationId)) {
+        const err = new Error('CONTRACT_APPROVE permission required');
+        (err as any).statusCode = 403;
+        throw err;
+      }
+
       const record = await this.contractRevisionRepo!.getByRevisionNumber(projectId, revisionNumber);
       if (!record) {
         const err = new Error(`Contract review revision ${revisionNumber} not found`);
@@ -671,6 +711,14 @@ export class PerformanceContractService {
         decisionRecord
       );
 
+      const allDecisions = await this.governanceDecisionRepo!.listDecisionsForTarget(
+        projectId,
+        'PERFORMANCE_CONTRACT',
+        record.contractId,
+        record.revisionNumber
+      );
+      const decisionHistory = allDecisions.map((d) => this.toDecisionSummary(d));
+
       updatedRevision = {
         id: record.id,
         projectId: record.projectId,
@@ -687,7 +735,8 @@ export class PerformanceContractService {
         actorUserId: record.actorUserId,
         actorDisplayName: record.actorDisplayName,
         activeDecision: validity.activeDecision,
-        approvalValidity: validity
+        approvalValidity: validity,
+        decisionHistory
       };
 
       if (input.idempotencyKey && this.idempotencyRepo) {

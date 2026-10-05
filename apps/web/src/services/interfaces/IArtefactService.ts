@@ -1,7 +1,8 @@
 import {
   ArtefactListItem,
   ArtefactDetailResponse,
-  GenerateArtefactInput
+  GenerateArtefactInput,
+  SubmitDecisionInput
 } from '@pecp/pe-domain';
 
 export interface IArtefactService {
@@ -20,4 +21,10 @@ export interface IArtefactService {
     artefactIdOrType: string,
     revisionNumber?: number
   ): Promise<string>;
+  submitArtefactDecision?(
+    projectId: string,
+    artefactIdOrType: string,
+    revisionNumber: number,
+    input: SubmitDecisionInput
+  ): Promise<ArtefactDetailResponse>;
 }

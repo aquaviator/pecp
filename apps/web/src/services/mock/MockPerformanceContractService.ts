@@ -6,7 +6,11 @@ import {
   ContractBlockingIssue,
   CompiledFieldValue,
   ContractFieldProvenance,
-  computeContractFingerprint
+  computeContractFingerprint,
+  ContractReviewRevision,
+  SaveContractReviewRevisionInput,
+  SubmitDecisionInput,
+  GovernanceDecisionSummary
 } from '@pecp/pe-domain';
 import { compileDraftPerformanceContract } from '@pecp/workload-engine';
 import { IPerformanceContractService } from '../interfaces/IPerformanceContractService';
@@ -16,6 +20,7 @@ import { IIntelligenceService } from '../interfaces/IIntelligenceService';
 export class MockPerformanceContractService implements IPerformanceContractService {
   private readonly projectService: IProjectService;
   private readonly intelligenceService: IIntelligenceService;
+  private revisionsMap = new Map<string, ContractReviewRevision[]>();
 
   constructor(projectService: IProjectService, intelligenceService: IIntelligenceService) {
     this.projectService = projectService;
@@ -108,5 +113,97 @@ export class MockPerformanceContractService implements IPerformanceContractServi
       provenance: provenanceList,
       compiledAt: contract.createdAt
     };
+  }
+
+  async saveContractReviewRevision(
+    projectId: string,
+    input?: SaveContractReviewRevisionInput
+  ): Promise<ContractReviewRevision> {
+    const comp = await this.getPerformanceContract(projectId);
+    const existing = this.revisionsMap.get(projectId) || [];
+    const nextRev = existing.length + 1;
+
+    const rev: ContractReviewRevision = {
+      id: `mock-contract-rev-${projectId}-${nextRev}`,
+      projectId,
+      organisationId: 'default-org',
+      revisionNumber: nextRev,
+      status: comp.contract.status,
+      contractId: comp.contract.id,
+      version: comp.contract.version,
+      fingerprint: comp.fingerprint,
+      inputRevisionDigest: `digest-${comp.fingerprint}`,
+      contract: comp.contract,
+      provenance: comp.provenance,
+      recordedAt: new Date().toISOString(),
+      actorUserId: 'mock-user',
+      actorDisplayName: 'Mock Engineer',
+      activeDecision: null,
+      approvalValidity: {
+        isValid: false,
+        state: 'NOT_APPROVED',
+        reasons: ['Contract review revision has not been approved.'],
+        activeDecision: null
+      }
+    };
+
+    existing.push(rev);
+    this.revisionsMap.set(projectId, existing);
+    return rev;
+  }
+
+  async listContractReviewRevisions(projectId: string): Promise<ContractReviewRevision[]> {
+    const list = this.revisionsMap.get(projectId) || [];
+    return [...list].reverse();
+  }
+
+  async getContractReviewRevision(
+    projectId: string,
+    revisionNumber: number
+  ): Promise<ContractReviewRevision> {
+    const list = this.revisionsMap.get(projectId) || [];
+    const found = list.find((r) => r.revisionNumber === revisionNumber);
+    if (!found) {
+      throw new Error(`Contract review revision ${revisionNumber} not found`);
+    }
+    return found;
+  }
+
+  async submitContractDecision(
+    projectId: string,
+    revisionNumber: number,
+    input: SubmitDecisionInput
+  ): Promise<ContractReviewRevision> {
+    const rev = await this.getContractReviewRevision(projectId, revisionNumber);
+    const decisionSummary: GovernanceDecisionSummary = {
+      id: `decision-${Date.now()}`,
+      decisionType: input.decisionType,
+      rationale: input.rationale,
+      actorDisplayName: 'Mock Reviewer',
+      actorUserId: 'mock-reviewer',
+      decidedAt: new Date().toISOString(),
+      targetContentFingerprint: rev.fingerprint,
+      targetInputDigest: rev.inputRevisionDigest,
+      decisionRevision: 1
+    };
+
+    rev.activeDecision = decisionSummary;
+    if (input.decisionType === 'APPROVE') {
+      rev.approvalValidity = {
+        isValid: true,
+        state: 'CURRENTLY_VALID',
+        reasons: [],
+        activeDecision: decisionSummary
+      };
+    } else {
+      rev.approvalValidity = {
+        isValid: false,
+        state: 'WITHDRAWN',
+        reasons: [`Approval was withdrawn: ${input.rationale}`],
+        activeDecision: decisionSummary
+      };
+    }
+
+    return rev;
   }
 }

@@ -7,7 +7,10 @@ import {
   GenerateArtefactInput,
   EngineeringArtefact,
   ArtefactStalenessResult,
-  ArtefactRevisionSummary
+  ArtefactRevisionSummary,
+  SubmitDecisionInput,
+  GovernanceDecisionSummary,
+  ApprovalValidity
 } from '@pecp/pe-domain';
 import {
   generatePerformanceStrategy,
@@ -257,5 +260,44 @@ export class MockArtefactService implements IArtefactService {
       md = `> ⚠️ **STALE ARTEFACT NOTICE**: Upstream contract changed.\n\n---\n\n` + md;
     }
     return md;
+  }
+
+  async submitArtefactDecision(
+    projectId: string,
+    artefactIdOrType: string,
+    revisionNumber: number,
+    input: SubmitDecisionInput
+  ): Promise<ArtefactDetailResponse> {
+    const detail = await this.getArtefact(projectId, artefactIdOrType, revisionNumber);
+    const decisionSummary: GovernanceDecisionSummary = {
+      id: `decision-${Date.now()}`,
+      decisionType: input.decisionType,
+      rationale: input.rationale,
+      actorDisplayName: 'Mock Reviewer',
+      actorUserId: 'mock-reviewer',
+      decidedAt: new Date().toISOString(),
+      targetContentFingerprint: detail.artefact.sourceContractFingerprint,
+      targetInputDigest: 'mock-digest',
+      decisionRevision: 1
+    };
+
+    detail.activeDecision = decisionSummary;
+    if (input.decisionType === 'APPROVE') {
+      detail.approvalValidity = {
+        isValid: true,
+        state: 'CURRENTLY_VALID',
+        reasons: [],
+        activeDecision: decisionSummary
+      };
+    } else {
+      detail.approvalValidity = {
+        isValid: false,
+        state: 'WITHDRAWN',
+        reasons: [`Approval was withdrawn: ${input.rationale}`],
+        activeDecision: decisionSummary
+      };
+    }
+
+    return detail;
   }
 }

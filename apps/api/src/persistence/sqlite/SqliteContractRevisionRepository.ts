@@ -48,7 +48,7 @@ export class SqliteContractRevisionRepository implements IContractRevisionReposi
   }
 
   async createRevision(record: ContractRevisionRecord): Promise<void> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       INSERT INTO project_contract_revisions (
         id, project_id, organisation_id, revision_number, status,
@@ -85,7 +85,7 @@ export class SqliteContractRevisionRepository implements IContractRevisionReposi
     projectId: string,
     revisionNumber: number
   ): Promise<ContractRevisionRecord | null> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       SELECT * FROM project_contract_revisions
       WHERE project_id = ? AND revision_number = ?
@@ -96,7 +96,7 @@ export class SqliteContractRevisionRepository implements IContractRevisionReposi
   }
 
   async getLatestRevision(projectId: string): Promise<ContractRevisionRecord | null> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       SELECT * FROM project_contract_revisions
       WHERE project_id = ?
@@ -109,7 +109,7 @@ export class SqliteContractRevisionRepository implements IContractRevisionReposi
   }
 
   async listRevisions(projectId: string): Promise<ContractRevisionRecord[]> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       SELECT * FROM project_contract_revisions
       WHERE project_id = ?

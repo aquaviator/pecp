@@ -2,7 +2,12 @@
 // Production-shaped Web API adapter for compiled performance contracts
 // Fetches real governed contract compilation with authoritative provenance and fingerprint.
 
-import { PerformanceContractCompilationResult } from '@pecp/pe-domain';
+import {
+  PerformanceContractCompilationResult,
+  ContractReviewRevision,
+  SaveContractReviewRevisionInput,
+  SubmitDecisionInput
+} from '@pecp/pe-domain';
 import { IPerformanceContractService } from '../interfaces/IPerformanceContractService';
 import { ApiClient, defaultApiClient } from './apiClient';
 
@@ -30,5 +35,36 @@ export class ApiPerformanceContractService implements IPerformanceContractServic
       }
       throw err;
     }
+  }
+
+  async saveContractReviewRevision(
+    projectId: string,
+    input?: SaveContractReviewRevisionInput
+  ): Promise<ContractReviewRevision> {
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/performance-contract/revisions`;
+    return this.client.post<ContractReviewRevision>(path, input || {});
+  }
+
+  async listContractReviewRevisions(projectId: string): Promise<ContractReviewRevision[]> {
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/performance-contract/revisions`;
+    const res = await this.client.get<{ revisions: ContractReviewRevision[] }>(path);
+    return res.revisions || [];
+  }
+
+  async getContractReviewRevision(
+    projectId: string,
+    revisionNumber: number
+  ): Promise<ContractReviewRevision> {
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/performance-contract/revisions/${revisionNumber}`;
+    return this.client.get<ContractReviewRevision>(path);
+  }
+
+  async submitContractDecision(
+    projectId: string,
+    revisionNumber: number,
+    input: SubmitDecisionInput
+  ): Promise<ContractReviewRevision> {
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/performance-contract/revisions/${revisionNumber}/decisions`;
+    return this.client.post<ContractReviewRevision>(path, input);
   }
 }

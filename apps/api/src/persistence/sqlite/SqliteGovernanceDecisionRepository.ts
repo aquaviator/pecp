@@ -51,7 +51,7 @@ export class SqliteGovernanceDecisionRepository implements IGovernanceDecisionRe
   }
 
   async recordDecision(record: GovernanceDecisionRecord): Promise<void> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       INSERT INTO governance_decisions (
         id, project_id, organisation_id, target_type, target_id,
@@ -90,7 +90,7 @@ export class SqliteGovernanceDecisionRepository implements IGovernanceDecisionRe
     targetId: string,
     targetRevisionNumber: number
   ): Promise<GovernanceDecisionRecord[]> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       SELECT * FROM governance_decisions
       WHERE project_id = ? AND target_type = ? AND target_id = ? AND target_revision_number = ?
@@ -113,7 +113,7 @@ export class SqliteGovernanceDecisionRepository implements IGovernanceDecisionRe
     targetId: string,
     targetRevisionNumber: number
   ): Promise<GovernanceDecisionRecord | null> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       SELECT * FROM governance_decisions
       WHERE project_id = ? AND target_type = ? AND target_id = ? AND target_revision_number = ?
@@ -132,7 +132,7 @@ export class SqliteGovernanceDecisionRepository implements IGovernanceDecisionRe
   }
 
   async listDecisionsForProject(projectId: string): Promise<GovernanceDecisionRecord[]> {
-    const rawDb = this.db.getRawDb();
+    const rawDb = this.db.getRawDatabase();
     const stmt = rawDb.prepare(`
       SELECT * FROM governance_decisions
       WHERE project_id = ?

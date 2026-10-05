@@ -4,7 +4,8 @@
 import {
   ArtefactListItem,
   ArtefactDetailResponse,
-  GenerateArtefactInput
+  GenerateArtefactInput,
+  SubmitDecisionInput
 } from '@pecp/pe-domain';
 import { IArtefactService } from '../interfaces/IArtefactService';
 import { ApiClient, defaultApiClient } from './apiClient';
@@ -74,5 +75,15 @@ export class ApiArtefactService implements IArtefactService {
     }
 
     return res.text();
+  }
+
+  async submitArtefactDecision(
+    projectId: string,
+    artefactIdOrType: string,
+    revisionNumber: number,
+    input: SubmitDecisionInput
+  ): Promise<ArtefactDetailResponse> {
+    const path = `/api/v1/projects/${encodeURIComponent(projectId)}/artefacts/${encodeURIComponent(artefactIdOrType)}/revisions/${revisionNumber}/decisions`;
+    return this.client.post<ArtefactDetailResponse>(path, input);
   }
 }
