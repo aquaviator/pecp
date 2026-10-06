@@ -161,11 +161,22 @@ export class MockArtefactService implements IArtefactService {
       sourceContractFingerprint: r.artefact.sourceContractFingerprint
     }));
 
+    const targetRevNum = targetRev ? targetRev.revisionNumber : entry.revisions.length;
+    const contentFingerprint = `art-fp-${projectedArtefact.id}-rev-${targetRevNum}`;
+
     return {
       artefact: projectedArtefact,
       staleness,
       currentRevisionNumber: entry.revisions.length,
-      revisions: revisionSummaries
+      contentFingerprint,
+      revisions: revisionSummaries,
+      activeDecision: (entry as any).activeDecision || null,
+      approvalValidity: (entry as any).approvalValidity || {
+        isValid: false,
+        state: 'NOT_APPROVED',
+        reasons: ['Artefact revision has not been approved.'],
+        activeDecision: null
+      }
     };
   }
 
@@ -245,7 +256,15 @@ export class MockArtefactService implements IArtefactService {
       artefact,
       staleness,
       currentRevisionNumber: nextRev,
-      revisions: revisionSummaries
+      contentFingerprint: `art-fp-${artefact.id}-rev-${nextRev}`,
+      revisions: revisionSummaries,
+      activeDecision: null,
+      approvalValidity: {
+        isValid: false,
+        state: 'NOT_APPROVED',
+        reasons: ['Artefact revision has not been approved.'],
+        activeDecision: null
+      }
     };
   }
 
@@ -296,6 +315,21 @@ export class MockArtefactService implements IArtefactService {
         reasons: [`Approval was withdrawn: ${input.rationale}`],
         activeDecision: decisionSummary
       };
+    }
+
+    const typeKey = this.storageKey(projectId, artefactIdOrType);
+    let entry = this.storage.get(typeKey);
+    if (!entry) {
+      for (const val of this.storage.values()) {
+        if (val.artefact.id === artefactIdOrType && val.artefact.projectId === projectId) {
+          entry = val;
+          break;
+        }
+      }
+    }
+    if (entry) {
+      (entry as any).activeDecision = decisionSummary;
+      (entry as any).approvalValidity = detail.approvalValidity;
     }
 
     return detail;

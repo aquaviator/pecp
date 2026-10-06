@@ -380,4 +380,298 @@ describe('Contract & Artefact Approval Portal DOM Interaction Tests', () => {
     expect(container.textContent).toContain('Decision Rationale');
     expect(container.textContent).toContain('Confirm Approval');
   });
+
+  it('4. Simulates approval error followed by Retry, asserting generateArtefact is NOT called', async () => {
+    const mockProjectService = new MockProjectService();
+    const mockIntelligenceService = new MockIntelligenceService();
+    const mockContractService = new MockPerformanceContractService(mockProjectService, mockIntelligenceService);
+    const mockArtefactService = new MockArtefactService(mockProjectService, mockIntelligenceService);
+
+    const mockDetail: ArtefactDetailResponse = {
+      artefact: {
+        id: `artefact-strategy-${testProject.id}`,
+        projectId: testProject.id,
+        projectName: testProject.name,
+        type: 'PERFORMANCE_STRATEGY',
+        title: 'Performance Strategy Specification',
+        version: 'v1.0-draft',
+        status: 'READY_FOR_APPROVAL',
+        engineeringIntent: 'FORECAST',
+        sourceContractId: mockContractResult.contract.id,
+        sourceContractVersion: mockContractResult.contract.version,
+        sourceContractFingerprint: mockContractResult.fingerprint,
+        sourceContractRevisionNumber: 1,
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-10-01T12:00:00.000Z',
+        sections: [
+          {
+            id: 'sec-1',
+            sectionNumber: '1.0',
+            title: '1. Executive Summary',
+            paragraphs: ['Strategy content.'],
+            status: 'COMPLETE'
+          }
+        ],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          status: 'READY_FOR_APPROVAL',
+          canApprove: true,
+          blockingReasons: [],
+          unresolvedIssuesCount: 0
+        }
+      },
+      staleness: {
+        isStale: false,
+        reasons: [],
+        currentContractVersion: 'v1.0-draft',
+        artefactContractVersion: 'v1.0-draft',
+        currentContractFingerprint: mockContractResult.fingerprint,
+        artefactContractFingerprint: mockContractResult.fingerprint
+      },
+      currentRevisionNumber: 1,
+      contentFingerprint: 'art-content-fp-1',
+      revisions: [
+        {
+          id: 'art-rev-1',
+          revisionNumber: 1,
+          status: 'READY_FOR_APPROVAL',
+          recordedAt: '2026-10-01T12:00:00.000Z',
+          actorDisplayName: 'Edward Engineer',
+          sourceContractFingerprint: mockContractResult.fingerprint,
+          sourceContractRevisionNumber: 1
+        }
+      ],
+      activeDecision: null,
+      approvalValidity: {
+        isValid: false,
+        state: 'NOT_APPROVED',
+        reasons: ['Artefact revision has not been approved.'],
+        activeDecision: null
+      },
+      decisionHistory: []
+    };
+
+    vi.spyOn(mockArtefactService, 'getArtefact').mockResolvedValue(mockDetail);
+    vi.spyOn(mockContractService, 'getPerformanceContract').mockResolvedValue(mockContractResult);
+    const generateSpy = vi.spyOn(mockArtefactService, 'generateArtefact');
+    const decisionSpy = vi
+      .spyOn(mockArtefactService, 'submitArtefactDecision')
+      .mockRejectedValueOnce(new Error('Precondition Failed: 409 Conflict'));
+
+    await act(async () => {
+      root.render(
+        <ServiceProvider
+          overrideServices={{
+            projectService: mockProjectService,
+            intelligenceService: mockIntelligenceService,
+            performanceContractService: mockContractService,
+            artefactService: mockArtefactService
+          }}
+        >
+          <StrategyPage project={testProject} />
+        </ServiceProvider>
+      );
+    });
+
+    // Open approval modal
+    const approveBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Approve Revision')
+    );
+    await act(async () => {
+      approveBtn?.click();
+    });
+
+    // Type rationale
+    const textarea = container.querySelector('textarea');
+    if (textarea) {
+      await act(async () => {
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value'
+        )?.set;
+        if (nativeSetter) {
+          nativeSetter.call(textarea, 'Approval rationale text');
+        } else {
+          textarea.value = 'Approval rationale text';
+        }
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+
+    // Confirm approval -> triggers rejected promise
+    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Confirm Approval')
+    );
+    await act(async () => {
+      confirmBtn?.click();
+    });
+
+    expect(decisionSpy).toHaveBeenCalledTimes(1);
+
+    // Verify error banner is displayed
+    expect(container.textContent).toContain('Precondition Failed: 409 Conflict');
+
+    // Click Retry / Refresh button in error banner
+    const retryOrRefreshBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes('Refresh Review') || b.textContent?.includes('Retry')
+    );
+    expect(retryOrRefreshBtn).toBeDefined();
+
+    await act(async () => {
+      retryOrRefreshBtn?.click();
+    });
+
+    // Crucial requirement: generateArtefact must NOT have been called!
+    expect(generateSpy).not.toHaveBeenCalled();
+  });
+
+  it('5. Protects against out-of-order async resolution and clears abandoned modal state on revision change', async () => {
+    const mockProjectService = new MockProjectService();
+    const mockIntelligenceService = new MockIntelligenceService();
+    const mockContractService = new MockPerformanceContractService(mockProjectService, mockIntelligenceService);
+    const mockArtefactService = new MockArtefactService(mockProjectService, mockIntelligenceService);
+
+    const makeDetail = (rev: number): ArtefactDetailResponse => ({
+      artefact: {
+        id: `artefact-strategy-${testProject.id}`,
+        projectId: testProject.id,
+        projectName: testProject.name,
+        type: 'PERFORMANCE_STRATEGY',
+        title: `Performance Strategy Specification Rev ${rev}`,
+        version: `v${rev}.0-draft`,
+        status: 'READY_FOR_APPROVAL',
+        engineeringIntent: 'FORECAST',
+        sourceContractId: mockContractResult.contract.id,
+        sourceContractVersion: mockContractResult.contract.version,
+        sourceContractFingerprint: mockContractResult.fingerprint,
+        sourceContractRevisionNumber: rev,
+        sourceIntelligenceReferences: [],
+        generationTimestamp: '2026-10-01T12:00:00.000Z',
+        sections: [
+          {
+            id: 'sec-1',
+            sectionNumber: '1.0',
+            title: '1. Executive Summary',
+            paragraphs: [`Strategy content for rev ${rev}`],
+            status: 'COMPLETE'
+          }
+        ],
+        unresolvedIssues: [],
+        approvalReadiness: {
+          status: 'READY_FOR_APPROVAL',
+          canApprove: true,
+          blockingReasons: [],
+          unresolvedIssuesCount: 0
+        }
+      },
+      staleness: {
+        isStale: false,
+        reasons: [],
+        currentContractVersion: 'v1.0-draft',
+        artefactContractVersion: 'v1.0-draft',
+        currentContractFingerprint: mockContractResult.fingerprint,
+        artefactContractFingerprint: mockContractResult.fingerprint
+      },
+      currentRevisionNumber: 2,
+      contentFingerprint: `art-content-fp-${rev}`,
+      revisions: [
+        {
+          id: 'art-rev-1',
+          revisionNumber: 1,
+          status: 'READY_FOR_APPROVAL',
+          recordedAt: '2026-10-01T12:00:00.000Z',
+          actorDisplayName: 'Edward Engineer',
+          sourceContractFingerprint: mockContractResult.fingerprint,
+          sourceContractRevisionNumber: 1
+        },
+        {
+          id: 'art-rev-2',
+          revisionNumber: 2,
+          status: 'READY_FOR_APPROVAL',
+          recordedAt: '2026-10-02T12:00:00.000Z',
+          actorDisplayName: 'Edward Engineer',
+          sourceContractFingerprint: mockContractResult.fingerprint,
+          sourceContractRevisionNumber: 2
+        }
+      ],
+      activeDecision: null,
+      approvalValidity: {
+        isValid: false,
+        state: 'NOT_APPROVED',
+        reasons: ['Artefact revision has not been approved.'],
+        activeDecision: null
+      },
+      decisionHistory: []
+    });
+
+    vi.spyOn(mockContractService, 'getPerformanceContract').mockResolvedValue(mockContractResult);
+
+    // Controlled out-of-order resolution
+    let resolveRev1: (val: any) => void;
+    let resolveRev2: (val: any) => void;
+    const rev1Promise = new Promise((res) => {
+      resolveRev1 = res;
+    });
+    const rev2Promise = new Promise((res) => {
+      resolveRev2 = res;
+    });
+
+    vi.spyOn(mockArtefactService, 'getArtefact').mockImplementation((_proj, _type, rev) => {
+      if (rev === 1) return rev1Promise as any;
+      if (rev === 2) return rev2Promise as any;
+      return Promise.resolve(makeDetail(2));
+    });
+
+    await act(async () => {
+      root.render(
+        <ServiceProvider
+          overrideServices={{
+            projectService: mockProjectService,
+            intelligenceService: mockIntelligenceService,
+            performanceContractService: mockContractService,
+            artefactService: mockArtefactService
+          }}
+        >
+          <StrategyPage project={testProject} />
+        </ServiceProvider>
+      );
+    });
+
+    // Strategy page initially renders rev 2
+    expect(container.textContent).toContain('Performance Strategy Specification Rev 2');
+
+    // Switch revision to 1 (request 1 fires)
+    const select = container.querySelector('select');
+    await act(async () => {
+      if (select) {
+        select.value = '1';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    // Immediately switch back to 2 (request 2 fires)
+    await act(async () => {
+      if (select) {
+        select.value = '2';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    // Now resolve request 2 first
+    await act(async () => {
+      resolveRev2!(makeDetail(2));
+    });
+
+    expect(container.textContent).toContain('Performance Strategy Specification Rev 2');
+
+    // Now late resolve request 1 (stale/out-of-order)
+    await act(async () => {
+      resolveRev1!(makeDetail(1));
+    });
+
+    // Stale resolution must NOT overwrite Rev 2
+    expect(container.textContent).toContain('Performance Strategy Specification Rev 2');
+    expect(container.textContent).not.toContain('Strategy content for rev 1');
+  });
 });

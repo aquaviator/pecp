@@ -40,7 +40,7 @@ import { IIdempotencyRepository } from '../repositories/IIdempotencyRepository.j
 import { IUnitOfWork } from '../transactions/IUnitOfWork.js';
 import { PerformanceContractService } from './PerformanceContractService.js';
 import { AuditService } from './AuditService.js';
-import { AuthorizationPolicy } from './AuthorizationPolicy.js';
+import { AuthorizationPolicy, ROLE_PERMISSIONS } from './AuthorizationPolicy.js';
 
 export interface ArtefactServiceOptions {
   artefactRepository: IArtefactRepository;
@@ -426,10 +426,14 @@ export class ArtefactService {
       activeDecision: null
     };
 
+    const contentFingerprint = createHash('sha256').update(savedRevision.contentJson).digest('hex');
+
     const response: ArtefactDetailResponse = {
       artefact: generatedArtefact,
       staleness,
       currentRevisionNumber: nextRevisionNumber,
+      contentFingerprint,
+      inputRevisionDigest: savedRevision.inputRevisionDigest,
       revisions: revisionSummaries,
       activeDecision: null,
       approvalValidity,
@@ -794,13 +798,18 @@ export class ArtefactService {
       };
     }
 
+    const isTargetSuperseded = revRecord.revisionNumber < artefactRecord.currentRevisionNumber;
+    const targetStalenessReasons = isTargetSuperseded
+      ? [...staleness.reasons, `Revision ${revRecord.revisionNumber} has been superseded by revision ${artefactRecord.currentRevisionNumber}.`]
+      : staleness.reasons;
+
     const targetValidity = await this.evaluateArtefactApprovalValidity(
       projectId,
       artefactRecord.artefactType as GovernanceTargetType,
       artefactRecord.id,
       revRecord,
-      staleness.isStale,
-      staleness.reasons,
+      staleness.isStale || isTargetSuperseded,
+      targetStalenessReasons,
       principal
     );
 
@@ -846,10 +855,14 @@ export class ArtefactService {
       }
     }
 
+    const contentFingerprint = createHash('sha256').update(revRecord.contentJson).digest('hex');
+
     return {
       artefact: projectedArtefact,
       staleness,
       currentRevisionNumber: artefactRecord.currentRevisionNumber,
+      contentFingerprint,
+      inputRevisionDigest: revRecord.inputRevisionDigest,
       revisions: revisionSummaries,
       activeDecision: targetValidity.activeDecision,
       approvalValidity: targetValidity.approvalValidity,
@@ -879,202 +892,293 @@ export class ArtefactService {
       throw new Error('Repositories not fully configured for governance decisions');
     }
 
-    if (!input.rationale || input.rationale.trim().length === 0) {
+    if (this.membershipRepo && principal.platformRole !== 'PLATFORM_ADMIN') {
+      const liveMem = await this.membershipRepo.get(orgId, principal.userId);
+      if (!liveMem || liveMem.status !== 'ACTIVE') {
+        const err = new Error('User membership has been revoked or is inactive');
+        (err as any).statusCode = 403;
+        throw err;
+      }
+      if (!ROLE_PERMISSIONS[liveMem.role]?.includes('ARTEFACT_APPROVE')) {
+        await this.auditService.record({
+          actor: principal,
+          projectId,
+          organisationId: orgId,
+          action: 'AUTHORIZATION_DENIED',
+          targetType: 'ENGINEERING_ARTEFACT',
+          targetId: artefactIdOrType,
+          outcome: 'DENIED',
+          reason: 'ARTEFACT_APPROVE permission required',
+          metadata: { attemptedPermission: 'ARTEFACT_APPROVE' }
+        });
+        const err = new Error('ARTEFACT_APPROVE permission required');
+        (err as any).statusCode = 403;
+        throw err;
+      }
+    } else {
+      const hasPerm = AuthorizationPolicy.hasPermission(
+        principal,
+        'ARTEFACT_APPROVE',
+        orgId
+      );
+      if (!hasPerm) {
+        await this.auditService.record({
+          actor: principal,
+          projectId,
+          organisationId: orgId,
+          action: 'AUTHORIZATION_DENIED',
+          targetType: 'ENGINEERING_ARTEFACT',
+          targetId: artefactIdOrType,
+          outcome: 'DENIED',
+          reason: 'ARTEFACT_APPROVE permission required',
+          metadata: { attemptedPermission: 'ARTEFACT_APPROVE' }
+        });
+        const err = new Error('ARTEFACT_APPROVE permission required');
+        (err as any).statusCode = 403;
+        throw err;
+      }
+    }
+
+    if (!input.decisionType || (input.decisionType !== 'APPROVE' && input.decisionType !== 'WITHDRAW')) {
+      const err = new Error("Invalid or missing decisionType. Must be 'APPROVE' or 'WITHDRAW'");
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    if (!input.rationale || typeof input.rationale !== 'string' || input.rationale.trim().length === 0) {
       const err = new Error('A non-blank rationale is required for approval decisions');
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    if (
+      input.expectedRevisionNumber === undefined ||
+      input.expectedRevisionNumber === null ||
+      typeof input.expectedRevisionNumber !== 'number' ||
+      isNaN(input.expectedRevisionNumber) ||
+      input.expectedRevisionNumber < 1
+    ) {
+      const err = new Error('Missing or malformed precondition: expectedRevisionNumber must be a positive integer');
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    if (
+      input.expectedDecisionRevision === undefined ||
+      input.expectedDecisionRevision === null ||
+      typeof input.expectedDecisionRevision !== 'number' ||
+      isNaN(input.expectedDecisionRevision) ||
+      input.expectedDecisionRevision < 0
+    ) {
+      const err = new Error('Missing or malformed precondition: expectedDecisionRevision must be an integer >= 0');
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
+    if (
+      !input.expectedContentFingerprint ||
+      typeof input.expectedContentFingerprint !== 'string' ||
+      input.expectedContentFingerprint.trim().length === 0
+    ) {
+      const err = new Error('Missing or malformed precondition: expectedContentFingerprint is required');
       (err as any).statusCode = 400;
       throw err;
     }
 
     const actor = principal;
 
-    const hasPerm = AuthorizationPolicy.hasPermission(
-      principal,
-      'ARTEFACT_APPROVE',
-      orgId
-    );
-    if (!hasPerm) {
-      await this.auditService.record({
-        actor: principal,
-        projectId,
-        organisationId: orgId,
-        action: 'AUTHORIZATION_DENIED',
-        targetType: 'ENGINEERING_ARTEFACT',
-        targetId: artefactIdOrType,
-        outcome: 'DENIED',
-        reason: 'ARTEFACT_APPROVE permission required',
-        metadata: { attemptedPermission: 'ARTEFACT_APPROVE' }
-      });
-      const err = new Error('ARTEFACT_APPROVE permission required');
-      (err as any).statusCode = 403;
-      throw err;
-    }
+    const executeDecision = async (): Promise<ArtefactDetailResponse> => {
+      // Idempotency check inside transaction
+      let payloadHash = '';
+      if (input.idempotencyKey && this.idempotencyRepo) {
+        payloadHash = createHash('sha256')
+          .update(
+            JSON.stringify({
+              organisationId: orgId,
+              projectId,
+              actorUserId: actor.userId,
+              operation: 'ARTEFACT_DECISION',
+              artefactIdOrType,
+              revisionNumber,
+              decisionType: input.decisionType,
+              rationale: input.rationale.trim(),
+              expectedRevisionNumber: input.expectedRevisionNumber,
+              expectedContentFingerprint: input.expectedContentFingerprint,
+              expectedDecisionRevision: input.expectedDecisionRevision,
+              expectedInputDigest: input.expectedInputDigest ?? null
+            })
+          )
+          .digest('hex');
 
-    // Idempotency check
-    let payloadHash = '';
-    if (input.idempotencyKey && this.idempotencyRepo) {
-      payloadHash = createHash('sha256')
-        .update(JSON.stringify({ projectId, artefactIdOrType, revisionNumber, ...input }))
-        .digest('hex');
+        const existing = await this.idempotencyRepo.get(input.idempotencyKey);
+        if (existing) {
+          if (
+            existing.projectId !== projectId ||
+            existing.actorUserId !== actor.userId ||
+            existing.operation !== 'ARTEFACT_DECISION'
+          ) {
+            const err = new Error('Idempotency key belongs to another context or actor');
+            (err as any).statusCode = 403;
+            throw err;
+          }
+          if (existing.payloadSha256 !== payloadHash) {
+            const err = new Error('Idempotency key mismatch: request payload differs from original execution');
+            (err as any).statusCode = 409;
+            throw err;
+          }
+          const liveDetail = await this.getArtefact(projectId, artefactIdOrType, revisionNumber, principal);
+          return liveDetail;
+        }
+      }
 
-      const existing = await this.idempotencyRepo.get(input.idempotencyKey);
-      if (existing) {
-        if (existing.projectId !== projectId || existing.actorUserId !== actor.userId) {
-          const err = new Error('Idempotency key belongs to another context or actor');
-          (err as any).statusCode = 403;
+      // Resolve artefact
+      let artefactRecord = await this.artefactRepo.getById(projectId, artefactIdOrType);
+      if (!artefactRecord) {
+        artefactRecord = await this.artefactRepo.getByType(projectId, artefactIdOrType);
+      }
+      if (!artefactRecord) {
+        const err = new Error(`Artefact '${artefactIdOrType}' not found for project '${projectId}'`);
+        (err as any).statusCode = 404;
+        throw err;
+      }
+
+      const revRecord = await this.artefactRepo.getRevision(projectId, artefactRecord.id, revisionNumber);
+      if (!revRecord) {
+        const err = new Error(`Revision ${revisionNumber} not found for artefact '${artefactRecord.id}'`);
+        (err as any).statusCode = 404;
+        throw err;
+      }
+
+      if (input.expectedRevisionNumber !== revisionNumber) {
+        const err = new Error(
+          `Precondition Failed: expected revision ${input.expectedRevisionNumber} does not match target ${revisionNumber}`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      const contentHash = createHash('sha256').update(revRecord.contentJson).digest('hex');
+      if (input.expectedContentFingerprint !== contentHash) {
+        const err = new Error(
+          `Precondition Failed: expected content fingerprint ${input.expectedContentFingerprint} does not match target content`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      if (input.expectedInputDigest && revRecord.inputRevisionDigest && input.expectedInputDigest !== revRecord.inputRevisionDigest) {
+        const err = new Error(
+          `Precondition Failed: expected input digest ${input.expectedInputDigest} does not match target input digest ${revRecord.inputRevisionDigest}`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      if (input.decisionType === 'APPROVE' && revisionNumber < artefactRecord.currentRevisionNumber) {
+        const err = new Error(
+          `Cannot approve superseded artefact revision ${revisionNumber}. Current revision is ${artefactRecord.currentRevisionNumber}.`
+        );
+        (err as any).statusCode = 409;
+        throw err;
+      }
+
+      const parsedArtefact: EngineeringArtefact = JSON.parse(revRecord.contentJson);
+
+      // Live contract compilation and staleness check
+      const liveCompilation = await this.contractService.compileProjectPerformanceContract(projectId, principal);
+      const staleness = evaluateArtefactStaleness(parsedArtefact, liveCompilation.contract);
+      const liveIntelligence = await this.intelligenceRepo.listByProject(projectId);
+      const liveInputDigest = this.computeInputRevisionDigest(liveCompilation.fingerprint, liveIntelligence);
+
+      if (revRecord.inputRevisionDigest && revRecord.inputRevisionDigest !== liveInputDigest) {
+        staleness.isStale = true;
+        staleness.reasons.push(
+          'Supplementary project intelligence (architecture, environment, or narrative context) changed since artefact generation.'
+        );
+      }
+
+      let parentDecisionId: string | null = null;
+
+      if (input.decisionType === 'APPROVE') {
+        if (parsedArtefact.status === 'BLOCKED' || (parsedArtefact.approvalReadiness && !parsedArtefact.approvalReadiness.canApprove)) {
+          const err = new Error(
+            'Cannot approve artefact: Document is BLOCKED by unresolved governance issues or missing prerequisites'
+          );
+          (err as any).statusCode = 400;
           throw err;
         }
-        if (existing.payloadSha256 !== payloadHash) {
-          const err = new Error('Idempotency key mismatch: request payload differs from original execution');
+
+        if (staleness.isStale) {
+          const err = new Error(
+            `Precondition Failed: Document is STALE due to upstream changes (${staleness.reasons.join('; ')}). Regenerate document before approving.`
+          );
           (err as any).statusCode = 409;
           throw err;
         }
-        return JSON.parse(existing.responseJson);
-      }
-    }
 
-    // Resolve artefact
-    let artefactRecord = await this.artefactRepo.getById(projectId, artefactIdOrType);
-    if (!artefactRecord) {
-      artefactRecord = await this.artefactRepo.getByType(projectId, artefactIdOrType);
-    }
-    if (!artefactRecord) {
-      const err = new Error(`Artefact '${artefactIdOrType}' not found for project '${projectId}'`);
-      (err as any).statusCode = 404;
-      throw err;
-    }
+        if (revRecord.sourceContractRevisionNumber === undefined || revRecord.sourceContractRevisionNumber === null) {
+          const err = new Error(
+            'Precondition Failed: Document was generated from an unpersisted contract draft. Regenerate from an approved contract review revision.'
+          );
+          (err as any).statusCode = 409;
+          throw err;
+        }
 
-    const revRecord = await this.artefactRepo.getRevision(projectId, artefactRecord.id, revisionNumber);
-    if (!revRecord) {
-      const err = new Error(`Revision ${revisionNumber} not found for artefact '${artefactRecord.id}'`);
-      (err as any).statusCode = 404;
-      throw err;
-    }
-
-    if (input.expectedRevisionNumber !== undefined && input.expectedRevisionNumber !== revisionNumber) {
-      const err = new Error(
-        `Precondition Failed: expected revision ${input.expectedRevisionNumber} does not match target ${revisionNumber}`
-      );
-      (err as any).statusCode = 409;
-      throw err;
-    }
-
-    const contentHash = createHash('sha256').update(revRecord.contentJson).digest('hex');
-    if (
-      input.expectedContentFingerprint &&
-      input.expectedContentFingerprint !== contentHash &&
-      input.expectedContentFingerprint !== revRecord.sourceContractFingerprint
-    ) {
-      const err = new Error(
-        `Precondition Failed: expected content fingerprint ${input.expectedContentFingerprint} does not match target content`
-      );
-      (err as any).statusCode = 409;
-      throw err;
-    }
-
-    const parsedArtefact: EngineeringArtefact = JSON.parse(revRecord.contentJson);
-
-    // Live contract compilation and staleness check
-    const liveCompilation = await this.contractService.compileProjectPerformanceContract(projectId, principal);
-    const staleness = evaluateArtefactStaleness(parsedArtefact, liveCompilation.contract);
-    const liveIntelligence = await this.intelligenceRepo.listByProject(projectId);
-    const liveInputDigest = this.computeInputRevisionDigest(liveCompilation.fingerprint, liveIntelligence);
-
-    if (revRecord.inputRevisionDigest && revRecord.inputRevisionDigest !== liveInputDigest) {
-      staleness.isStale = true;
-      staleness.reasons.push(
-        'Supplementary project intelligence (architecture, environment, or narrative context) changed since artefact generation.'
-      );
-    }
-
-    let parentDecisionId: string | null = null;
-
-    if (input.decisionType === 'APPROVE') {
-      if (parsedArtefact.status === 'BLOCKED' || (parsedArtefact.approvalReadiness && !parsedArtefact.approvalReadiness.canApprove)) {
-        const err = new Error(
-          'Cannot approve artefact: Document is BLOCKED by unresolved governance issues or missing prerequisites'
+        const contractRev = await this.contractService.getContractReviewRevision(
+          projectId,
+          revRecord.sourceContractRevisionNumber,
+          principal
         );
-        (err as any).statusCode = 400;
-        throw err;
+
+        if (!contractRev.approvalValidity?.isValid || contractRev.approvalValidity.state !== 'CURRENTLY_VALID') {
+          const err = new Error(
+            `Precondition Failed: Governing Performance Contract revision ${revRecord.sourceContractRevisionNumber} is not approved or has drifted/been withdrawn.`
+          );
+          (err as any).statusCode = 409;
+          throw err;
+        }
+
+        parentDecisionId = contractRev.activeDecision?.id ?? null;
       }
 
-      if (staleness.isStale) {
-        const err = new Error(
-          `Precondition Failed: Document is STALE due to upstream changes (${staleness.reasons.join('; ')}). Regenerate document before approving.`
-        );
-        (err as any).statusCode = 409;
-        throw err;
-      }
-
-      if (revRecord.sourceContractRevisionNumber === undefined || revRecord.sourceContractRevisionNumber === null) {
-        const err = new Error(
-          'Precondition Failed: Document was generated from an unpersisted contract draft. Regenerate from an approved contract review revision.'
-        );
-        (err as any).statusCode = 409;
-        throw err;
-      }
-
-      const contractRev = await this.contractService.getContractReviewRevision(
+      const existingDecisions = await this.governanceDecisionRepo!.listDecisionsForTarget(
         projectId,
-        revRecord.sourceContractRevisionNumber,
-        principal
+        artefactRecord.artefactType as GovernanceTargetType,
+        artefactRecord.id,
+        revisionNumber
       );
+      const nextDecisionRev = existingDecisions.length + 1;
 
-      if (!contractRev.approvalValidity?.isValid || contractRev.approvalValidity.state !== 'CURRENTLY_VALID') {
+      if (input.expectedDecisionRevision !== nextDecisionRev - 1) {
         const err = new Error(
-          `Precondition Failed: Governing Performance Contract revision ${revRecord.sourceContractRevisionNumber} is not approved or has drifted/been withdrawn.`
+          `Optimistic concurrency failure: expectedDecisionRevision is ${input.expectedDecisionRevision}, current is ${nextDecisionRev - 1}`
         );
         (err as any).statusCode = 409;
         throw err;
       }
 
-      parentDecisionId = contractRev.activeDecision?.id ?? null;
-    }
+      const targetInputDigest = JSON.stringify({
+        inputRevisionDigest: revRecord.inputRevisionDigest,
+        sourceContractRevisionNumber: revRecord.sourceContractRevisionNumber ?? null,
+        parentContractDecisionId: parentDecisionId
+      });
 
-    const existingDecisions = await this.governanceDecisionRepo.listDecisionsForTarget(
-      projectId,
-      artefactRecord.artefactType as GovernanceTargetType,
-      artefactRecord.id,
-      revisionNumber
-    );
-    const nextDecisionRev = existingDecisions.length + 1;
-
-    if (input.expectedDecisionRevision !== undefined && input.expectedDecisionRevision !== nextDecisionRev - 1) {
-      const err = new Error(
-        `Optimistic concurrency failure: expectedDecisionRevision is ${input.expectedDecisionRevision}, current is ${nextDecisionRev - 1}`
-      );
-      (err as any).statusCode = 409;
-      throw err;
-    }
-
-    const targetInputDigest = JSON.stringify({
-      inputRevisionDigest: revRecord.inputRevisionDigest,
-      sourceContractRevisionNumber: revRecord.sourceContractRevisionNumber ?? null,
-      parentContractDecisionId: parentDecisionId
-    });
-
-    const decisionRecord: GovernanceDecisionRecord = {
-      id: randomUUID(),
-      projectId,
-      organisationId: orgId,
-      targetType: artefactRecord.artefactType as GovernanceTargetType,
-      targetId: artefactRecord.id,
-      targetRevisionNumber: revisionNumber,
-      decisionType: input.decisionType,
-      rationale: input.rationale.trim(),
-      actorUserId: actor.userId,
-      actorDisplayName: actor.displayName,
-      targetContentFingerprint: contentHash,
-      targetInputDigest,
-      decidedAt: new Date().toISOString(),
-      decisionRevision: nextDecisionRev
-    };
-
-    const executeDecision = async () => {
-      if (!AuthorizationPolicy.hasPermission(actor, 'ARTEFACT_APPROVE', orgId)) {
-        const err = new Error('ARTEFACT_APPROVE permission required');
-        (err as any).statusCode = 403;
-        throw err;
-      }
+      const decisionRecord: GovernanceDecisionRecord = {
+        id: randomUUID(),
+        projectId,
+        organisationId: orgId,
+        targetType: artefactRecord.artefactType as GovernanceTargetType,
+        targetId: artefactRecord.id,
+        targetRevisionNumber: revisionNumber,
+        decisionType: input.decisionType,
+        rationale: input.rationale.trim(),
+        actorUserId: actor.userId,
+        actorDisplayName: actor.displayName,
+        targetContentFingerprint: contentHash,
+        targetInputDigest,
+        decidedAt: new Date().toISOString(),
+        decisionRevision: nextDecisionRev
+      };
 
       await this.governanceDecisionRepo!.recordDecision(decisionRecord);
 
@@ -1094,30 +1198,29 @@ export class ArtefactService {
           decisionType: input.decisionType
         }
       });
+
+      const updatedDetail = await this.getArtefact(projectId, artefactRecord.id, revisionNumber, principal);
+
+      if (input.idempotencyKey && this.idempotencyRepo) {
+        await this.idempotencyRepo.save({
+          key: input.idempotencyKey,
+          projectId,
+          actorUserId: actor.userId,
+          operation: 'ARTEFACT_DECISION',
+          payloadSha256: payloadHash,
+          responseStatus: 200,
+          responseJson: JSON.stringify(updatedDetail),
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      return updatedDetail;
     };
 
     if (this.unitOfWork) {
-      await this.unitOfWork.execute(executeDecision);
-    } else {
-      await executeDecision();
+      return this.unitOfWork.execute(executeDecision);
     }
-
-    const updatedDetail = await this.getArtefact(projectId, artefactRecord.id, revisionNumber, principal);
-
-    if (input.idempotencyKey && this.idempotencyRepo) {
-      await this.idempotencyRepo.save({
-        key: input.idempotencyKey,
-        projectId,
-        actorUserId: actor.userId,
-        operation: 'ARTEFACT_DECISION',
-        payloadSha256: payloadHash,
-        responseStatus: 200,
-        responseJson: JSON.stringify(updatedDetail),
-        createdAt: new Date().toISOString()
-      });
-    }
-
-    return updatedDetail;
+    return executeDecision();
   }
 
   /**

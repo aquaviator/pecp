@@ -2277,8 +2277,8 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       const result = await performanceContractService.saveContractReviewRevision(
         projectId,
         {
-          expectedFingerprint: body.expectedFingerprint,
-          notes: body.notes,
+          expectedFingerprint: body.expectedFingerprint ?? body.expectedContractFingerprint,
+          notes: body.notes ?? body.commitMessage,
           idempotencyKey
         },
         principal
@@ -2358,6 +2358,11 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       return reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
     }
     const { projectId, revisionNumber } = request.params as { projectId: string; revisionNumber: string };
+    const revNum = Number(revisionNumber);
+    if (isNaN(revNum) || revNum < 1) {
+      return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: 'revisionNumber must be a positive integer' } });
+    }
+
     const body = (request.body as any) || {};
 
     const idempotencyKey =
@@ -2368,11 +2373,11 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
     try {
       const result = await performanceContractService.submitContractDecision(
         projectId,
-        Number(revisionNumber),
+        revNum,
         {
           decisionType: body.decisionType,
           rationale: body.rationale,
-          expectedRevisionNumber: body.expectedRevisionNumber ?? Number(revisionNumber),
+          expectedRevisionNumber: body.expectedRevisionNumber,
           expectedContentFingerprint: body.expectedContentFingerprint,
           expectedInputDigest: body.expectedInputDigest,
           expectedDecisionRevision: body.expectedDecisionRevision,
@@ -2542,6 +2547,11 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       artefactId: string;
       revisionNumber: string;
     };
+    const revNum = Number(revisionNumber);
+    if (isNaN(revNum) || revNum < 1) {
+      return reply.status(400).send({ error: { code: 'VALIDATION_ERROR', message: 'revisionNumber must be a positive integer' } });
+    }
+
     const body = (request.body as any) || {};
 
     const idempotencyKey =
@@ -2553,11 +2563,11 @@ export function buildApiApp(options: ApiAppOptions = {}): FastifyInstance {
       const result = await artefactService.submitArtefactDecision(
         projectId,
         artefactId,
-        Number(revisionNumber),
+        revNum,
         {
           decisionType: body.decisionType,
           rationale: body.rationale,
-          expectedRevisionNumber: body.expectedRevisionNumber ?? Number(revisionNumber),
+          expectedRevisionNumber: body.expectedRevisionNumber,
           expectedContentFingerprint: body.expectedContentFingerprint,
           expectedInputDigest: body.expectedInputDigest,
           expectedDecisionRevision: body.expectedDecisionRevision,

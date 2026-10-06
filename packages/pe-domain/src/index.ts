@@ -478,6 +478,8 @@ export interface EngineeringArtefact {
   sourceContractVersion: string;
   sourceContractFingerprint: string;
   sourceContractRevisionNumber?: number;
+  contentFingerprint?: string;
+  inputRevisionDigest?: string;
   sourceIntelligenceReferences: ArtefactSourceReference[];
   generationTimestamp: string;
   sections: ArtefactSection[];
@@ -613,6 +615,8 @@ export interface ArtefactRevisionSummary {
   actorDisplayName: string;
   sourceContractFingerprint: string;
   sourceContractRevisionNumber?: number;
+  contentFingerprint?: string;
+  inputRevisionDigest?: string;
   activeDecision?: GovernanceDecisionSummary | null;
   approvalValidity?: ApprovalValidity;
 }
@@ -621,6 +625,8 @@ export interface ArtefactDetailResponse {
   artefact: EngineeringArtefact;
   staleness: ArtefactStalenessResult;
   currentRevisionNumber: number;
+  contentFingerprint?: string;
+  inputRevisionDigest?: string;
   revisions: ArtefactRevisionSummary[];
   activeDecision?: GovernanceDecisionSummary | null;
   approvalValidity?: ApprovalValidity;

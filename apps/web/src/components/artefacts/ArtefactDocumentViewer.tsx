@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Lock,
@@ -96,6 +96,13 @@ export const ArtefactDocumentViewer: React.FC<ArtefactDocumentViewerProps> = ({
     artefact.status === 'BLOCKED' || !artefact.approvalReadiness.canApprove;
 
   const effectiveRevNumber = selectedRevisionNumber || currentRevisionNumber || 1;
+
+  // Clear abandoned rationale/confirmation state when the target revision or artefact changes
+  useEffect(() => {
+    setDecisionModalOpen(false);
+    setRationale('');
+    setDecisionError(null);
+  }, [effectiveRevNumber, artefact.id]);
 
   const handleOpenDecisionModal = (type: 'APPROVE' | 'WITHDRAW') => {
     setDecisionType(type);

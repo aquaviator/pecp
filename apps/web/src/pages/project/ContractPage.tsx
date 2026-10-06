@@ -240,7 +240,7 @@ export const ContractPage: React.FC<ContractPageProps> = ({
           rationale: rationale.trim(),
           expectedRevisionNumber: selectedRevNumber,
           expectedContentFingerprint: selectedRevisionRecord.fingerprint,
-          expectedDecisionRevision: selectedRevisionRecord.activeDecision?.decisionRevision
+          expectedDecisionRevision: selectedRevisionRecord.activeDecision?.decisionRevision ?? 0
         }
       );
 
@@ -258,6 +258,12 @@ export const ContractPage: React.FC<ContractPageProps> = ({
       setIsSubmittingDecision(false);
     }
   };
+
+  // Clear rationale and modal if revision or project changes
+  useEffect(() => {
+    setRationale('');
+    setDecisionModalOpen(false);
+  }, [selectedRevNumber, project.id]);
 
   const throughputCalc = activeContract.workloadCalculations?.find(
     (c: any) => c.outputParameter === 'order_throughput_per_second'

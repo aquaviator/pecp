@@ -256,6 +256,7 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
         decisionType: 'APPROVE',
         rationale: 'Performance strategy structure and testing phases are validated.',
         expectedRevisionNumber: 1,
+        expectedContentFingerprint: strategy.contentFingerprint,
         expectedDecisionRevision: 0
       }
     });
@@ -287,6 +288,7 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
         decisionType: 'APPROVE',
         rationale: 'SLO thresholds and k6 schedule scenarios are complete and verified.',
         expectedRevisionNumber: 1,
+        expectedContentFingerprint: testPlan.contentFingerprint,
         expectedDecisionRevision: 0
       }
     });
@@ -346,7 +348,8 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
         decisionType: 'APPROVE',
         rationale: 'Conflict test',
         expectedRevisionNumber: 2,
-        expectedContentFingerprint: 'fp-mismatched-deadbeef'
+        expectedContentFingerprint: 'fp-mismatched-deadbeef',
+        expectedDecisionRevision: 0
       }
     });
     expect(conflictRes.statusCode).toBe(409);
@@ -360,6 +363,7 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
         decisionType: 'APPROVE',
         rationale: 'Conflict test',
         expectedRevisionNumber: 2,
+        expectedContentFingerprint: fingerprint,
         expectedDecisionRevision: 99
       }
     });
@@ -383,22 +387,31 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
       payload: {
         decisionType: 'APPROVE',
         rationale: 'Approved baseline contract.',
-        expectedRevisionNumber: 1
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
+        expectedDecisionRevision: 0
       }
     });
 
     // Generate & approve Strategy Revision 1
-    await app.inject({
+    const genStratRes = await app.inject({
       method: 'POST',
       url: `/api/v1/projects/${northstarProjectId}/artefacts`,
       headers: edwardEngineerAuth,
       payload: { artefactType: 'PERFORMANCE_STRATEGY', contractRevisionNumber: 1 }
     });
+    const stratJson = genStratRes.json();
     await app.inject({
       method: 'POST',
       url: `/api/v1/projects/${northstarProjectId}/artefacts/PERFORMANCE_STRATEGY/revisions/1/decisions`,
       headers: rachelReviewerAuth,
-      payload: { decisionType: 'APPROVE', rationale: 'Approved strategy.', expectedRevisionNumber: 1 }
+      payload: {
+        decisionType: 'APPROVE',
+        rationale: 'Approved strategy.',
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: stratJson.contentFingerprint,
+        expectedDecisionRevision: 0
+      }
     });
 
     // Rachel Reviewer WITHDRAWS the Contract approval
@@ -410,6 +423,7 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
         decisionType: 'WITHDRAW',
         rationale: 'New regulatory change requires revisiting order capacity assumptions.',
         expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
         expectedDecisionRevision: 1
       }
     });
@@ -440,6 +454,7 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
         decisionType: 'APPROVE',
         rationale: 'Re-approved after clarification.',
         expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
         expectedDecisionRevision: 2
       }
     });
@@ -455,7 +470,7 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
   });
 
   it('4. Scenario 8: Role-Matrix RBAC and cross-tenant isolation enforcement', async () => {
-    await seedApprovedIntelligence();
+    const { fingerprint } = await seedApprovedIntelligence();
 
     // 1. Unauthenticated requests fail with 401
     const unauthSave = await app.inject({
@@ -516,14 +531,16 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
       payload: {
         decisionType: 'APPROVE',
         rationale: 'Reviewer is authorized to approve',
-        expectedRevisionNumber: 1
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
+        expectedDecisionRevision: 0
       }
     });
     expect(reviewerApprove.statusCode).toBe(200);
   });
 
   it('5. Scenario 9: Idempotency and atomic duplicate rejection', async () => {
-    await seedApprovedIntelligence();
+    const { fingerprint } = await seedApprovedIntelligence();
 
     await app.inject({
       method: 'POST',
@@ -542,7 +559,9 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
       payload: {
         decisionType: 'APPROVE',
         rationale: 'Approved with idempotency key.',
-        expectedRevisionNumber: 1
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
+        expectedDecisionRevision: 0
       }
     });
     expect(res1.statusCode).toBe(200);
@@ -555,7 +574,9 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
       payload: {
         decisionType: 'APPROVE',
         rationale: 'Approved with idempotency key.',
-        expectedRevisionNumber: 1
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
+        expectedDecisionRevision: 0
       }
     });
     expect(res2.statusCode).toBe(200);
@@ -569,14 +590,16 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
       payload: {
         decisionType: 'WITHDRAW',
         rationale: 'Conflicting replay payload',
-        expectedRevisionNumber: 1
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
+        expectedDecisionRevision: 0
       }
     });
     expect(res3.statusCode).toBe(409);
   });
 
   it('6. Scenario 7: Full database restart preserves revisions, decisions, and validity', async () => {
-    await seedApprovedIntelligence();
+    const { fingerprint } = await seedApprovedIntelligence();
 
     // 1. Save and approve contract revision 1
     await app.inject({
@@ -586,16 +609,19 @@ describe('Contract and Artefact Approval Workflow API Integration', () => {
       payload: { commitMessage: 'Pre-restart baseline' }
     });
 
-    await app.inject({
+    const approveBeforeRestart = await app.inject({
       method: 'POST',
       url: `/api/v1/projects/${northstarProjectId}/performance-contract/revisions/1/decisions`,
       headers: rachelReviewerAuth,
       payload: {
         decisionType: 'APPROVE',
         rationale: 'Pre-restart approval rationale.',
-        expectedRevisionNumber: 1
+        expectedRevisionNumber: 1,
+        expectedContentFingerprint: fingerprint,
+        expectedDecisionRevision: 0
       }
     });
+    expect(approveBeforeRestart.statusCode).toBe(200);
 
     // 2. Simulate complete API & database restart
     await app.close();

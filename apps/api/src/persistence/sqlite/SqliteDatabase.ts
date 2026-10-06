@@ -465,6 +465,16 @@ export const MIGRATIONS: Migration[] = [
         // Column may already exist
       }
     }
+  },
+  {
+    version: 7,
+    name: '007_governance_decision_unique_revision',
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_gov_decisions_unique_revision
+        ON governance_decisions(project_id, target_type, target_id, target_revision_number, decision_revision);
+      `);
+    }
   }
 ];
 

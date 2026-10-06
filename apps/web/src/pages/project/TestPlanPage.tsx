@@ -27,8 +27,19 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
   const [canGenerate, setCanGenerate] = useState<boolean>(true);
   const [canApprove, setCanApprove] = useState<boolean>(true);
   const [isSubmittingDecision, setIsSubmittingDecision] = useState<boolean>(false);
+  const [errorActionType, setErrorActionType] = useState<'LOAD' | 'GENERATE' | 'DECISION' | null>(null);
 
   const activeProjectRef = useRef<string>(project.id);
+  const requestCounterRef = useRef<number>(0);
+  const activeScopeRef = useRef<{
+    projectId: string;
+    entityType: string;
+    revisionNumber?: number;
+  }>({
+    projectId: project.id,
+    entityType: 'PERFORMANCE_TEST_PLAN',
+    revisionNumber: undefined
+  });
 
   // Synchronous fallback for SSR or initial tests that supply initialItems
   const localFallbackArtefact = useMemo(() => {
@@ -88,10 +99,17 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
   // Fetch live contract and artefact whenever project changes
   useEffect(() => {
     activeProjectRef.current = project.id;
+    activeScopeRef.current = {
+      projectId: project.id,
+      entityType: 'PERFORMANCE_TEST_PLAN',
+      revisionNumber: undefined
+    };
+    const currentReqId = ++requestCounterRef.current;
     let isCancelled = false;
 
     setIsLoading(true);
     setError(null);
+    setErrorActionType(null);
     setDetail(null);
     setSelectedRevision(undefined);
 
@@ -100,7 +118,7 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
       performanceContractService
         .getPerformanceContract(project.id)
         .then((res) => {
-          if (!isCancelled && activeProjectRef.current === project.id) {
+          if (!isCancelled && activeScopeRef.current.projectId === project.id) {
             setContractResult(res);
           }
         })
@@ -114,19 +132,21 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
       artefactService
         .getArtefact(project.id, 'PERFORMANCE_TEST_PLAN')
         .then((res) => {
-          if (!isCancelled && activeProjectRef.current === project.id) {
+          if (!isCancelled && activeScopeRef.current.projectId === project.id && requestCounterRef.current === currentReqId) {
             setDetail(res);
             setSelectedRevision(res.currentRevisionNumber);
+            activeScopeRef.current.revisionNumber = res.currentRevisionNumber;
             setIsLoading(false);
           }
         })
         .catch((err) => {
-          if (!isCancelled && activeProjectRef.current === project.id) {
+          if (!isCancelled && activeScopeRef.current.projectId === project.id && requestCounterRef.current === currentReqId) {
             setIsLoading(false);
             if (err?.message?.includes('404') || err?.message?.includes('not found')) {
               setDetail(null);
             } else {
               setError(err.message || 'Failed to load Performance Test Plan');
+              setErrorActionType('LOAD');
             }
           }
         });
@@ -143,6 +163,9 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
     if (!artefactService) return;
     setIsGenerating(true);
     setError(null);
+    setErrorActionType(null);
+    const reqId = ++requestCounterRef.current;
+    const reqProjectId = project.id;
 
     try {
       const res = await artefactService.generateArtefact(project.id, {
@@ -150,16 +173,21 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
         expectedContractFingerprint: contractResult?.fingerprint
       });
 
-      if (activeProjectRef.current === project.id) {
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        requestCounterRef.current === reqId
+      ) {
         setDetail(res);
         setSelectedRevision(res.currentRevisionNumber);
+        activeScopeRef.current.revisionNumber = res.currentRevisionNumber;
       }
     } catch (err: any) {
-      if (activeProjectRef.current === project.id) {
+      if (activeScopeRef.current.projectId === reqProjectId) {
         setError(err.message || 'Generation failed');
+        setErrorActionType('GENERATE');
       }
     } finally {
-      if (activeProjectRef.current === project.id) {
+      if (activeScopeRef.current.projectId === reqProjectId) {
         setIsGenerating(false);
       }
     }
@@ -169,6 +197,10 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
     if (!artefactService) return;
     setIsLoading(true);
     setError(null);
+    setErrorActionType(null);
+    const reqId = ++requestCounterRef.current;
+    const reqProjectId = project.id;
+    activeScopeRef.current.revisionNumber = revNumber;
 
     try {
       const res = await artefactService.getArtefact(
@@ -176,16 +208,27 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
         'PERFORMANCE_TEST_PLAN',
         revNumber
       );
-      if (activeProjectRef.current === project.id) {
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === revNumber &&
+        requestCounterRef.current === reqId
+      ) {
         setDetail(res);
         setSelectedRevision(revNumber);
       }
     } catch (err: any) {
-      if (activeProjectRef.current === project.id) {
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === revNumber
+      ) {
         setError(err.message || `Failed to load revision ${revNumber}`);
+        setErrorActionType('LOAD');
       }
     } finally {
-      if (activeProjectRef.current === project.id) {
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === revNumber
+      ) {
         setIsLoading(false);
       }
     }
@@ -217,7 +260,10 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
     if (!artefactService?.submitArtefactDecision || !detail) return;
     setIsSubmittingDecision(true);
     setError(null);
+    setErrorActionType(null);
     const targetRev = selectedRevision || detail.currentRevisionNumber || 1;
+    const reqId = ++requestCounterRef.current;
+    const reqProjectId = project.id;
 
     try {
       const updated = await artefactService.submitArtefactDecision(
@@ -228,18 +274,33 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
           decisionType: 'APPROVE',
           rationale,
           expectedRevisionNumber: targetRev,
-          expectedContentFingerprint: detail.artefact.sourceContractFingerprint,
-          expectedDecisionRevision: detail.activeDecision?.decisionRevision
+          expectedContentFingerprint: detail.contentFingerprint || detail.artefact.sourceContractFingerprint,
+          expectedDecisionRevision: detail.activeDecision?.decisionRevision ?? 0
         }
       );
-      if (activeProjectRef.current === project.id) {
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === targetRev &&
+        requestCounterRef.current === reqId
+      ) {
         setDetail(updated);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to approve Performance Test Plan');
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === targetRev
+      ) {
+        setError(err.message || 'Failed to approve Performance Test Plan');
+        setErrorActionType('DECISION');
+      }
       throw err;
     } finally {
-      setIsSubmittingDecision(false);
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === targetRev
+      ) {
+        setIsSubmittingDecision(false);
+      }
     }
   };
 
@@ -247,7 +308,10 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
     if (!artefactService?.submitArtefactDecision || !detail) return;
     setIsSubmittingDecision(true);
     setError(null);
+    setErrorActionType(null);
     const targetRev = selectedRevision || detail.currentRevisionNumber || 1;
+    const reqId = ++requestCounterRef.current;
+    const reqProjectId = project.id;
 
     try {
       const updated = await artefactService.submitArtefactDecision(
@@ -258,18 +322,44 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
           decisionType: 'WITHDRAW',
           rationale,
           expectedRevisionNumber: targetRev,
-          expectedContentFingerprint: detail.artefact.sourceContractFingerprint,
-          expectedDecisionRevision: detail.activeDecision?.decisionRevision
+          expectedContentFingerprint: detail.contentFingerprint || detail.artefact.sourceContractFingerprint,
+          expectedDecisionRevision: detail.activeDecision?.decisionRevision ?? 0
         }
       );
-      if (activeProjectRef.current === project.id) {
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === targetRev
+        && requestCounterRef.current === reqId
+      ) {
         setDetail(updated);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to withdraw approval');
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === targetRev
+      ) {
+        setError(err.message || 'Failed to withdraw approval');
+        setErrorActionType('DECISION');
+      }
       throw err;
     } finally {
-      setIsSubmittingDecision(false);
+      if (
+        activeScopeRef.current.projectId === reqProjectId &&
+        activeScopeRef.current.revisionNumber === targetRev
+      ) {
+        setIsSubmittingDecision(false);
+      }
+    }
+  };
+
+  const handleRetry = () => {
+    if (errorActionType === 'GENERATE') {
+      handleGenerate();
+    } else {
+      setError(null);
+      setErrorActionType(null);
+      const targetRev = selectedRevision || detail?.currentRevisionNumber || 1;
+      handleSelectRevision(targetRev).catch(() => {});
     }
   };
 
@@ -285,8 +375,8 @@ export const TestPlanPage: React.FC<TestPlanPageProps> = ({ project, initialItem
               <span>{error}</span>
             </div>
             <button
-              onClick={() => handleGenerate()}
-              className="px-3 py-1 bg-rose-900 hover:bg-rose-800 text-rose-200 rounded border border-rose-700 transition"
+              onClick={handleRetry}
+              className="px-3 py-1 bg-rose-900 hover:bg-rose-800 text-rose-200 rounded border border-rose-700 transition cursor-pointer"
             >
               Retry
             </button>
