@@ -1,140 +1,138 @@
-# AI Studio Instruction: Complete Approval Transaction and Revision Safety
+# AI Studio Instruction: Finish the Remaining Approval Backend Paths
 
 ## Active task
 
 - Repository: `aquaviator/pecp`
 - Task identifier: `BUILD-CONTRACT-ARTEFACT-APPROVALS`
-- Instruction revision: `3`
-- Task mode: `IMPLEMENT TARGETED PRODUCT FIXES`
-- Preparation date: 5 October 2026
+- Instruction revision: `4`
+- Task mode: `IMPLEMENT REMAINING BACKEND FIXES AND REGRESSION TESTS`
+- Prepared: 6 October 2026
 
-Continue the delivered approval workflow. Implement the remaining transaction, exact-revision binding, replay and UI retry safeguards below. This is product-code work, not a PM audit, report, acknowledgement, milestone closure or instruction to rebuild the feature. Preserve the implemented Contract, Strategy and Test Plan screens, persistence, decision history and withdrawal functionality.
+Continue the existing approval implementation. This is NOT a new feature, a full re-audit, a reporting task or an acknowledgement request. Complete B1, B2 and B3 below, preserving the delivered UI and governance behaviour. Do not rebuild the approval screens, generators, source intake or repositories. Do not begin test definitions, k6 bundle delivery or execution.
 
-Do not begin test-definition generation, k6 bundle delivery or test execution in this task. Those are the next product direction, not authority to skip these existing approval requirements.
+The previous instruction's safety requirements remain in force. This revision pinpoints the remaining source-level gaps instead of asking you to repeat the whole build. Capture the failing cases in executable backend tests first, fix the paths, and finish with locally verified changes ready for Andy's manual push.
 
 ## Manual transfer workflow
 
-Andy manually pulls instructions from GitHub into AI Studio and manually pushes finished changes back. ChatGPT maintains this handover and checks the resulting remote implementation and CI.
+ChatGPT writes the handover in GitHub. Andy manually pulls it into Studio. Studio implements and tests. Andy manually pushes the finished changes. ChatGPT then reads the actual remote commit and CI.
 
-Read the instruction already present in your workspace. Do not run terminal `git fetch`, `git pull` or `git push`; request credentials; change remotes; reset the workspace; delete customer data; or discard legitimate local changes. Local Git inspection is permitted. Label any local commit SHA LOCAL, never as proof of remote delivery. Preserve additional work Andy has not pushed. A pending manual push is a handoff state, not a product defect.
+Do not run terminal `git fetch`, `git pull` or `git push`. Do not request credentials, alter remotes, reset/discard legitimate work, recreate the project or delete customer data. Local Git inspection is allowed. Label any local commit SHA LOCAL; do not infer the SHA of Andy's subsequent manual push. Uncommitted working changes are an acceptable handoff when clearly identified. Pending manual transfer is not a product defect.
 
-If the workspace is inaccessible, make one small access check and report the exact infrastructure blocker without repeating long failing operations or claiming execution. Otherwise implement immediately without another permission or acknowledgement round.
+Use the workspace Andy has pulled and preserve later local changes. If this file is absent, identify that prerequisite rather than inventing its contents. If the filesystem is unavailable, make one small check and report the exact access failure without repeated long attempts or claims of completed work.
 
-## Delivered checkpoint
+## Verified delivery checkpoint
 
-Remote implementation inspected: `fd28ad77d9f9dfb6758932b88ec5866a43be4ca8`.
+Remote implementation: `708b1b9549e2ef373b20ff9c95eaccd6a891a63f`.
 
-Commit message: `feat: implement contract revision and governance tracking`.
+Parent instruction commit: `88d1b32800637b043697034f3dff4c6f5399c94c`.
 
-Its parent is the revision-2 instruction commit `efe888864cccbdea736150c2b8eafe1014d9ea86`. The earlier interrupted partial commit `5f9f28921fc73fc21edee8586387c0f375fa2f02` is not the current delivery baseline. Do not reset to any of these SHAs.
+Remote CI run `37443588955`, job `112202941526`, completed successfully. The inspected logs show:
 
-Remote CI run `37293561661`, job `111709414913`, completed successfully for `fd28ad77...`. Inspected logs show:
-
-- Web: 34 test files, 499 passed.
-- API: 23 test files, 132 passed.
+- Web: 34 files, 501 passed.
+- API: 23 files, 132 passed.
 - Reference Lab: 10 passed.
-- Total: 641 passed.
-- Deterministic install, TypeScript checks and production web build: passed.
+- Total: 643 passed.
+- `npm ci`, TypeScript checks and production web build: successful.
 
-These are observed regression results, not proof that every concurrency and validity requirement is implemented. This instruction-only update does not repair product code. Work from Andy's pulled state and retain later legitimate changes.
+These are verified baseline execution results, not evidence that the missing backend cases below passed. No additional race or failure-injection test was executed by ChatGPT. Findings below are grounded in the delivered source and diff.
 
-## Source observations motivating this continuation
+Preserve the delivered document content fingerprints, explicit initial decision revision 0, decision idempotency improvements, historical-revision checks, separate UI error recovery, async target guards and modal cleanup. Do not reset to this or an older SHA.
 
-These observations refer to the inspected commit, not a claim that a live exploit or failing race test was executed by ChatGPT. First capture the affected behaviour in focused regression tests, then fix the implementation in this run.
+## Source evidence and bounded correction set
 
-1. In `packages/platform-core/src/services/ArtefactService.ts`, `submitArtefactDecision` reads the target revision, live compilation, intelligence, parent approval and existing decisions before `unitOfWork.execute(executeDecision)`. The closure inserts the previously constructed decision and success audit. Rechecking a permission against the same principal object inside that closure does not refresh membership or the target's state.
-2. In that method, expected target revision, content fingerprint and decision revision are checked only when supplied. The content check also accepts `revRecord.sourceContractFingerprint` in place of the document content hash. Two different documents bound to the same contract must not be treated as identical reviewed content. The approval integration test currently exercises successful document approval without a content/input binding.
-3. Idempotency lookup is before the protected transaction, and its saved response is written after the decision transaction. Replays return cached detail JSON, including the old validity projection, without recomputing present validity. These patterns do not establish atomic concurrent retries or a truthful current approved badge after withdrawal.
-4. `getArtefact` evaluates the selected target's validity using input staleness, but only adds an older-revision check when evaluating other history entries. `submitArtefactDecision` does not compare the target to the artefact's current revision before approving. Test the selected-old-revision detail and approval paths explicitly.
-5. In `apps/web/src/pages/project/StrategyPage.tsx`, the shared error banner's Retry button invokes `handleGenerate()` even when the error came from an approval/withdrawal action. The decision callbacks guard completion by project ID, not by the full project/entity/revision/request target. The shown withdrawal payload sends the parent contract fingerprint as the expected document fingerprint. Correct the corresponding Test Plan/Contract paths where they share the pattern.
+### B1. Artefact generation still has an incomplete transaction boundary
 
-Relevant evidence paths:
+In `packages/platform-core/src/services/ArtefactService.ts::generateArtefact`, at the checkpoint:
 
-- `packages/platform-core/src/services/ArtefactService.ts`
-- `packages/platform-core/src/services/PerformanceContractService.ts`
-- `apps/api/test/contract_artefact_approval_workflow.test.ts`
-- `apps/web/src/pages/project/StrategyPage.tsx`
+- project access and idempotency lookup occur before the Unit of Work;
+- contract resolution, intelligence reads, `nextRevisionNumber` allocation and generation occur before `executeSave`;
+- `executeSave` checks the same captured principal, writes the already-built records and success audit;
+- the idempotency receipt is saved AFTER the Unit of Work returns;
+- the replay payload hash omits actor, operation and `contractRevisionNumber`, and returns cached detail JSON;
+- expected contract fingerprint is checked only when truthy.
 
-Read the actual API route validation and repository/Unit-of-Work implementations too. Do not treat a method comment or a test named "atomic" as evidence of a race having been exercised.
+The route in `apps/api/src/app.ts` directly invokes this service; it does not wrap the entire operation in another transaction. Therefore the existing INSERT transaction alone does not satisfy the prior generation/concurrent-retry requirement.
 
-## 1. Make the protected operation atomic, not just the final INSERT
+**Implement:** move current-authority resolution, scoped idempotency lookup, consistent governing-input reads, expected-binding checks, current revision lookup/allocation, generation, record writes, mandatory success audit and receipt write into one existing serialized Unit of Work, or an equivalent fully revision-checked atomic operation. For this bounded implementation prefer the existing reentrant serialized Unit of Work. Do not invent a separate lock or bypass its database connection.
 
-Reuse the existing serialized Unit of Work, repository interfaces, authentication and audit infrastructure. Require the production dependencies necessary for correctness. Do not fall back to a non-transactional protected write when a dependency is missing.
+Calculate the next revision only after entering the protected boundary. Include actor, organisation/project, operation, exact requested contract revision and all meaningful generation inputs/expectations in the idempotency identity/payload. Do not replay an earlier generation when the same key is submitted for a different governing contract revision. Reauthorize before any replay. Persist the receipt atomically with the generated revision and success audit. If any of those writes fails, roll back all of them.
 
-For contract review saving, contract decisions, document generation/revision allocation and document decisions, fix the same pattern wherever it is present on the shared approval path. Within one serialized operation, or an equivalent fully revision-checked atomic boundary:
+Return an identifiable original operation receipt separately from fresh present-state validity, or use the existing response convention with equivalent unambiguous meaning. Do not return stale cached approval/readiness metadata as current. Preserve immutable content and historical lineage. A retry must not allocate an extra revision.
 
-- resolve the real project and organisation;
-- validate the current authenticated actor/account, session and membership authority through the existing supported repositories/services;
-- check the scoped idempotency record;
-- read the exact saved target and current revision pointer;
-- read consistent governing inputs, checklist, source bindings and parent decision state;
-- validate required client expectations, readiness and current-use eligibility;
-- allocate the next revision/decision number;
-- write the revision or decision, its mandatory success audit and idempotency receipt together.
+Keep pre-approval BLOCKED/draft document generation available where the existing product supports it, with truthful blockers. Do not promote unapproved assertions to authoritative facts or silently substitute a newer contract. Reuse existing generators and stored bindings.
 
-Do not hold one database connection in a transaction and accidentally perform the decision write on a different connection or bypass the existing mutex. Preserve reentrant Unit-of-Work behaviour for legitimate nested service calls; do not introduce a deadlock. Repository uniqueness constraints should reinforce the application checks.
+### B2. Document authority is still checked before lock acquisition
 
-Keep all genuine historical decisions and immutable content. Use additive schema changes only when necessary; do not rewrite an applied migration or recreate existing tables/data to make tests pass. Database access must use the existing supported provider interface.
+In `ArtefactService.ts::submitArtefactDecision`, the real `membershipRepo.get(orgId, principal.userId)` lookup and role check occur BEFORE `executeDecision` is passed to `unitOfWork.execute`. The transaction closure starts with idempotency lookup and does not repeat that live authority check. A valid permission read before waiting is not proof of permission when the write begins.
 
-## 2. Require the exact reviewed binding
+`PerformanceContractService` has moved its save/decision work further inside its Unit of Work; preserve that improvement. Check the shared protected paths for current account/session validation too, rather than assuming refreshed membership alone establishes all current authority.
 
-For APPROVE and WITHDRAW, require a valid expected target revision, current decision revision (including explicit 0 for no decision), and exact target content/input binding. Expose these values in the real detail response so the client can submit what the user actually viewed. Use existing fields where appropriate, extending shared types only as necessary.
+**Implement:** after acquiring the protected boundary, resolve the current project/organisation and real authenticated account, active session and current membership/permissions through the existing supported interfaces. Perform this before idempotent replay and before a new mutation. Cover contract review save, contract approve/withdraw, document generation and document approve/withdraw consistently. Do not trust a captured PLATFORM_ADMIN flag after account/session revocation; follow the actual existing platform-admin policy using fresh authority.
 
-Reject missing, null, blank, malformed or wrong-type preconditions explicitly with 400; well-formed stale/mismatching expectations return 409 with refresh guidance and no successful mutation. Reject unknown decision actions. Do not silently populate missing expectations with server-current state.
+An inexpensive preflight check outside the transaction is permitted for early rejection, but it cannot replace inside-boundary validation. Inspect actual repository/service method signatures before use. Do not introduce a fabricated system actor, another nonexistent helper, unchecked casts, or a broad role bypass. Keep the established role matrix unchanged.
 
-A document's parent contract fingerprint is not a substitute for that document's content fingerprint. Bind the decision to the immutable document revision, complete generation-input binding and parent revision/decision dependency. Continue using existing canonical hash/lineage utilities; keep semantic/content/input identity separate from presentation status, decision identity and request-time timestamps. Do not create a hash that changes merely because the approval itself was added.
+Required write dependencies must fail closed when unavailable. Remove the silent non-transactional protected-write fallback. Do not break a pure read-only compiler merely because a write dependency is absent; reject the protected mutation before it writes. Keep denial logging consistent with the existing architecture so a rolled-back write does not accidentally erase required denial evidence. Successful audit and business writes remain atomic.
 
-On contract saving and document generation, validate the expected input/revision binding consistently where the operation establishes a review target. Do not permit missing preconditions as a general legacy bypass. Older stored revisions remain readable; require an explicit new revision/regeneration when a safe binding cannot be established instead of retroactively inventing lineage.
+### B3. The complete reviewed input binding is still optional or omitted
 
-An APPROVE action may only approve a current, unsuperseded target whose existing readiness and source-eligibility rules pass. Do not auto-approve, fabricate missing engineering inputs, weaken blocked-state rules or change the role matrix to obtain success. Historical decisions remain visible, but cannot authorise present use of a superseded revision. Preserve the ability to explicitly withdraw an existing historical approval where the established product policy permits it; withdrawal must not promote a historical target to current.
+At the checkpoint:
 
-## 3. Make retries safe and current validity truthful
+- `submitContractDecision` and `submitArtefactDecision` only compare `expectedInputDigest` when it is truthy;
+- `saveContractReviewRevision` defaults its input to `{}` and only checks `expectedFingerprint` if supplied;
+- generation likewise permits an omitted expected contract binding; the route forwards `expectedInputRevision`, but the shown generation path does not enforce it;
+- revision validation uses numeric/NaN/range checks without enforcing safe integers;
+- the previous successful integration requests were amended with document content fingerprints, but still omit the full expected input binding.
 
-Scope idempotency to the real actor, organisation/project, operation, target revision and canonical request payload. Concurrent delivery of the same operation/key must commit one mutation, one decision/revision increment and one success audit. Changed payload/target/actor reuse must not replay another operation.
+**Implement:** enforce the required review preconditions end to end, using the actual shared types and existing fingerprint utilities. Extend types, adapters and UI payloads only as needed to carry server-issued expectations.
 
-Check/reserve/store the receipt atomically with the protected mutation. An idempotency or success-audit persistence failure must roll back the operation rather than leave an approval that the caller believes failed. Do not suppress the exception or weaken rollback tests.
+For APPROVE and WITHDRAW, require:
 
-Reauthorise every replay using current authority. Return the original operation receipt without creating a new decision, but clearly separate it from recomputed present approval validity. An approval receipt replayed after source change, withdrawal or supersession must not return a fresh-looking CURRENTLY_VALID result. Immutable receipt/history and live validity are distinct parts of the response.
+1. the exact expected target revision, a safe positive integer;
+2. expected decision revision, a safe non-negative integer, explicitly 0 when none exists;
+3. the exact immutable target content fingerprint, not the parent's fingerprint;
+4. the exact expected governing-input binding returned for the inspected revision.
 
-Use a consistent validity evaluation for list, selected detail, history, export and protected writes. Selecting an older revision must not make its approval currently valid when the same revision is shown as superseded in history. Export notices and badges must agree.
+Bind document approval to the governing saved contract revision and decision identity the reviewer inspected. If the expected input token currently covers only generation inputs, expose and validate the parent decision identity separately or use a versioned combined review token that covers it. A withdrawal/reapproval of the parent between preview and submission must require refresh and explicit reconfirmation, not silently switch the child's approval dependency to the new parent decision. Do not create a hash cycle where the child's own approval changes its input identity.
 
-Preserve the delivered no-resurrection rule: parent withdrawal/reapproval, source replacement with the same number, re-binding intelligence or regenerating identical text cannot revive the child's old approval decision. New explicit decisions are required for the correct current chain. Relevant narrative/checklist inputs and source/candidate/decision lineage must remain in validity checks, not just final numeric workload equality.
+For Save for Review and Generate/Regenerate, require the expected current compilation/input binding from the user's preview, and the applicable exact selected parent revision/expected current revision. Expose the complete binding in the read/preview response so the client can actually obtain it. Do not require a token the API never returns. First-time generation must have a supported read/preview route for its binding; extend an appropriate existing read model minimally if needed. GET must not create revisions.
 
-## 4. Finish the UI integration for the stricter contract
+Carry these fields through `apps/api/src/app.ts`, shared domain/platform types, existing API/mock services, ContractPage, StrategyPage and TestPlanPage. Never silently fill missing expectations with server-current values or copy a different field to bypass validation. Use canonical field names with explicit supported aliases, not arbitrary fallback values. Retain read access to historical records; require a new review/regeneration when old data cannot provide a safe binding, without backfilling invented provenance.
 
-Update the existing Contract, Strategy, Test Plan, document viewer, API adapters and explicit mock implementations together. Preserve full previews, saved revision selection, generation, downloads and provenance.
+Malformed/missing/null/blank/wrong-type preconditions return 400. Well-formed stale or mismatched bindings return 409 with useful refresh guidance and no partial write. Enforce safe-integer validation on route and payload revision coordinates. Preserve exact source/candidate/approval/checklist/narrative lineage, typed values and units. Do not broaden compilation readiness or manufacture missing inputs to make the positive tests pass.
 
-Use the exact content/input binding returned for the displayed revision. Send initial expected decision revision 0 explicitly. Do not substitute a parent hash or locally invented approval metadata.
+## Implementation method: test the specific gaps, not just the old green suite
 
-Separate load, generation, approval, withdrawal and export error recovery. Retrying a failed approval must not generate a document or save another contract revision. A 409 must refresh the review information and require the user to inspect/reconfirm the intended target; do not automatically approve a newer revision.
+Use actual SQLite repositories, the real Unit of Work and the existing authenticated API composition. Add focused cases to `apps/api/test/contract_artefact_approval_workflow.test.ts`, `artefact_workflow_api.test.ts` or a clearly named neighbouring backend test. The delivered diff added two DOM cases and amended existing API requests; it did not establish the barrier-controlled backend cases requested in instruction revision 3.
 
-Guard asynchronous results using project, entity/type, target revision and request identity, including A-to-B-to-A navigation. Clear abandoned rationale/confirmation state when the target changes. A late result may not approve, replace or unlock controls on another selected revision. Do not rely solely on matching the project ID.
+Before fixing B1/B2/B3, add and run the corresponding tests against the current implementation and observe the expected failures where present. Keep the tests after the repair. Do not turn tests into mocked successful service responses. Updating old success payloads is necessary but is not the new regression coverage.
 
-Keep the established role policy: engineers may save/generate but not decide; reviewers may decide but not generate; viewers remain read-only; lead/admin privileges stay as defined in the central policy. Server enforcement remains authoritative, including CSRF on cookie mutations and revoked session/membership checks. No synthetic system actor or role fallback in production.
+Required executable cases:
 
-## 5. Executable regression cases
+| Case | Exercise and required result |
+| --- | --- |
+| Generation receipt rollback | Inject failure in the real generation receipt persistence seam. Revision, current pointer and successful audit must all remain unchanged. Remove the fault and retry once; exactly one new revision is saved. |
+| Concurrent generation retry | Release two same-actor, same-payload, same-key generation requests together through the actual serialized service. Both refer to the same result, with one revision increment, one success audit and one receipt. |
+| Generation identity collision | Same key with a different actor, target project, operation or selected contract revision must not replay the earlier generation. No extra write on rejection. |
+| Revocation while queued | Pause the protected operation immediately before its real transaction starts, AFTER any preflight permission check. Commit membership revocation/demotion using the normal authority path, then release the queued document decision/generation. It must be denied without a successful decision, revision or audit. Repeat for account/session invalidation through supported seams. |
+| Competing decisions | Two different keys with the same expected decision revision produce one success and one 409, not two decisions or an uncaught uniqueness error. Same-key concurrent approval commits one decision and success audit. |
+| Upstream change while queued | Commit source/input change, target supersession or parent withdrawal while the protected operation is queued. Its stale preview must be rejected before writing. If approval legitimately wins first, the later source change must invalidate it; both legal serial orderings need not both fail. |
+| Required preconditions | Omit each required input/content/revision token individually; try null, blank, wrong type and fractional revision. Assert 400 and no write. Submit well-formed mismatches and assert 409. Exact current bindings then succeed. Cover saves, generation, contract decisions and document decisions. |
+| Parent decision change after preview | Read a document approval target/token, withdraw then reapprove its parent, submit the old child token. Reject; require newly inspected parent dependency and explicit child approval. |
+| Replay after drift or withdrawal | Preserve the original receipt, return truthful current invalidity and no new approval. A now-revoked actor cannot replay. Historical list/detail/export stay consistent. |
+| Mandatory dependency/write failure | Missing protected-write dependencies, or injected mandatory audit/receipt failure, cannot leave a partial revision or decision. Restart does not revive partial data. |
 
-Extend the existing approval integration and DOM suites with focused cases that fail for the observed gaps. Preserve the 641-test behaviour baseline, adjusting existing requests to supply newly required truthful preconditions rather than removing assertions. Do not duplicate the generators or manufacture complete Test Plan inputs.
+Use narrow dependency-injection barriers or existing test seams, not sleep-based timing guesses and not new public test-control endpoints. A barrier must be placed so the inside-lock check can actually observe the committed revocation; pausing while already holding the same lock would deadlock the test. Do not mock the Unit of Work into immediate success.
 
-Prove, with real SQLite integration and controlled ordering rather than timing guesses:
+Keep the already-added DOM retry/isolation tests green. Add only the client contract coverage needed for B3: initial 0 decision revision, exact content/input/parent tokens, and 409 refresh requiring reconfirmation without generating a document or approving a newer target automatically.
 
-1. Missing/malformed expected target, decision, content and input bindings are rejected for both contract and document mutations; the exact current bindings succeed. A parent fingerprint alone cannot approve a different document.
-2. Two identical concurrent approval requests with one idempotency key yield one decision and one success audit. Two competing requests with different keys but the same expected decision revision produce one winner and a deterministic conflict, not two successful decisions or an uncaught uniqueness exception.
-3. Source/input replacement, parent withdrawal, target supersession and membership revocation that commit while an approval waits for the write boundary are observed before it writes. Add barrier-controlled tests that force the ordering. When approval legitimately commits first, the later upstream mutation invalidates it; do not write a test asserting that both serial orderings must fail.
-4. Failure of decision/revision storage, required success audit or idempotency persistence leaves no partial protected operation. A valid retry can then succeed once.
-5. Replay after withdrawal/drift returns the original receipt plus invalid present validity, not a renewed approval. A revoked actor cannot replay it. Foreign project/actor/operation collisions remain rejected.
-6. After revision 2 exists, directly fetching revision 1 cannot label it currently valid; newly approving revision 1 is rejected. List, detail, history and Markdown export remain consistent without modifying old bytes. Verify after database restart.
-7. Parent withdrawal followed by reapproval does not resurrect a child decision. Re-binding the same numerical value to a new source requires the new explicit review chain.
-8. DOM tests simulate an approval error followed by Retry and assert that generation/save is NOT called. Simulate 409 and revision/project changes, then resolve old requests out of order. The selected target, rationale, decision token and badge remain correct. Exercise actual page/service wiring, not only a standalone modal.
+Do not suppress errors, remove assertions, skip required tests or claim that the existing six sequential approval tests prove these races. Test names and actual assertions/results must correspond.
 
-Use existing dependency-injection seams or narrowly scoped test barriers; do not add public production endpoints for test control. A passing general concurrency suite is not a substitute for driving these approval operations.
+## Scope, dependency advisory note and finish
 
-## Completion and scope
+This is a bounded completion of the existing approvals task. No new milestone, PM report, audit document, closure file, design system, approval role, dual-approval requirement, test engine feature, connector, BYOAI, billing or deployment change is authorised. Preserve all earlier source/approval history, no-resurrection rules and working portal functionality. Apply additive migrations only if truly necessary; do not rewrite deployed migrations or erase data.
 
-Implement the fixes and tests in this run. Do not stop after writing a plan, listing issues or acknowledging the handover. This continuation fulfils the existing approval task; it does not reopen M5.2 or authorise a new PM reporting cycle.
+The latest CI installation log also reported four dependency advisories: one moderate, one high and two critical. The log alone does not identify affected paths or establish exploitability. Do not describe the dependency set as warning-free or production-certified. Keep this flagged for dependency triage; do not perform blind or forced bulk upgrades in this approval fix. A brief unresolved advisory note is sufficient for this handoff, not another report.
 
-Run `npm ci`, `npm run lint`, `npm test` and `npm run build`. Verify the persisted API workflow and actual DOM interactions. Report actual outcomes, not the historical 641 count as though it were a new run. Keep remote CI separate from local verification.
+Run `npm ci`, `npm run lint`, `npm test` and `npm run build` after the targeted tests pass. Execute the real persisted API flow, not only a homepage HTTP 200 or applet compilation. Remeasure suite totals. Keep local results distinct from remote CI for the baseline.
 
-Out of scope: test-definition/bundle features, load execution, new connectors, BYOAI, billing, deployment redesign, unrelated dependency upgrades, new approval roles or mandatory dual approval. Keep other previously specified governance, provenance, human-attribution and zero-invention requirements intact.
-
-Leave the working changes ready for Andy's manual push. Return only a compact handoff: product behaviour corrected, API/client contract changes, focused tests and full local verification results, exact LOCAL SHA if one exists, and any genuine unfinished behaviour. Do not create PM reports, audit documents, completion reports or closure files.
+Leave all changes preserved for Andy's manual push. Return only: B1/B2/B3 implementation outcomes, exact new backend test names with observed local results, relevant API/client binding changes, full local test/typecheck/build outcomes, any LOCAL SHA if one exists, and genuine remaining blockers. Do not claim all requirements satisfied when any named case was not implemented or run. Do not stop at a protocol acknowledgement, a list of intended changes or after UI-only edits.
