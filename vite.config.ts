@@ -13,14 +13,19 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3000,
+    allowedHosts: true,
     fs: {
-      allow: ['..']
+      allow: ['.']
     }
   },
   resolve: {
     alias: {
       '@pecp/pe-domain': path.resolve(__dirname, 'packages/pe-domain/src/index.ts'),
-      '@pecp/workload-engine': path.resolve(__dirname, 'packages/workload-engine/src/index.ts')
+      '@pecp/workload-engine': path.resolve(__dirname, 'packages/workload-engine/src/index.ts'),
+      '@pecp/artefact-engine': path.resolve(__dirname, 'packages/artefact-engine/src/index.ts'),
+      '@pecp/test-engine/execution': path.resolve(__dirname, 'packages/test-engine/src/referenceExecutionHarness.ts'),
+      '@pecp/test-engine': path.resolve(__dirname, 'packages/test-engine/src/index.ts'),
+      '@pecp/platform-core': path.resolve(__dirname, 'packages/platform-core/src/index.ts')
     }
   },
   build: {
